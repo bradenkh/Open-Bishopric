@@ -1,0 +1,21 @@
+{
+  "name": "open-bishopric",
+  "version": "1.0.0",
+  "description": "Slack integration for managing an LDS bishopric — starting with a todo list",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js"
+  },
+  "keywords": ["slack", "bishopric", "lds", "todo"],
+  "author": "Braden Hansen",
+  "license": "MIT",
+  "dependencies": {
+    "@slack/bolt": "^3.19.0",
+    "better-sqlite3": "^9.4.3",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  }
+}
