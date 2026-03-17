@@ -19,11 +19,31 @@ The processes that I would like to streamline
     * Requires a connection to some sort of calendar \- we can do an internal solution or connect to google calendar \- only if there is capability to use google calendars new booking feature  
   * After interviews scheduled time passes ask the person (bishop or counselor) if the interview happened and if that person needs to be scheduled for a follow up (optional add to upcoming ward council agenda maybe)  
   * Behavior for interviews is  
-    * Using a slack command or via agent, i add people to the list of people to interview  
+    * i add people to the list of people to interview  
     * Bot proposes times for interviews, sending texts and emails is automated via links clickable in slack such as sms:+15551234567?body=Hello or mailto links with the recipient, subject and body. When a link is sent ask me if i sent the message to register it in the backend  
-    * Using a slack command or via agent, i report when the person said they would be at the interview, then the interview is added to the google calendar  
+    * I report when the person said they would be at the interview, then the interview is added to the google calendar  
     * The applicable interviewer and interviewee are notified by being added as attendees to the google calendar event.  
     * After the interview passes, the applicable interviewer is sent a message to ask if the interviewee attended the meeting (y/n) if they did, if a follow up is needed. The executive secretary is notified if they need rescheduled or a follow up scheduled and they added back into the list of people that need interviewed (in the database)  
+  * Agent tools  
+    * Get schedule  
+      * Gets the schedule of a bishopric member  
+      * Default to three week date range, paramter for specific date range  
+    * Schedule interview  
+      * Requires confirmation with executive secretary to confirm date and time  
+    * Send text  
+      * Sends a message to exec sec of a sms link with a number and the message so they don’t have to type it  
+        Message should have a button to confirm a text was sent  
+    * Send email  
+      * Mailto link similar to send text tool, include recipient body and subject in link  
+        Message should have a button to confirm email was sent  
+    * Add to interview list  
+      * Adds a person to the list of people to schedule interview  
+    * Remove from interview list  
+      * Removes a person from the list of people to schedule  
+    * Followup on interview  
+      * Maybe not a tool for the agent, but there should be some mechanism to follow up with interviewers after the interview happens to ask if the person attended and if they need a follow up or to be rescheduled if they weren’t there  
+    * Get interview list  
+      * Gets the list of people who need to be scheduled from the database
 * Meeting notes  
   * Meetings are ward council, bishopric meeting, youth council  
   * Allow me to take notes during a meeting  
