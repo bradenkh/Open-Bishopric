@@ -170,35 +170,81 @@ def complete_task(task_id: int) -> str:
 def send_email(to_email: str, subject: str, body: str, task_id: int = 0) -> str:
     """Send a real email via ALMA's email account. Provide the recipient email, subject, and body.
     If this is part of a task, include the task_id so replies can be automatically matched back.
-    After sending, the task status will be updated to 'waiting_reply'."""
+    The email will NOT be sent immediately — it will be queued and a Slack message will be sent
+    to you for approval first. Once approved, the email is sent and the task updated."""
+    if not _slack_client or not _slack_user_id:
+        return "Slack client not available. Cannot request email approval."
+
     tid = task_id if task_id else None
+
+    # Store the pending email in the database
+    db = get_db()
+    cursor = db.execute(
+        "INSERT INTO pending_emails (to_email, subject, body, task_id, requested_by, status) "
+        "VALUES (?, ?, ?, ?, ?, 'pending')",
+        (to_email, subject, body, tid, _slack_user_id),
+    )
+    pending_id = cursor.lastrowid
+    db.commit()
+    db.close()
+
+    # Build a Slack approval message with the email preview
+    preview_body = body if len(body) <= 300 else body[:300] + "..."
+    blocks = [
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": (
+                    f":email: *Email Approval Request*\n\n"
+                    f"*To:* {to_email}\n"
+                    f"*Subject:* {subject}"
+                    + (f"\n*Task:* #{task_id}" if task_id else "")
+                ),
+            },
+        },
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": f"*Body:*\n>>>{preview_body}",
+            },
+        },
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "Approve & Send"},
+                    "style": "primary",
+                    "action_id": "email_approve",
+                    "value": str(pending_id),
+                },
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "Deny"},
+                    "style": "danger",
+                    "action_id": "email_deny",
+                    "value": str(pending_id),
+                },
+            ],
+        },
+    ]
+
     try:
-        message_id = _smtp_send(to_email, subject, body, task_id=tid)
+        _slack_client.chat_postMessage(
+            channel=_slack_user_id,
+            text=f"Email approval needed: send to {to_email} — {subject}",
+            blocks=blocks,
+        )
     except Exception as e:
-        return f"Failed to send email to {to_email}: {e}"
+        return f"Email queued (#{pending_id}) but failed to send approval request via Slack: {e}"
 
-    result = f"Email sent to {to_email} (Message-ID: {message_id})."
-
-    if task_id:
-        db = get_db()
-        # Update task status to waiting_reply and add note
-        row = db.execute("SELECT context FROM tasks WHERE id = ?", (task_id,)).fetchone()
-        if row:
-            ctx = json.loads(row["context"])
-            notes = ctx.get("notes", [])
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-            notes.append(f"[{timestamp}] Email sent to {to_email}: {subject}")
-            ctx["step"] = "waiting_for_reply"
-            ctx["notes"] = notes
-            db.execute(
-                "UPDATE tasks SET status = 'waiting_reply', context = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (json.dumps(ctx), task_id),
-            )
-            db.commit()
-        db.close()
-        result += f" Task #{task_id} status updated to *waiting_reply*."
-
-    return result
+    return (
+        f"Email to {to_email} has been queued for approval (#{pending_id}). "
+        f"A Slack message has been sent to you with Approve/Deny buttons. "
+        f"The email will only be sent after you approve it."
+    )
 
 
 # ---------------------------------------------------------------------------

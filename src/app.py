@@ -10,6 +10,7 @@ load_dotenv()
 
 from src.db import run_migrations
 from src.actions.scheduling import register as register_scheduling_actions
+from src.actions.email_approval import register as register_email_approval_actions
 from src.agent import run_agent
 
 app = App(
@@ -18,6 +19,7 @@ app = App(
 )
 
 register_scheduling_actions(app)
+register_email_approval_actions(app)
 
 # Z.AI allows only one concurrent request — serialize agent calls
 agent_lock = threading.Lock()
