@@ -5,13 +5,11 @@ from langchain_openai import ChatOpenAI
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage
 
-from src.agent.prompts import SYSTEM_PROMPT
+from src.agent.prompts import build_system_prompt
 from src.agent.tools import ALL_TOOLS, set_request_context
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
-
-_agent = None
 
 
 def _get_llm():
@@ -24,17 +22,16 @@ def _get_llm():
     )
 
 
-def _get_agent():
-    global _agent
-    if _agent is None:
-        llm = _get_llm()
-        _agent = create_agent(
-            model=llm,
-            tools=ALL_TOOLS,
-            system_prompt=SYSTEM_PROMPT,
-            debug=os.environ.get("AGENT_VERBOSE", "").lower() == "true",
-        )
-    return _agent
+def _build_agent():
+    """Build a fresh agent with the latest process prompts from the database."""
+    llm = _get_llm()
+    system_prompt = build_system_prompt()
+    return create_agent(
+        model=llm,
+        tools=ALL_TOOLS,
+        system_prompt=system_prompt,
+        debug=os.environ.get("AGENT_VERBOSE", "").lower() == "true",
+    )
 
 
 def run_agent(text: str, slack_user_id: str, channel_id: str, say, client=None) -> str:
@@ -43,7 +40,8 @@ def run_agent(text: str, slack_user_id: str, channel_id: str, say, client=None) 
     logger.info(f"[AGENT] Request started | user={slack_user_id} channel={channel_id}")
     logger.info(f"[AGENT] Prompt: {text}")
     try:
-        agent = _get_agent()
+        # Build a fresh agent each invocation so process prompt changes take effect
+        agent = _build_agent()
         result = agent.invoke({"messages": [HumanMessage(content=text)]})
         messages = result.get("messages", [])
 

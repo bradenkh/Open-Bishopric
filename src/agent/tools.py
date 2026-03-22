@@ -648,6 +648,143 @@ def get_pending_schedules() -> str:
     return f"*Active/Waiting Tasks* ({len(rows)}):\n" + "\n".join(f"• {line}" for line in lines)
 
 
+# ---------------------------------------------------------------------------
+# Process management tools
+# ---------------------------------------------------------------------------
+
+@tool
+def get_processes(include_disabled: bool = False) -> str:
+    """List all defined processes. Each process contains instructions for a specific workflow.
+    Set include_disabled=True to also show disabled processes."""
+    db = get_db()
+    if include_disabled:
+        rows = db.execute("SELECT id, name, display_name, description, enabled, sort_order FROM processes ORDER BY sort_order, name").fetchall()
+    else:
+        rows = db.execute("SELECT id, name, display_name, description, enabled, sort_order FROM processes WHERE enabled = 1 ORDER BY sort_order, name").fetchall()
+    db.close()
+
+    if not rows:
+        return "No processes defined."
+
+    lines = []
+    for r in rows:
+        status = "" if r["enabled"] else " [DISABLED]"
+        lines.append(f"#{r['id']} *{r['display_name']}*{status} — {r['description']}")
+    return f"*Processes* ({len(rows)}):\n" + "\n".join(f"• {line}" for line in lines)
+
+
+@tool
+def get_process(name_or_id: str) -> str:
+    """Get the full details of a process, including its prompt text.
+    Look up by name (e.g. 'schedule_interview') or by ID number."""
+    db = get_db()
+    # Try by ID first, then by name
+    row = None
+    try:
+        pid = int(name_or_id)
+        row = db.execute("SELECT * FROM processes WHERE id = ?", (pid,)).fetchone()
+    except ValueError:
+        pass
+    if not row:
+        row = db.execute("SELECT * FROM processes WHERE LOWER(name) = LOWER(?)", (name_or_id,)).fetchone()
+    db.close()
+
+    if not row:
+        return f"Process '{name_or_id}' not found."
+
+    status = "Enabled" if row["enabled"] else "Disabled"
+    parts = [
+        f"*{row['display_name']}* (name: `{row['name']}`, id: #{row['id']})",
+        f"Status: {status} | Task type: {row['task_type'] or 'none'} | Sort order: {row['sort_order']}",
+        f"Description: {row['description']}",
+        f"\n---\n*Prompt:*\n{row['prompt']}",
+    ]
+    return "\n".join(parts)
+
+
+@tool
+def update_process(name_or_id: str, display_name: str = "", description: str = "",
+                   prompt: str = "", task_type: str = "", enabled: str = "",
+                   sort_order: str = "") -> str:
+    """Update an existing process definition. Look up by name or ID.
+    Only provided fields will be changed. Use enabled='true'/'false' to toggle.
+    The prompt field contains the full instruction text that ALMA uses for this workflow."""
+    db = get_db()
+    row = None
+    try:
+        pid = int(name_or_id)
+        row = db.execute("SELECT * FROM processes WHERE id = ?", (pid,)).fetchone()
+    except ValueError:
+        pass
+    if not row:
+        row = db.execute("SELECT * FROM processes WHERE LOWER(name) = LOWER(?)", (name_or_id,)).fetchone()
+    if not row:
+        db.close()
+        return f"Process '{name_or_id}' not found."
+
+    updates = ["updated_at = CURRENT_TIMESTAMP"]
+    params = []
+
+    if display_name:
+        updates.append("display_name = ?")
+        params.append(display_name)
+    if description:
+        updates.append("description = ?")
+        params.append(description)
+    if prompt:
+        updates.append("prompt = ?")
+        params.append(prompt)
+    if task_type:
+        updates.append("task_type = ?")
+        params.append(task_type if task_type != "none" else None)
+    if enabled:
+        updates.append("enabled = ?")
+        params.append(1 if enabled.lower() in ("true", "1", "yes") else 0)
+    if sort_order:
+        try:
+            updates.append("sort_order = ?")
+            params.append(int(sort_order))
+        except ValueError:
+            db.close()
+            return "sort_order must be a number."
+
+    if len(updates) == 1:  # only the timestamp
+        db.close()
+        return "No fields to update."
+
+    params.append(row["id"])
+    db.execute(f"UPDATE processes SET {', '.join(updates)} WHERE id = ?", params)
+    db.commit()
+    db.close()
+    return f"Updated process *{row['display_name']}* (#{row['id']})."
+
+
+@tool
+def create_process(name: str, display_name: str, description: str, prompt: str,
+                   task_type: str = "", sort_order: int = 100) -> str:
+    """Create a new process definition. This adds a new set of instructions that ALMA will follow.
+    name: unique machine key (e.g. 'sacrament_program').
+    display_name: human label (e.g. 'Sacrament Program').
+    description: short explanation of what this process handles.
+    prompt: full instruction text — markdown formatted, will be appended to ALMA's system prompt.
+    task_type: optional, links to a task_type value if this process creates tasks.
+    sort_order: controls position in the system prompt (lower = earlier). Default 100."""
+    db = get_db()
+    existing = db.execute("SELECT id FROM processes WHERE LOWER(name) = LOWER(?)", (name,)).fetchone()
+    if existing:
+        db.close()
+        return f"A process with name '{name}' already exists (#{existing['id']}). Use update_process to modify it."
+
+    cursor = db.execute(
+        "INSERT INTO processes (name, display_name, description, prompt, task_type, sort_order) VALUES (?, ?, ?, ?, ?, ?)",
+        (name, display_name, description, prompt, task_type or None, sort_order),
+    )
+    db.commit()
+    pid = cursor.lastrowid
+    db.close()
+    return f"Created process *{display_name}* (#{pid}). It will be active on the next message."
+
+
 ALL_TOOLS = [
     # Task management
     create_task,
@@ -670,4 +807,9 @@ ALL_TOOLS = [
     # Scheduling
     ask_bishopric_member,
     get_pending_schedules,
+    # Process management
+    get_processes,
+    get_process,
+    update_process,
+    create_process,
 ]
