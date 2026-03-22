@@ -1,94 +1,247 @@
-Slack integration  
-I’d like to create a slack integration to handle many of the duties performed by ward members. I would like the integration to be architected such that I could give it to any other bishopric and they would be able to set it up for their ward given they have somewhere to host it. Each ward has access to a windows machine that is always on, so self hosting may be an option. Other decisions are to use sqlite as a db and create some sort of periodic backup to google drive.I would like there to be an AI agent that uses [z.ai](http://z.ai) glm 4.7 flash model for the agent. This should be done in python to make use of langchain-zhipuai python package. For interfacing with slack we should use slack bolt in python.  
-Users should be able to directly message the agent to interact with it or tag it in channels. The agent will be named ALMA or Automated leadership management assistant. Because we are using a smaller model take into consideration that we should use subagents that our main agent can use to complete tasks. A limitation of [z.ai](http://z.ai)’s free tier is that it only allows one concurrent request at a time. When possible we should program processes instead of relying on the agent to follow them. The majority of the use cases for the agent will be to ask it to do things the user could do with commands but the user doesn’t know the commands, and for the meeting agenda process.  
-Roles
+# ALMA — Automated Leadership Management Assistant
 
-* Bishop  
-* Bishopric Counselor  
-* Executive secretary  
-* Clerk  
-* Organization leader (Relief society, Elders Quorum, Young Women, sunday School, ability to add more organizations if needed) for v1 will not be slack users. The bot should interact with them via email (smtp/imap) any automated email should inform the user that it is an automated email from ALMA
+## Overview
 
-The processes that I would like to streamline
+ALMA is a Slack-based AI assistant for LDS ward bishoprics. It runs as a self-hosted Python app on a ward Windows machine, using SQLite for storage and Z.AI GLM-4.7-Flash as the LLM via LangChain. Communication happens through Slack (Bolt SDK, Socket Mode) and email (SMTP/IMAP). Non-Slack users (organization leaders, ward members) interact with ALMA through email; automated emails clearly identify themselves as coming from ALMA.
 
-* Organizing interviews  
-  * Allow me to keep a list of people who need to be scheduled and if they have been contacted, if they have been scheduled for said interview  
-  * Easily add people to a list of people to interview  
-  * Remind me weekly of who needs an interview that I haven't heard from  
-  * Allow me to schedule interviews  
-    * Requires a connection to some sort of calendar \- we can do an internal solution or connect to google calendar \- only if there is capability to use google calendars new booking feature  
-  * After interviews scheduled time passes ask the person (bishop or counselor) if the interview happened and if that person needs to be scheduled for a follow up (optional add to upcoming ward council agenda maybe)  
-  * Behavior for interviews is  
-    * i add people to the list of people to interview  
-    * Bot proposes times for interviews, sending texts and emails is automated via links clickable in slack such as sms:+15551234567?body=Hello or mailto links with the recipient, subject and body. When a link is sent ask me if i sent the message to register it in the backend  
-    * I report when the person said they would be at the interview, then the interview is added to the google calendar  
-    * The applicable interviewer and interviewee are notified by being added as attendees to the google calendar event.  
-    * After the interview passes, the applicable interviewer is sent a message to ask if the interviewee attended the meeting (y/n) if they did, if a follow up is needed. The executive secretary is notified if they need rescheduled or a follow up scheduled and they added back into the list of people that need interviewed (in the database)  
-  * Agent tools  
-    * Get schedule  
-      * Gets the schedule of a bishopric member  
-      * Default to three week date range, paramter for specific date range  
-    * Schedule interview  
-      * Requires confirmation with executive secretary to confirm date and time  
-    * Send text  
-      * Sends a message to exec sec of a sms link with a number and the message so they don’t have to type it  
-        Message should have a button to confirm a text was sent  
-    * Send email  
-      * Mailto link similar to send text tool, include recipient body and subject in link  
-        Message should have a button to confirm email was sent  
-    * Add to interview list  
-      * Adds a person to the list of people to schedule interview  
-    * Remove from interview list  
-      * Removes a person from the list of people to schedule  
-    * Followup on interview  
-      * Maybe not a tool for the agent, but there should be some mechanism to follow up with interviewers after the interview happens to ask if the person attended and if they need a follow up or to be rescheduled if they weren’t there  
-    * Get interview list  
-      * Gets the list of people who need to be scheduled from the database
-* Meeting notes  
-  * Meetings are ward council, bishopric meeting, youth council  
-  * Allow me to take notes during a meeting  
-  * From the notes, update the original agenda with what we talked about  
-  * Create a new agenda, organizing the items to ask the bishop if we should talk abou them next agenda.  
-  * One day before the meeting, send a message to each org leader to ask if there are any people they would like to add for ministering items or other topics they would like to discuss in ward council.  
-  * From the responses, create the new agenda  
-  * Currently we are using google docs for this, but i would be open to using a canvas in each meetings channel if there is a way to archive the agendas after the meeting is done, while not having to pay for the pro features of slack.  
-  * During meeting notes I will create todo items, the majority of todo items will come from meeting notes  
-  * Meeting notes and agendas behavior is  
-    * Meeting notes are started via a slack command or via the agent  
-    * I will enter notes into the chat with the agent.  
-    * At the end the notes are organized into what agenda section they should pertain to, so that they can be used to create an agenda for the next meeting.  
-    * Todo items are created via slack command or the agent makes them, they should have an assignee, the task, and an end date. See todo items section for more on todo items  
-    * After the meeting a list of agenda items is made from the notes of the meeting and the items from the last agenda. The bishop is sent a list of each item with a checkbox, to determine if items should be included in the next agenda.  
-    * Once the agent knows what to include in the next agenda it creates it and sends it to the bishopric for review, the bishopric can provide feedback to refine the agenda until it gets approved  
-    * Two days before the next meeting the bot sends an email to ask the organization members (bishopric members asked via message) if they have anything to add to the program and it adds their responses to the agenda.  
-    * The agenda gets sent 1 hour before the meeting starts (google doc) via email and in the meeting channel  
-* Sacrament meeting program  
-  * Keep track of speakers, musical numbers,  
-  * Create a sacrament meeting program that has the speakers, musical numbers, announcements, 2nd hour meeting.  
-  * Announcements should be tracked as title, date/time, description and included in the bulletin until the date passes.  
-  * Bishopric members should be able to ask the agent to add announcements to the record of announcements, or add them via slack command  
-  * This should connect to a google sheet that has all the needed information with each week as a column. If any information is missing for the upcoming week, ask someone to provide it, optionally add it to the column in the google sheet.  
-* Calling management   
-  * From bishopric meeting notes make todos for extending callings, as part of completing a todo the bishop or counselor should mark if they accepted, if they do then add to business items for sacrament meeting, otherwise add to next bishopric meeting agenda that someone else needs to be called. Bishopric member should be informed once they give a response if they say the person didn’t accept it will go on the bishopric meeting agenda.  
-  * Ask bishopric member if they should be sustained in sacrament meeting or only announced.  
-  * They should be added to the sacrament meeting business items to announce/sustain  
-  * Some callings we don’t sustain only announce.  
-  * They go on a list of people to set apart and bishopric is made aware  
-  * 1 hour after church bishopric gets a checkbox list to indicate who was set apart  
-  * Clerk is notified to update calling in LCR and that they have been set apart.  
-* Track todo items  
-  * Allow me to enter todo items during meeting notes with an assignee (not always a person in slack) and an end date  
-  * Follow up with that person half way to the end date, to remind them. and then one day before ask for a report of the status of that todo item. If the todo item was part of a meeting, then the message to ask if they have any items to add to the agenda should also ask for a reporting on their todo item(s)  
-  * If a todo item is made during a meeting without and end date, the end date should be the next meeting of that type of meeting (youth council, ward council, bishopric, etc.)
+Everything ALMA does is modeled as a **task**. Tasks are the universal unit of work — every workflow, follow-up, reminder, and multi-step process is tracked as a task with typed context, status transitions, and email/Slack integration.
 
-Other behavior to consider 
+---
 
-* Document management  
-  * The bot should create a drive folder, or allow one to be specified that will hold all the applicable documents  
-  * A folder for each meeting with the current agenda and an archive folder for old agendas. Once a new agenda is finalized the previous one is moved to the archive folder.  
-  * A folder for sacrament meeting, which holds the business items and the sacrament meeting programs  
-    * A google sheet for keeping track of who the speakers are, musical numbers, prayers, etc.  
-    * Business items is for the counselor who is directing to know what to say when conducting the meeting, should have the items from the program as well as the callings, announcement, ward and stake business.there should be a folder for archiving business items  
-    * Sacrament meeting program, should have the date, hymns/ musical numbers, speakers or state it is fast and testimony meeting, second hour meeting, announcements. Archive folder for old programs, current program inside folder.  
-* Channels for the bot to use include a bishopric channel (clerks, secretaries, counselors and the bishop), clerk channel (clerk \+ assistant clerks), executive secretary channel (executive secretary, assistant executive secretaries), and a channel for each recurring meeting such as ward council or youth council.  
-* Slack integration app home should provide an interface for specifying the emails of organization leaders
+## Roles
+
+| Role | Slack User | Notes |
+|------|-----------|-------|
+| Bishop | Yes | Primary interviewer, approves agendas and programs |
+| Bishopric Counselor (x2) | Yes | Conduct interviews, extend callings, direct sacrament meeting |
+| Executive Secretary | Yes | Primary ALMA operator — schedules interviews, manages tasks |
+| Assistant Executive Secretary | Yes | Supports exec sec, coordinates with quorum leaders |
+| Clerk / Assistant Clerks | Yes | Update LCR records, notified for calling completions |
+| Organization Leaders (RS, EQ, YW, SS, custom) | No — email only | Provide agenda items, report on assignments |
+
+---
+
+## Core Architecture: The Task System
+
+### Task Model
+
+Every unit of work is a `task` with:
+
+- **task_type** — categorizes the workflow (see types below)
+- **status** — `active`, `waiting_reply`, `completed`, `cancelled`
+- **summary** — human-readable description
+- **context** — JSON blob holding all workflow-specific state (current step, proposed times, assignee info, due dates, etc.)
+- **created_by** — Slack user who initiated
+- **notify_channel** — where to post updates
+- **assignee** — person responsible (may be a Slack user or external contact name/email)
+- **due_date** — when the task should be completed (nullable)
+- **parent_task_id** — links sub-tasks to a parent task for multi-step workflows
+- **source** — origin of the task (`meeting_notes`, `manual`, `system`, `calling_workflow`)
+
+### Task Types
+
+| Type | Description |
+|------|-------------|
+| `schedule_interview` | Full scheduling workflow: email outreach, reply processing, availability check, ICS invite |
+| `follow_up` | Post-interview or post-assignment check-in |
+| `contact` | One-off outreach to a ward member |
+| `todo` | Action item with assignee and due date, often created from meeting notes |
+| `calling` | Multi-step calling workflow (see Calling Management) |
+| `agenda_item` | Item to be included in a meeting agenda |
+| `sacrament_item` | Business or program item for sacrament meeting |
+| `announcement` | Recurring announcement with expiry date |
+| `general` | Catch-all |
+
+### Task Lifecycle
+
+Tasks move through statuses driven by agent actions, email replies, Slack button interactions, and scheduled checks:
+
+1. **Created** (`active`) — by agent tool call, meeting notes processing, or system trigger
+2. **Waiting** (`waiting_reply`) — email sent or Slack interaction pending
+3. **Completed** (`completed`) — work finished, outcome recorded in context
+4. **Cancelled** (`cancelled`) — no longer needed
+
+Sub-tasks can be spawned from parent tasks. A parent task's completion may depend on all sub-tasks completing.
+
+### Scheduled Task Processing
+
+A periodic check (configurable interval) should:
+- Find `todo` tasks approaching their due date: send a reminder at the halfway point, and request a status report one day before
+- Find `waiting_reply` tasks that have gone stale (no response after configurable days) and notify the exec secretary
+- Find `announcement` tasks past their expiry date and mark them completed
+- Trigger pre-meeting workflows (agenda solicitation, agenda distribution) based on meeting schedules
+
+---
+
+## Workflows
+
+### 1. Interview Scheduling (Implemented)
+
+**Participants:** Executive Secretary, Bishopric Member (interviewer), Ward Member (interviewee)
+
+**Interview Types & Durations:**
+| Type | Duration |
+|------|----------|
+| Child baptism | 15 min |
+| Youth temple recommend / annual | 10 min |
+| Adult temple recommend renewal | 15 min |
+| First-time temple recommend, mission prep, marriage/sealing | 30 min |
+| Undisclosed (repentance, welfare) | 20 min default, adjustable |
+
+**Flow:**
+1. Exec sec tells ALMA to schedule an interview (or adds to interview list) -> `schedule_interview` task created
+2. ALMA checks interviewer availability via `get_availability()`
+3. ALMA sends email to interviewee proposing available times (task moves to `waiting_reply`)
+4. Interviewee replies (IMAP polling matches reply to task)
+5. Agent processes reply, cross-references with interviewer availability
+6. ALMA sends Slack DM to interviewer with time-picker buttons via `ask_bishopric_member()`
+7. Interviewer picks a time -> ICS invite sent to both parties, task completed
+8. If interviewer rejects all times -> task returns to `active`, exec sec notified to get more options
+9. **Post-interview follow-up:** After the scheduled time passes, ALMA creates a `follow_up` task — asks the interviewer (via Slack) if the interview happened, if a follow-up is needed, or if the person needs to be rescheduled
+
+**Agent should also:**
+- Maintain a persistent interview list (people who need to be scheduled)
+- Send weekly reminders to exec sec of unscheduled people on the list
+- Track last-contacted date per person
+- Provide `sms:` and `mailto:` links in Slack for the exec sec to easily contact people outside the system
+
+### 2. Meeting Notes & Agendas
+
+**Meeting Types:** Bishopric Meeting, Ward Council, Youth Council, EQ/RS Coordination (extensible)
+
+Each meeting type has a recurring schedule (day of week + time) stored in configuration.
+
+**Flow:**
+1. Exec sec starts a meeting notes session via ALMA (specifies meeting type)
+2. During the meeting, exec sec sends notes into the chat with ALMA
+3. ALMA processes notes into structured sections matching the agenda format
+4. ALMA extracts action items and creates `todo` tasks with assignees and due dates (default due date = next meeting of that type)
+5. After the meeting:
+   - ALMA compiles items from the notes + carryover items from the previous agenda
+   - Bishop receives a checklist of items to include/exclude from the next agenda
+   - Once confirmed, ALMA generates the draft agenda and sends to bishopric for review
+   - Bishopric can provide feedback; ALMA refines until approved
+6. **Two days before** the next meeting: ALMA emails organization leaders (and messages bishopric members) asking if they have items to add, including reminders about their open `todo` tasks
+7. Responses are incorporated into the agenda
+8. **One hour before** the meeting: final agenda sent via email to all attendees and posted in the meeting's Slack channel
+
+**Agenda Storage:**
+- Current agenda is the active document; previous agendas are archived
+- Format TBD (Google Docs, or a generated document — avoid paid Slack features)
+
+### 3. Sacrament Meeting Program
+
+**Components tracked as tasks/records:**
+- Speakers and topics
+- Musical numbers / hymns
+- Prayers (assigned well in advance with history tracking — who prayed last and when)
+- Announcements (title, date/time, description — included until date passes, then auto-expired)
+- Second hour meeting info
+- Ward/stake business items (callings, ordinations, etc.)
+
+**Flow:**
+1. Bishopric members add program items through ALMA (conversationally or via commands) -> each becomes a `sacrament_item` or `announcement` task
+2. ALMA maintains a running view of the upcoming week's program
+3. If any required information is missing for the upcoming Sunday, ALMA proactively asks a bishopric member to fill it in
+4. Once bishopric approves the program, ALMA generates:
+   - **Business items sheet** — for the conducting counselor (includes program items + callings + announcements + ward/stake business)
+   - **Ward bulletin** — date, hymns, speakers, musical numbers, announcements, second hour, building cleaning schedule
+5. Bulletin converted to PDF and emailed to the ward
+6. Reminder to print copies of the bulletin and sacrament meeting agenda on Sunday
+
+**Prayer Assignment:**
+- ALMA maintains a history of prayer assignments per person
+- When assigning prayers, prioritize people who haven't prayed recently
+- Create a `contact` task to reach out and confirm with the assigned person
+
+### 4. Calling Management
+
+A calling goes through a multi-step lifecycle, modeled as a `calling` task with sub-tasks:
+
+1. **Identified** — from bishopric meeting notes, someone is called to a position. Bishopric discusses and decides who to extend the calling to -> `calling` task created
+2. **Extend** — a `todo` sub-task is created for the assigned bishopric member to extend the calling
+3. **Response** — bishopric member reports back:
+   - **Accepted:** ALMA asks if the calling should be sustained in sacrament meeting or only announced in classes. Creates a `sacrament_item` task for the appropriate action
+   - **Declined:** item added to next bishopric meeting agenda to discuss a replacement
+4. **Sustain/Announce** — added to sacrament meeting business items
+5. **Set Apart** — added to a list of people to set apart. One hour after church, bishopric gets a checklist to indicate who was set apart
+6. **Record** — clerk notified to update calling in LCR and record the setting apart
+7. **Release** (if replacing someone) — notify the person being released, handle separately or as part of the same workflow
+
+The previous calling holder's release follows a parallel track: collect replacement suggestions, release the person, sustain the new person.
+
+### 5. Todo / Action Items
+
+Todos are `todo`-type tasks with:
+- **assignee** — can be a Slack user or an external person (name + email)
+- **due_date** — explicit or defaults to next meeting of the originating meeting type
+- **source** — `meeting_notes`, `manual`, `calling_workflow`, etc.
+
+**Automated follow-up:**
+- **Halfway to due date:** ALMA sends a reminder to the assignee
+- **One day before due date:** ALMA asks for a status report
+- **If the assignee is an org leader and a meeting is approaching:** the pre-meeting solicitation email also asks about their open todos
+- **Overdue:** exec sec notified of overdue items weekly
+
+### 6. Temple Recommend Monitoring
+
+- Track member temple recommend expiry dates
+- As recommends approach expiry, create `schedule_interview` tasks to get them renewed
+- Youth recommends: schedule through head of household
+- Full-use recommends: follow up to ensure the member can meet with the stake presidency after the bishop interview
+
+---
+
+## Communication Channels
+
+### Slack
+- **Bishopric channel** — clerks, secretaries, counselors, bishop
+- **Clerk channel** — clerk + assistant clerks
+- **Executive secretary channel** — exec sec + assistant exec secs
+- **Meeting channels** — one per recurring meeting type (ward council, youth council, etc.)
+- **DMs** — ALMA sends individual messages for scheduling confirmations, follow-ups, and task-specific interactions
+
+### Email
+- Outbound emails are HTML-formatted with ALMA branding and ward name
+- Each outbound email is linked to a task via Message-ID for reply matching
+- IMAP polling matches inbound replies to tasks (In-Reply-To header, References header, subject line fallback)
+- ICS calendar invites attached for scheduled events
+- All automated emails clearly state they are from ALMA
+
+### Future: Texting
+- Trigger texts via iPhone Shortcuts integration (phone number + separator + message)
+- Batch text message support
+- For now, ALMA provides `sms:` links in Slack as a bridge
+
+---
+
+## Technical Constraints
+
+- **Z.AI free tier:** one concurrent LLM request at a time (serialized with a lock)
+- **Self-hosted:** runs on ward Windows machines, SQLite for storage
+- **No Google Calendar API:** scheduling uses ICS email invites + Slack buttons
+- **Programmatic over agentic:** where possible, implement deterministic processes rather than relying on the LLM to follow multi-step procedures. Use the agent for interpretation and decision-making, not for rote sequencing.
+- **Sub-agents:** use sub-agents for complex tasks to work within the smaller model's capabilities
+
+---
+
+## Configuration
+
+| Setting | Description |
+|---------|-------------|
+| `WARD_NAME` | Ward name for branding |
+| `WARD_TIMEZONE` | Timezone for scheduling (e.g., America/New_York) |
+| `IMAP_POLL_INTERVAL` | Seconds between inbox checks (default: 60) |
+| Meeting schedules | Day/time for each recurring meeting type |
+| Interview durations | Configurable per interview type |
+| Reminder intervals | How far before due dates to send reminders |
+| Stale task threshold | Days before a `waiting_reply` task is flagged |
+
+---
+
+## App Home
+
+The Slack App Home tab should provide an interface for:
+- Specifying organization leader emails and names
+- Viewing current task summary / dashboard
+- Quick actions (add to interview list, create announcement, etc.)

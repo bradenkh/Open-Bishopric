@@ -9,7 +9,7 @@ from slack_bolt.adapter.socket_mode import SocketModeHandler
 load_dotenv()
 
 from src.db import run_migrations
-from src.actions.interviews import register as register_interview_actions
+from src.actions.scheduling import register as register_scheduling_actions
 from src.agent import run_agent
 
 app = App(
@@ -17,7 +17,7 @@ app = App(
     signing_secret=os.environ["SLACK_SIGNING_SECRET"],
 )
 
-register_interview_actions(app)
+register_scheduling_actions(app)
 
 # Z.AI allows only one concurrent request — serialize agent calls
 agent_lock = threading.Lock()
@@ -29,11 +29,11 @@ def handle_mention(event, say, client):
         return
     text = re.sub(r"<@\w+>", "", event["text"]).strip()
     if not text:
-        say("Hi! I'm ALMA. How can I help with interviews today?")
+        say("Hi! I'm ALMA. How can I help today?")
         return
     client.reactions_add(channel=event["channel"], timestamp=event["ts"], name="hourglass_flowing_sand")
     with agent_lock:
-        response = run_agent(text, event["user"], event["channel"], say)
+        response = run_agent(text, event["user"], event["channel"], say, client)
     try:
         client.reactions_remove(channel=event["channel"], timestamp=event["ts"], name="hourglass_flowing_sand")
     except Exception:
@@ -50,7 +50,7 @@ def handle_dm(event, say, client):
         return
     client.reactions_add(channel=event["channel"], timestamp=event["ts"], name="hourglass_flowing_sand")
     with agent_lock:
-        response = run_agent(text, event["user"], event["channel"], say)
+        response = run_agent(text, event["user"], event["channel"], say, client)
     try:
         client.reactions_remove(channel=event["channel"], timestamp=event["ts"], name="hourglass_flowing_sand")
     except Exception:
@@ -60,6 +60,15 @@ def handle_dm(event, say, client):
 
 if __name__ == "__main__":
     run_migrations()
+
+    # Start IMAP poller for email reply handling
+    from src.reply_processor import init as init_reply_processor, process_reply
+    from src.imap_client import start_imap_poller
+
+    init_reply_processor(slack_app=app, agent_lock=agent_lock)
+    imap_interval = int(os.environ.get("IMAP_POLL_INTERVAL", "60"))
+    start_imap_poller(process_reply_fn=process_reply, interval_seconds=imap_interval)
+
     handler = SocketModeHandler(app, os.environ["SLACK_APP_TOKEN"])
     print("⚡ ALMA is running in Socket Mode!")
     handler.start()

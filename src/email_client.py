@@ -1,7 +1,15 @@
 import os
 import smtplib
+import uuid
+import logging
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email import encoders
+
+from src.db import get_db
+
+logger = logging.getLogger(__name__)
 
 WARD_NAME = os.environ.get("WARD_NAME", "Your Ward")
 
@@ -84,14 +92,42 @@ PLAIN_TEMPLATE = (
 )
 
 
-def send_email(to: str, subject: str, body: str) -> None:
-    """Send an HTML email with plain-text fallback via SMTP. Raises on failure."""
+def _generate_message_id(task_id: int | None = None) -> str:
+    """Generate a unique RFC 2822 Message-ID for outbound emails."""
+    short_uuid = uuid.uuid4().hex[:12]
+    tag = f"alma-t{task_id}" if task_id else "alma"
+    domain = os.environ.get("EMAIL_DOMAIN", "alma.local")
+    return f"<{tag}-{short_uuid}@{domain}>"
+
+
+def _record_outbound(task_id: int | None, message_id: str, to: str, subject: str, body: str):
+    """Store an outbound email record so inbound replies can be matched."""
+    db = get_db()
+    try:
+        db.execute(
+            "INSERT INTO outbound_emails (task_id, message_id, to_email, subject, body_preview) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (task_id, message_id, to, subject, body[:200]),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+def send_email(to: str, subject: str, body: str, task_id: int | None = None,
+               in_reply_to: str | None = None) -> str:
+    """Send an HTML email with plain-text fallback via SMTP.
+
+    Returns the Message-ID of the sent email. Raises on failure.
+    """
     host = os.environ["SMTP_HOST"]
     port = int(os.environ["SMTP_PORT"])
     user = os.environ["SMTP_USER"]
     password = os.environ["SMTP_PASSWORD"]
     from_addr = os.environ.get("EMAIL_FROM", user)
     ward_name = os.environ.get("WARD_NAME", "Your Ward")
+
+    message_id = _generate_message_id(task_id)
 
     # Convert plain-text body line breaks to HTML paragraphs
     html_body = "".join(f"<p style='margin:0 0 12px 0;'>{line}</p>" if line.strip() else ""
@@ -101,6 +137,10 @@ def send_email(to: str, subject: str, body: str) -> None:
     msg["Subject"] = subject
     msg["From"] = from_addr
     msg["To"] = to
+    msg["Message-ID"] = message_id
+    if in_reply_to:
+        msg["In-Reply-To"] = in_reply_to
+        msg["References"] = in_reply_to
 
     # Plain-text version (shown by clients that don't support HTML)
     msg.attach(MIMEText(
@@ -115,3 +155,62 @@ def send_email(to: str, subject: str, body: str) -> None:
         server.starttls()
         server.login(user, password)
         server.send_message(msg)
+
+    _record_outbound(task_id, message_id, to, subject, body)
+    logger.info("Sent email to %s (message_id=%s, task_id=%s)", to, message_id, task_id)
+    return message_id
+
+
+def send_email_with_ics(
+    to: str, subject: str, body: str, ics_content: str,
+    ics_filename: str = "invite.ics", task_id: int | None = None
+) -> str:
+    """Send an HTML email with an .ics calendar invite attached.
+
+    Returns the Message-ID of the sent email. Raises on failure.
+    """
+    host = os.environ["SMTP_HOST"]
+    port = int(os.environ["SMTP_PORT"])
+    user = os.environ["SMTP_USER"]
+    password = os.environ["SMTP_PASSWORD"]
+    from_addr = os.environ.get("EMAIL_FROM", user)
+    ward_name = os.environ.get("WARD_NAME", "Your Ward")
+
+    message_id = _generate_message_id(task_id)
+
+    html_body = "".join(
+        f"<p style='margin:0 0 12px 0;'>{line}</p>" if line.strip() else ""
+        for line in body.split("\n")
+    )
+
+    msg = MIMEMultipart("mixed")
+    msg["Subject"] = subject
+    msg["From"] = from_addr
+    msg["To"] = to
+    msg["Message-ID"] = message_id
+
+    # Text alternatives (plain + HTML)
+    alt = MIMEMultipart("alternative")
+    alt.attach(MIMEText(
+        PLAIN_TEMPLATE.format(body=body, ward_name=ward_name), "plain"
+    ))
+    alt.attach(MIMEText(
+        HTML_TEMPLATE.format(subject=subject, body=html_body, ward_name=ward_name), "html"
+    ))
+    msg.attach(alt)
+
+    # ICS attachment
+    ics_part = MIMEBase("text", "calendar", method="REQUEST")
+    ics_part.set_payload(ics_content.encode("utf-8"))
+    encoders.encode_base64(ics_part)
+    ics_part.add_header("Content-Disposition", f"attachment; filename={ics_filename}")
+    msg.attach(ics_part)
+
+    with smtplib.SMTP(host, port) as server:
+        server.starttls()
+        server.login(user, password)
+        server.send_message(msg)
+
+    _record_outbound(task_id, message_id, to, subject, body)
+    logger.info("Sent ICS email to %s (message_id=%s, task_id=%s)", to, message_id, task_id)
+    return message_id

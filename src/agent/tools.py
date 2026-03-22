@@ -1,3 +1,5 @@
+import json
+import logging
 from datetime import datetime
 
 from langchain_core.tools import tool
@@ -7,159 +9,201 @@ from src.email_client import send_email as _smtp_send
 
 DAY_NAMES = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 
+logger = logging.getLogger(__name__)
 
 # Global per-request context, set by the agent runner before each invocation
 _say_fn = None
 _slack_user_id = None
+_slack_client = None
 
 
-def set_request_context(say, slack_user_id):
-    global _say_fn, _slack_user_id
+def set_request_context(say, slack_user_id, client=None):
+    global _say_fn, _slack_user_id, _slack_client
     _say_fn = say
     _slack_user_id = slack_user_id
+    _slack_client = client
 
+
+# ---------------------------------------------------------------------------
+# Task management tools
+# ---------------------------------------------------------------------------
 
 @tool
-def add_to_interview_list(name: str, phone: str = "", email: str = "", reason: str = "") -> str:
-    """Add a person to the interview list. Provide their name and optionally phone number, email, and a reason/note for the interview (e.g. 'new move-in', 'annual interview', 'temple recommend renewal')."""
+def create_task(task_type: str, summary: str, context_json: str = "{}") -> str:
+    """Create a task to track a multi-step workflow.
+    task_type: 'schedule_interview', 'follow_up', 'contact', 'general'.
+    summary: brief human-readable description (e.g. 'Schedule interview for John Doe with Bishop').
+    context_json: JSON object with workflow state. For schedule_interview include at minimum:
+      member_name, member_email, interviewer_role, reason. Other useful fields:
+      member_phone, step, proposed_times, scheduled_at, notes (list of strings)."""
+    valid_types = ["schedule_interview", "follow_up", "contact", "general"]
+    if task_type not in valid_types:
+        return f"Invalid task_type '{task_type}'. Must be one of: {', '.join(valid_types)}"
+
+    # Validate context is valid JSON
+    try:
+        ctx = json.loads(context_json)
+    except json.JSONDecodeError:
+        return "Invalid context_json — must be valid JSON."
+
     db = get_db()
     cursor = db.execute(
-        "INSERT INTO members (name, phone, email) VALUES (?, ?, ?)",
-        (name, phone or None, email or None),
+        "INSERT INTO tasks (task_type, status, summary, context, created_by, notify_channel) "
+        "VALUES (?, 'active', ?, ?, ?, ?)",
+        (task_type, summary, json.dumps(ctx), _slack_user_id, None),
     )
-    member_id = cursor.lastrowid
-    initial_note = ""
-    if reason:
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-        initial_note = f"[{timestamp}] Added to list — {reason}"
-    cursor = db.execute(
-        "INSERT INTO interviews (member_id, status, created_by, notes) VALUES (?, 'pending', ?, ?)",
-        (member_id, _slack_user_id, initial_note or None),
-    )
+    task_id = cursor.lastrowid
     db.commit()
-    interview_id = cursor.lastrowid
     db.close()
-    return f"Added {name} to the interview list (Interview #{interview_id})."
+    return f"Created task #{task_id}: {summary}"
 
 
 @tool
-def remove_from_interview_list(interview_id: int) -> str:
-    """Remove a person from the interview list by their interview ID."""
+def update_task(task_id: int, status: str = "", context_json: str = "", summary: str = "") -> str:
+    """Update a task's status, context, and/or summary.
+    status: 'active', 'waiting_reply', 'completed', 'cancelled'.
+    context_json: full replacement JSON for the context field.
+    summary: updated summary text."""
     db = get_db()
-    row = db.execute(
-        "SELECT i.id, m.name FROM interviews i JOIN members m ON i.member_id = m.id WHERE i.id = ?",
-        (interview_id,),
-    ).fetchone()
+    row = db.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
     if not row:
         db.close()
-        return f"Interview #{interview_id} not found."
-    name = row["name"]
-    db.execute("DELETE FROM interviews WHERE id = ?", (interview_id,))
+        return f"Task #{task_id} not found."
+
+    updates = ["updated_at = CURRENT_TIMESTAMP"]
+    params = []
+
+    if status:
+        valid = ["active", "waiting_reply", "completed", "cancelled"]
+        if status not in valid:
+            db.close()
+            return f"Invalid status '{status}'. Must be one of: {', '.join(valid)}"
+        updates.append("status = ?")
+        params.append(status)
+
+    if context_json:
+        try:
+            json.loads(context_json)
+        except json.JSONDecodeError:
+            db.close()
+            return "Invalid context_json — must be valid JSON."
+        updates.append("context = ?")
+        params.append(context_json)
+
+    if summary:
+        updates.append("summary = ?")
+        params.append(summary)
+
+    params.append(task_id)
+    db.execute(f"UPDATE tasks SET {', '.join(updates)} WHERE id = ?", params)
     db.commit()
     db.close()
-    return f"Removed {name} (Interview #{interview_id}) from the interview list."
+    return f"Updated task #{task_id}."
 
 
 @tool
-def get_interview_list(status_filter: str = "all") -> str:
-    """Get the list of people who need interviews. Filter by status: all, pending, contacted, scheduled, completed, no_show, follow_up."""
+def get_tasks(task_type: str = "", status: str = "") -> str:
+    """List tasks, optionally filtered by task_type and/or status.
+    task_type: 'schedule_interview', 'follow_up', 'contact', 'general' or '' for all.
+    status: 'active', 'waiting_reply', 'completed', 'cancelled' or '' for all."""
     db = get_db()
-    if status_filter == "all":
-        rows = db.execute(
-            """
-            SELECT i.id, m.name, m.phone, m.email, i.status, i.contacted_at, i.scheduled_at, i.notes
-            FROM interviews i JOIN members m ON i.member_id = m.id
-            ORDER BY i.created_at DESC
-            """
-        ).fetchall()
-    else:
-        rows = db.execute(
-            """
-            SELECT i.id, m.name, m.phone, m.email, i.status, i.contacted_at, i.scheduled_at
-            FROM interviews i JOIN members m ON i.member_id = m.id
-            WHERE i.status = ?
-            ORDER BY i.created_at DESC
-            """,
-            (status_filter,),
-        ).fetchall()
+    query = "SELECT * FROM tasks WHERE 1=1"
+    params = []
+    if task_type:
+        query += " AND task_type = ?"
+        params.append(task_type)
+    if status:
+        query += " AND status = ?"
+        params.append(status)
+    query += " ORDER BY created_at DESC"
+    rows = db.execute(query, params).fetchall()
     db.close()
 
     if not rows:
-        if status_filter == "all":
-            return "The interview list is empty."
-        return f"No interviews with status '{status_filter}'."
+        filters = []
+        if task_type:
+            filters.append(f"type={task_type}")
+        if status:
+            filters.append(f"status={status}")
+        filter_str = f" ({', '.join(filters)})" if filters else ""
+        return f"No tasks found{filter_str}."
 
     lines = []
     for r in rows:
-        parts = [f"#{r['id']} — *{r['name']}* ({r['status']})"]
-        if r["phone"]:
-            parts.append(f"Phone: {r['phone']}")
-        if r["email"]:
-            parts.append(f"Email: {r['email']}")
-        if r["contacted_at"]:
-            parts.append(f"Contacted: {r['contacted_at']}")
-        if r["scheduled_at"]:
-            parts.append(f"Scheduled: {r['scheduled_at']}")
-        if r["notes"]:
-            parts.append(f"Notes: {r['notes']}")
+        ctx = json.loads(r["context"])
+        parts = [f"#{r['id']} — *{r['summary']}* [{r['status']}]"]
+        if ctx.get("member_name"):
+            parts.append(f"Member: {ctx['member_name']}")
+        if ctx.get("member_email"):
+            parts.append(f"Email: {ctx['member_email']}")
+        if ctx.get("step"):
+            parts.append(f"Step: {ctx['step']}")
+        if ctx.get("scheduled_at"):
+            parts.append(f"Scheduled: {ctx['scheduled_at']}")
         lines.append(" | ".join(parts))
 
-    return f"*Interview List* ({len(rows)} total):\n" + "\n".join(f"• {line}" for line in lines)
+    return f"*Tasks* ({len(rows)}):\n" + "\n".join(f"• {line}" for line in lines)
 
 
 @tool
-def send_email(to_email: str, subject: str, body: str, interview_id: int = 0) -> str:
+def complete_task(task_id: int) -> str:
+    """Mark a task as completed."""
+    db = get_db()
+    row = db.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+    if not row:
+        db.close()
+        return f"Task #{task_id} not found."
+    db.execute(
+        "UPDATE tasks SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (task_id,),
+    )
+    db.commit()
+    db.close()
+    return f"Task #{task_id} marked as completed."
+
+
+# ---------------------------------------------------------------------------
+# Email tool
+# ---------------------------------------------------------------------------
+
+@tool
+def send_email(to_email: str, subject: str, body: str, task_id: int = 0) -> str:
     """Send a real email via ALMA's email account. Provide the recipient email, subject, and body.
-    If this is about an interview, include the interview_id to automatically update the interview status to 'contacted'."""
+    If this is part of a task, include the task_id so replies can be automatically matched back.
+    After sending, the task status will be updated to 'waiting_reply'."""
+    tid = task_id if task_id else None
     try:
-        _smtp_send(to_email, subject, body)
+        message_id = _smtp_send(to_email, subject, body, task_id=tid)
     except Exception as e:
         return f"Failed to send email to {to_email}: {e}"
 
-    result = f"Email sent to {to_email}."
+    result = f"Email sent to {to_email} (Message-ID: {message_id})."
 
-    if interview_id:
+    if task_id:
         db = get_db()
-        db.execute(
-            "UPDATE interviews SET status = 'contacted', contacted_at = CURRENT_TIMESTAMP WHERE id = ?",
-            (interview_id,),
-        )
-        db.execute(
-            "INSERT INTO contact_log (interview_id, method, confirmed_sent) VALUES (?, 'email', 1)",
-            (interview_id,),
-        )
-        db.commit()
+        # Update task status to waiting_reply and add note
+        row = db.execute("SELECT context FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        if row:
+            ctx = json.loads(row["context"])
+            notes = ctx.get("notes", [])
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+            notes.append(f"[{timestamp}] Email sent to {to_email}: {subject}")
+            ctx["step"] = "waiting_for_reply"
+            ctx["notes"] = notes
+            db.execute(
+                "UPDATE tasks SET status = 'waiting_reply', context = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (json.dumps(ctx), task_id),
+            )
+            db.commit()
         db.close()
-        result += f" Interview #{interview_id} status updated to *contacted*."
+        result += f" Task #{task_id} status updated to *waiting_reply*."
 
     return result
 
 
-@tool
-def update_notes(interview_id: int, notes: str) -> str:
-    """Update the notes for an interview. Use this to record correspondence, interview purpose, scheduling details, or any other relevant information. New notes are appended with a timestamp."""
-    db = get_db()
-    row = db.execute(
-        """
-        SELECT i.id, i.notes, m.name
-        FROM interviews i JOIN members m ON i.member_id = m.id
-        WHERE i.id = ?
-        """,
-        (interview_id,),
-    ).fetchone()
-    if not row:
-        db.close()
-        return f"Interview #{interview_id} not found."
-
-    existing = row["notes"] or ""
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-    updated = f"{existing}\n[{timestamp}] {notes}".strip()
-
-    db.execute("UPDATE interviews SET notes = ? WHERE id = ?", (updated, interview_id))
-    db.commit()
-    db.close()
-    return f"Notes updated for {row['name']} (Interview #{interview_id})."
-
+# ---------------------------------------------------------------------------
+# Bishopric member tools (unchanged)
+# ---------------------------------------------------------------------------
 
 def _resolve_bishopric_member(db, role_or_name: str):
     """Look up a bishopric member by role or name (case-insensitive)."""
@@ -222,7 +266,7 @@ def _fmt_time(t: str) -> str:
 
 @tool
 def add_bishopric_member(name: str, role: str, email: str = "", phone: str = "", slack_id: str = "") -> str:
-    """Add a bishopric member. Role must be one of: bishop, first_counselor, second_counselor, exec_secretary. Most members communicate via email, not Slack. Provide email and/or phone."""
+    """Add a bishopric member. Role must be one of: bishop, first_counselor, second_counselor, exec_secretary. Provide email and/or phone. Provide slack_id so ALMA can DM them for scheduling confirmations."""
     role_lower = role.lower().replace(" ", "_")
     valid_roles = ["bishop", "first_counselor", "second_counselor", "exec_secretary"]
     if role_lower not in valid_roles:
@@ -313,6 +357,10 @@ def get_bishopric_members() -> str:
     return f"*Bishopric Members* ({len(rows)}):\n" + "\n".join(f"• {line}" for line in lines)
 
 
+# ---------------------------------------------------------------------------
+# Availability tools (unchanged)
+# ---------------------------------------------------------------------------
+
 @tool
 def set_availability(role_or_name: str, day_of_week: str, start_time: str, end_time: str) -> str:
     """Set recurring weekly availability for a bishopric member. Replaces any existing blocks for that day.
@@ -331,9 +379,8 @@ def set_availability(role_or_name: str, day_of_week: str, start_time: str, end_t
     member = _resolve_bishopric_member(db, role_or_name)
     if not member:
         db.close()
-        return f"Bishopric member '{role_or_name}' not found. Register them first with register_bishopric_member."
+        return f"Bishopric member '{role_or_name}' not found. Register them first with add_bishopric_member."
 
-    # Delete existing blocks for this member+day, then insert new ones
     db.execute(
         "DELETE FROM availability_blocks WHERE bishopric_member_id = ? AND day_of_week = ?",
         (member["id"], day_num),
@@ -442,7 +489,6 @@ def get_availability(role_or_name: str = "") -> str:
     for member in members:
         lines.append(f"*{member['name']}* ({member['role']})")
 
-        # Get recurring blocks grouped by day
         blocks = db.execute(
             "SELECT day_of_week, block_time FROM availability_blocks WHERE bishopric_member_id = ? ORDER BY day_of_week, block_time",
             (member["id"],),
@@ -459,7 +505,6 @@ def get_availability(role_or_name: str = "") -> str:
         else:
             lines.append("  No recurring availability set.")
 
-        # Get active overrides
         overrides = db.execute(
             "SELECT id, start_date, end_date, reason FROM availability_overrides WHERE bishopric_member_id = ? AND end_date >= ? ORDER BY start_date",
             (member["id"], today),
@@ -476,19 +521,153 @@ def get_availability(role_or_name: str = "") -> str:
     return "\n".join(lines).strip()
 
 
+# ---------------------------------------------------------------------------
+# Scheduling tools (task-based)
+# ---------------------------------------------------------------------------
+
+@tool
+def ask_bishopric_member(role_or_name: str, task_id: int, proposed_times: str) -> str:
+    """Send a Slack DM to a bishopric member asking them to pick a time for an interview.
+    The member will see buttons for each proposed time and can select one or decline all.
+    role_or_name: the bishopric member (e.g. 'bishop' or their name).
+    task_id: the task tracking this interview.
+    proposed_times: JSON list of time strings in 'YYYY-MM-DD HH:MM' format, e.g. '["2026-03-22 10:00", "2026-03-22 11:00"]'."""
+    if not _slack_client:
+        return "Slack client not available. Cannot send DMs."
+
+    try:
+        times = json.loads(proposed_times)
+    except json.JSONDecodeError:
+        return "Invalid proposed_times format. Provide a JSON list of 'YYYY-MM-DD HH:MM' strings."
+
+    if not times:
+        return "No times provided."
+
+    db = get_db()
+    member = _resolve_bishopric_member(db, role_or_name)
+    if not member:
+        db.close()
+        return f"Bishopric member '{role_or_name}' not found."
+    if not member["slack_id"]:
+        db.close()
+        return f"{member['name']} does not have a Slack ID set. Use update_bishopric_member to set their slack_id first."
+
+    task = db.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+    if not task:
+        db.close()
+        return f"Task #{task_id} not found."
+
+    ctx = json.loads(task["context"])
+    member_name = ctx.get("member_name", "someone")
+
+    # Update task context with proposed times and step
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    notes = ctx.get("notes", [])
+    notes.append(f"[{timestamp}] Asked {member['name']} to pick a time: {', '.join(times)}")
+    ctx["step"] = "waiting_for_bishopric_confirmation"
+    ctx["proposed_times"] = times
+    ctx["notes"] = notes
+    db.execute(
+        "UPDATE tasks SET context = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (json.dumps(ctx), task_id),
+    )
+    db.commit()
+
+    # Build Block Kit message with time buttons
+    # Encode task_id into button values so scheduling actions can find the task
+    time_buttons = []
+    for t in times:
+        dt = datetime.strptime(t, "%Y-%m-%d %H:%M")
+        time_str = _fmt_time(dt.strftime("%H:%M"))
+        label = dt.strftime(f"%a %b %d, {time_str}")
+        time_buttons.append({
+            "type": "button",
+            "text": {"type": "plain_text", "text": label},
+            "style": "primary",
+            "action_id": "schedule_select",
+            "value": f"{task_id}|{t}",
+        })
+
+    blocks = [
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": f"Hi! Can you do any of these times for an interview with *{member_name}*?",
+            },
+        },
+        {
+            "type": "actions",
+            "elements": time_buttons + [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "None of these work"},
+                    "style": "danger",
+                    "action_id": "schedule_reject",
+                    "value": str(task_id),
+                },
+            ],
+        },
+    ]
+
+    try:
+        _slack_client.chat_postMessage(
+            channel=member["slack_id"],
+            text=f"Can you do any of these times for an interview with {member_name}?",
+            blocks=blocks,
+        )
+    except Exception as e:
+        db.close()
+        return f"Failed to send DM to {member['name']}: {e}"
+
+    db.close()
+    return f"Sent scheduling options to {member['name']} for interview with {member_name} (Task #{task_id}). Waiting for their response."
+
+
+@tool
+def get_pending_schedules() -> str:
+    """Get all tasks that are waiting for a reply or in an active scheduling step."""
+    db = get_db()
+    rows = db.execute(
+        "SELECT * FROM tasks WHERE status IN ('active', 'waiting_reply') ORDER BY created_at DESC"
+    ).fetchall()
+    db.close()
+
+    if not rows:
+        return "No active or waiting tasks."
+
+    lines = []
+    for r in rows:
+        ctx = json.loads(r["context"])
+        status_icon = {"active": ":gear:", "waiting_reply": ":hourglass:"}.get(r["status"], "")
+        line = f"#{r['id']} {status_icon} *{r['summary']}* [{r['status']}]"
+        if ctx.get("step"):
+            line += f" — step: {ctx['step']}"
+        lines.append(line)
+
+    return f"*Active/Waiting Tasks* ({len(rows)}):\n" + "\n".join(f"• {line}" for line in lines)
+
+
 ALL_TOOLS = [
-    add_to_interview_list,
-    remove_from_interview_list,
-    get_interview_list,
+    # Task management
+    create_task,
+    update_task,
+    get_tasks,
+    complete_task,
+    # Email
     send_email,
-    update_notes,
+    # Bishopric members
     add_bishopric_member,
     update_bishopric_member,
     remove_bishopric_member,
     get_bishopric_members,
+    # Availability
     set_availability,
     remove_availability,
     add_availability_override,
     remove_availability_override,
     get_availability,
+    # Scheduling
+    ask_bishopric_member,
+    get_pending_schedules,
 ]
