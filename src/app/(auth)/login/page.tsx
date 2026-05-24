@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 function LoginForm() {
-  const { signIn, appUser, loading: authLoading } = useAuth();
+  const { signIn, appUser, loading: authLoading, authError } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
@@ -23,6 +23,14 @@ function LoginForm() {
       router.replace(searchParams.get("from") ?? "/home");
     }
   }, [appUser, authLoading, router, searchParams]);
+
+  // If auth context itself errored (e.g. Firestore/Admin misconfigured), stop the spinner
+  useEffect(() => {
+    if (authError) {
+      setSubmitting(false);
+      setError(`Server error: ${authError}`);
+    }
+  }, [authError]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

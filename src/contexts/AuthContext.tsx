@@ -15,6 +15,7 @@ interface AuthContextValue {
   user: User | null;
   appUser: AppUser | null;
   loading: boolean;
+  authError: string | null;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
 }
@@ -26,37 +27,50 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [appUser, setAppUser] = useState<AppUser | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const [authError, setAuthError] = useState<string | null>(null);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       setUser(firebaseUser);
+      setAuthError(null);
 
-      if (firebaseUser) {
-        const token = await firebaseUser.getIdToken();
-        await fetch("/api/auth/session", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ token }),
-        });
+      try {
+        if (firebaseUser) {
+          const token = await firebaseUser.getIdToken();
+          const sessionRes = await fetch("/api/auth/session", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ token }),
+          });
 
-        const profileDoc = await getDoc(doc(db, "users", firebaseUser.uid));
-        if (profileDoc.exists()) {
-          setAppUser(profileDoc.data() as AppUser);
+          if (!sessionRes.ok) {
+            const body = await sessionRes.json().catch(() => ({}));
+            console.error("[Auth] Session cookie creation failed:", sessionRes.status, body);
+          }
+
+          const profileDoc = await getDoc(doc(db, "users", firebaseUser.uid));
+          if (profileDoc.exists()) {
+            setAppUser(profileDoc.data() as AppUser);
+          } else {
+            const newUser: AppUser = {
+              uid: firebaseUser.uid,
+              email: firebaseUser.email!,
+              displayName: firebaseUser.displayName ?? firebaseUser.email!,
+              role: "clerk",
+            };
+            await setDoc(doc(db, "users", firebaseUser.uid), newUser);
+            setAppUser(newUser);
+          }
         } else {
-          const newUser: AppUser = {
-            uid: firebaseUser.uid,
-            email: firebaseUser.email!,
-            displayName: firebaseUser.displayName ?? firebaseUser.email!,
-            role: "clerk",
-          };
-          await setDoc(doc(db, "users", firebaseUser.uid), newUser);
-          setAppUser(newUser);
+          setAppUser(null);
+          await fetch("/api/auth/session", { method: "DELETE" });
         }
-      } else {
-        setAppUser(null);
-        await fetch("/api/auth/session", { method: "DELETE" });
+      } catch (err) {
+        console.error("[Auth] onAuthStateChanged error:", err);
+        setAuthError(err instanceof Error ? err.message : "Authentication error");
+      } finally {
+        setLoading(false);
       }
-
-      setLoading(false);
     });
 
     return unsubscribe;
@@ -71,7 +85,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, appUser, loading, signIn, signOut }}>
+    <AuthContext.Provider value={{ user, appUser, loading, authError, signIn, signOut }}>
       {children}
     </AuthContext.Provider>
   );
