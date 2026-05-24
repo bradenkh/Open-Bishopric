@@ -17,7 +17,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 
 const navItems = [
-  { href: "/", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/home", label: "Dashboard", icon: LayoutDashboard },
   { href: "/chat", label: "AI Assistant", icon: MessageSquare },
   { href: "/members", label: "Members", icon: Users },
   { href: "/tasks", label: "Tasks", icon: CheckSquare },

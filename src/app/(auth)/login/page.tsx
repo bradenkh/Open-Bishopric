@@ -23,7 +23,7 @@ function LoginForm() {
     setLoading(true);
     try {
       await signIn(email, password);
-      router.push(searchParams.get("from") ?? "/");
+      router.push(searchParams.get("from") ?? "/home");
     } catch {
       setError("Invalid email or password. Please try again.");
     } finally {

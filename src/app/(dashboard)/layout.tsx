@@ -6,6 +6,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/nav/sidebar";
 import { BottomNav } from "@/components/nav/bottom-nav";
+import { InstallBanner } from "@/components/pwa/InstallBanner";
 import { useAuth } from "@/contexts/AuthContext";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -35,6 +36,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <div className="pb-20 lg:pb-0">{children}</div>
       </main>
       <BottomNav />
+      <InstallBanner variant="banner" />
     </div>
   );
 }

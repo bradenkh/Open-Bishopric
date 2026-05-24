@@ -6,7 +6,7 @@ import { LayoutDashboard, MessageSquare, Users, CheckSquare, Church } from "luci
 import { cn } from "@/lib/utils";
 
 const navItems = [
-  { href: "/", label: "Home", icon: LayoutDashboard },
+  { href: "/home", label: "Home", icon: LayoutDashboard },
   { href: "/chat", label: "Chat", icon: MessageSquare },
   { href: "/members", label: "Members", icon: Users },
   { href: "/tasks", label: "Tasks", icon: CheckSquare },
