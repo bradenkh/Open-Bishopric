@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Church } from "lucide-react";
+import { LDSChurchIcon } from "@/components/icons/lds-church-icon";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -34,7 +34,7 @@ export default function LandingPage() {
       <div className="flex flex-1 flex-col items-center justify-center gap-8 text-center w-full max-w-sm">
         {/* Logo */}
         <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-primary/10 shadow-sm">
-          <Church className="h-10 w-10 text-primary" />
+          <LDSChurchIcon className="h-10 w-10 text-primary" />
         </div>
 
         {/* Title + tagline */}

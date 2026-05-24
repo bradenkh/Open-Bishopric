@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Church, X, Download, Smartphone } from "lucide-react";
+import { X, Download, Smartphone } from "lucide-react";
+import { LDSChurchIcon } from "@/components/icons/lds-church-icon";
 import { Button } from "@/components/ui/button";
 import { usePWAInstall } from "@/hooks/usePWAInstall";
 import { IOSInstallInstructions } from "./IOSInstallInstructions";
@@ -45,7 +46,7 @@ export function InstallBanner({ variant = "banner" }: Props) {
         >
           <div className="flex items-center gap-3 px-4 py-3">
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10">
-              <Church className="h-5 w-5 text-primary" />
+              <LDSChurchIcon className="h-5 w-5 text-primary" />
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium leading-tight">Install Open Bishopric</p>

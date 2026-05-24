@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Church } from "lucide-react";
+import { LDSChurchIcon } from "@/components/icons/lds-church-icon";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -83,7 +83,7 @@ export default function LoginPage() {
       <div className="w-full max-w-sm space-y-8">
         <div className="flex flex-col items-center gap-3">
           <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
-            <Church className="h-7 w-7 text-primary" />
+            <LDSChurchIcon className="h-7 w-7 text-primary" />
           </div>
           <div className="text-center">
             <h1 className="text-2xl font-bold tracking-tight">Open Bishopric</h1>
