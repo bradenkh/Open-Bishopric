@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Church } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
@@ -9,25 +9,31 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 function LoginForm() {
-  const { signIn } = useAuth();
+  const { signIn, appUser, loading: authLoading } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  // Navigate only after appUser is fully set (session cookie established)
+  useEffect(() => {
+    if (!authLoading && appUser) {
+      router.replace(searchParams.get("from") ?? "/home");
+    }
+  }, [appUser, authLoading, router, searchParams]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
-    setLoading(true);
+    setSubmitting(true);
     try {
       await signIn(email, password);
-      router.push(searchParams.get("from") ?? "/home");
+      // Navigation handled by useEffect above once appUser is set
     } catch {
       setError("Invalid email or password. Please try again.");
-    } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   };
 
@@ -64,8 +70,8 @@ function LoginForm() {
         </p>
       )}
 
-      <Button type="submit" className="w-full" size="lg" disabled={loading}>
-        {loading ? "Signing in…" : "Sign in"}
+      <Button type="submit" className="w-full" size="lg" disabled={submitting}>
+        {submitting ? "Signing in…" : "Sign in"}
       </Button>
     </form>
   );
