@@ -39,8 +39,8 @@ export function InstallBanner({ variant = "banner" }: Props) {
       <>
         <div
           className={cn(
-            // Sits above the 64px bottom nav + 18px confidential banner
-            "fixed bottom-[82px] left-0 right-0 z-30 lg:hidden",
+            // Sits above the 64px bottom nav
+            "fixed bottom-16 left-0 right-0 z-30 lg:hidden",
             "border-t border-border bg-background shadow-lg"
           )}
         >

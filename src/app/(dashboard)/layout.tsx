@@ -33,7 +33,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     <div className="flex h-full min-h-screen">
       <Sidebar />
       <main className="flex-1 overflow-auto lg:pl-60">
-        <div className="pb-[82px] lg:pb-0">{children}</div>
+        <div className="pb-20 lg:pb-0">{children}</div>
       </main>
       <BottomNav />
       <InstallBanner variant="banner" />
