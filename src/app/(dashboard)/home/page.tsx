@@ -25,6 +25,7 @@ export default function DashboardPage() {
     activeTasks: 0,
     members: 0,
     callingsInProgress: 0,
+    vacantCallings: 0,
     interviews: 0,
   });
   const [recentTasks, setRecentTasks] = useState<Task[]>([]);
@@ -46,7 +47,8 @@ export default function DashboardPage() {
         setStats({
           activeTasks: tasks.length,
           members: membersSnap.size,
-          callingsInProgress: callings.length,
+          callingsInProgress: callings.filter((c) => c.stage !== "vacant").length,
+          vacantCallings: callings.filter((c) => c.stage === "vacant").length,
           interviews: tasks.filter((t) => t.type === "interview").length,
         });
         setRecentTasks(tasks.slice(0, 5));
@@ -79,6 +81,7 @@ export default function DashboardPage() {
       icon: Church,
       href: "/callings",
       color: "text-purple-600",
+      badge: stats.vacantCallings > 0 ? `${stats.vacantCallings} vacant` : undefined,
     },
     {
       label: "Pending Interviews",
@@ -101,7 +104,7 @@ export default function DashboardPage() {
       </div>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {statCards.map(({ label, value, icon: Icon, href, color }) => (
+        {statCards.map(({ label, value, icon: Icon, href, color, badge }) => (
           <Link key={label} href={href}>
             <Card className="hover:shadow-md transition-shadow cursor-pointer">
               <CardContent className="p-4">
@@ -111,6 +114,11 @@ export default function DashboardPage() {
                     <p className={`text-2xl font-bold mt-1 ${loading ? "opacity-0" : ""}`}>
                       {loading ? "—" : value}
                     </p>
+                    {"badge" in { badge } && badge && (
+                      <p className="text-xs text-red-600 dark:text-red-400 mt-0.5 font-medium">
+                        {badge}
+                      </p>
+                    )}
                   </div>
                   <Icon className={`h-5 w-5 ${color} shrink-0`} />
                 </div>
@@ -185,10 +193,19 @@ export default function DashboardPage() {
                 {recentCallings.map((calling) => (
                   <li key={calling.id} className="flex items-start gap-3 px-6 py-3">
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{calling.memberName}</p>
+                      <p className="text-sm font-medium truncate">
+                        {calling.memberName || (
+                          <span className="text-muted-foreground italic">Vacant Position</span>
+                        )}
+                      </p>
                       <p className="text-xs text-muted-foreground truncate">{calling.position}</p>
                     </div>
-                    <Badge variant="outline" className="text-xs shrink-0 capitalize">
+                    <Badge
+                      variant="outline"
+                      className={`text-xs shrink-0 capitalize ${
+                        calling.stage === "vacant" ? "border-red-300 text-red-700 dark:text-red-400" : ""
+                      }`}
+                    >
                       {calling.stage.replace("_", " ")}
                     </Badge>
                   </li>
