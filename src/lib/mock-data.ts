@@ -1,0 +1,316 @@
+/**
+ * Static mock data used in place of Firebase while the backend is stripped out.
+ * All IDs are deterministic strings so they survive HMR refreshes.
+ */
+import type { Calling, Task, Member } from "@/types";
+
+// ── Members ───────────────────────────────────────────────────────────────────
+
+export const MOCK_MEMBERS: Member[] = [
+  { id: "m01", firstName: "James",    lastName: "Anderson",  email: "james.anderson@email.com",  phone: "801-555-0101", address: "142 Maple St",   isActive: true, notes: "",                         createdAt: "2025-09-01T00:00:00Z", updatedAt: "2025-09-01T00:00:00Z" },
+  { id: "m02", firstName: "Sarah",    lastName: "Mitchell",  email: "sarah.mitchell@email.com",   phone: "801-555-0102", address: "87 Oak Ave",     isActive: true, notes: "",                         createdAt: "2025-09-01T00:00:00Z", updatedAt: "2025-09-01T00:00:00Z" },
+  { id: "m03", firstName: "Thomas",   lastName: "Hughes",    email: "thomas.hughes@email.com",    phone: "801-555-0103", address: "214 Pine Rd",    isActive: true, notes: "",                         createdAt: "2025-09-01T00:00:00Z", updatedAt: "2025-09-01T00:00:00Z" },
+  { id: "m04", firstName: "Rebecca",  lastName: "Torres",    email: "rebecca.torres@email.com",   phone: "801-555-0104", address: "33 Cedar Ln",    isActive: true, notes: "Recently moved in",        createdAt: "2025-10-15T00:00:00Z", updatedAt: "2025-10-15T00:00:00Z" },
+  { id: "m05", firstName: "David",    lastName: "Park",      email: "david.park@email.com",       phone: "801-555-0105", address: "519 Birch Blvd", isActive: true, notes: "",                         createdAt: "2025-09-01T00:00:00Z", updatedAt: "2025-09-01T00:00:00Z" },
+  { id: "m06", firstName: "Anna",     lastName: "Martinez",  email: "anna.martinez@email.com",    phone: "801-555-0106", address: "8 Elm Court",    isActive: true, notes: "",                         createdAt: "2025-09-01T00:00:00Z", updatedAt: "2025-09-01T00:00:00Z" },
+  { id: "m07", firstName: "Mark",     lastName: "Williams",  email: "mark.williams@email.com",    phone: "801-555-0107", address: "77 Aspen Way",   isActive: true, notes: "",                         createdAt: "2025-09-01T00:00:00Z", updatedAt: "2025-09-01T00:00:00Z" },
+  { id: "m08", firstName: "Jennifer", lastName: "Kim",       email: "jennifer.kim@email.com",     phone: "801-555-0108", address: "302 Willow Dr",  isActive: true, notes: "",                         createdAt: "2025-09-01T00:00:00Z", updatedAt: "2025-09-01T00:00:00Z" },
+  { id: "m09", firstName: "Robert",   lastName: "Johnson",   email: "robert.johnson@email.com",   phone: "801-555-0109", address: "91 Spruce St",   isActive: true, notes: "",                         createdAt: "2025-09-01T00:00:00Z", updatedAt: "2025-09-01T00:00:00Z" },
+  { id: "m10", firstName: "Emily",    lastName: "Chen",      email: "emily.chen@email.com",       phone: "801-555-0110", address: "445 Fir Ave",    isActive: true, notes: "",                         createdAt: "2025-11-01T00:00:00Z", updatedAt: "2025-11-01T00:00:00Z" },
+  { id: "m11", firstName: "Michael",  lastName: "Davis",     email: "michael.davis@email.com",    phone: "801-555-0111", address: "18 Poplar Ct",   isActive: true, notes: "Ward mission leader candidate", createdAt: "2025-09-01T00:00:00Z", updatedAt: "2025-09-01T00:00:00Z" },
+  { id: "m12", firstName: "Linda",    lastName: "Brown",     email: "linda.brown@email.com",      phone: "801-555-0112", address: "629 Sequoia Ln", isActive: true, notes: "",                         createdAt: "2025-09-01T00:00:00Z", updatedAt: "2026-01-10T00:00:00Z" },
+];
+
+// ── Callings ──────────────────────────────────────────────────────────────────
+// Spread across all lifecycle stages so every kanban column has something.
+// Thomas Hughes (c07) is in "sustaining" for sacrament meeting without
+// businessItemAdded — this deliberately triggers the business-items banner.
+
+export const MOCK_CALLINGS: Calling[] = [
+  // ── Vacant positions ──────────────────────────────────────────────────────
+  {
+    id: "c01",
+    position: "Primary President",
+    organization: "Primary",
+    stage: "vacant",
+    notes: "Previous president moved out of ward last month",
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-05-10T00:00:00Z",
+    updatedAt: "2026-05-10T00:00:00Z",
+  },
+  {
+    id: "c02",
+    position: "Young Women President",
+    organization: "Young Women",
+    stage: "vacant",
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-05-20T00:00:00Z",
+    updatedAt: "2026-05-20T00:00:00Z",
+  },
+
+  // ── Discussing ────────────────────────────────────────────────────────────
+  {
+    id: "c03",
+    memberId: "m02",
+    memberName: "Sarah Mitchell",
+    position: "Sunday School Teacher",
+    organization: "Sunday School",
+    stage: "discussing",
+    notes: "Has teaching experience, available Sundays",
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-05-18T00:00:00Z",
+    updatedAt: "2026-05-18T00:00:00Z",
+  },
+
+  // ── Approved ──────────────────────────────────────────────────────────────
+  {
+    id: "c04",
+    memberId: "m10",
+    memberName: "Emily Chen",
+    position: "Elders Quorum Secretary",
+    organization: "Elders Quorum",
+    stage: "approved",
+    approvedBy: "Bishop Anderson",
+    approvedAt: "2026-05-19T10:00:00Z",
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-05-15T00:00:00Z",
+    updatedAt: "2026-05-19T10:00:00Z",
+  },
+
+  // ── Extending ─────────────────────────────────────────────────────────────
+  {
+    id: "c05",
+    memberId: "m04",
+    memberName: "Rebecca Torres",
+    position: "Relief Society Secretary",
+    organization: "Relief Society",
+    stage: "extending",
+    approvedBy: "Bishop Anderson",
+    approvedAt: "2026-05-20T09:00:00Z",
+    extendedBy: "Counselor Hughes",
+    extendedAt: "2026-05-21T14:00:00Z",
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-05-14T00:00:00Z",
+    updatedAt: "2026-05-21T14:00:00Z",
+  },
+
+  // ── Accepted ──────────────────────────────────────────────────────────────
+  {
+    id: "c06",
+    memberId: "m05",
+    memberName: "David Park",
+    position: "Young Men Advisor",
+    organization: "Young Men",
+    stage: "accepted",
+    approvedBy: "Bishop Anderson",
+    approvedAt: "2026-05-12T00:00:00Z",
+    extendedBy: "Bishop Anderson",
+    extendedAt: "2026-05-14T00:00:00Z",
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-05-10T00:00:00Z",
+    updatedAt: "2026-05-14T00:00:00Z",
+  },
+
+  // ── Sustaining (sacrament meeting — NO business item yet → triggers banner)
+  {
+    id: "c07",
+    memberId: "m03",
+    memberName: "Thomas Hughes",
+    position: "Ward Mission Leader",
+    organization: "Ward Mission",
+    stage: "sustaining",
+    approvedBy: "Bishop Anderson",
+    approvedAt: "2026-05-05T00:00:00Z",
+    extendedBy: "Bishop Anderson",
+    extendedAt: "2026-05-08T00:00:00Z",
+    sustainedIn: "sacrament_meeting",
+    sustainedDate: "2026-06-01",
+    businessItemAdded: false,           // ← deliberate: triggers the banner
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-05-01T00:00:00Z",
+    updatedAt: "2026-05-22T00:00:00Z",
+  },
+
+  // ── Sustained ─────────────────────────────────────────────────────────────
+  {
+    id: "c08",
+    memberId: "m06",
+    memberName: "Anna Martinez",
+    position: "Young Women Advisor",
+    organization: "Young Women",
+    stage: "sustained",
+    approvedBy: "Bishop Anderson",
+    approvedAt: "2026-04-20T00:00:00Z",
+    extendedBy: "Counselor Davis",
+    extendedAt: "2026-04-22T00:00:00Z",
+    sustainedIn: "class",
+    sustainedDate: "2026-05-11",
+    businessItemAdded: true,
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-04-18T00:00:00Z",
+    updatedAt: "2026-05-11T00:00:00Z",
+  },
+
+  // ── Set Apart (LCR not updated yet) ───────────────────────────────────────
+  {
+    id: "c09",
+    memberId: "m07",
+    memberName: "Mark Williams",
+    position: "Ward Clerk",
+    organization: "Ward Clerk",
+    stage: "set_apart",
+    approvedBy: "Stake President",
+    approvedAt: "2026-04-10T00:00:00Z",
+    extendedBy: "Bishop Anderson",
+    extendedAt: "2026-04-13T00:00:00Z",
+    sustainedIn: "sacrament_meeting",
+    sustainedDate: "2026-04-20",
+    businessItemAdded: true,
+    setApartBy: "Bishop Anderson",
+    setApartDate: "2026-04-20",
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-04-08T00:00:00Z",
+    updatedAt: "2026-04-20T00:00:00Z",
+  },
+
+  // ── LCR Updated (just needs to be archived) ───────────────────────────────
+  {
+    id: "c10",
+    memberId: "m08",
+    memberName: "Jennifer Kim",
+    position: "Relief Society Teacher",
+    organization: "Relief Society",
+    stage: "lcr_updated",
+    approvedBy: "Bishop Anderson",
+    approvedAt: "2026-03-25T00:00:00Z",
+    extendedBy: "Counselor Hughes",
+    extendedAt: "2026-03-27T00:00:00Z",
+    sustainedIn: "class",
+    sustainedDate: "2026-04-06",
+    businessItemAdded: true,
+    setApartBy: "Counselor Hughes",
+    setApartDate: "2026-04-06",
+    lcrUpdated: true,
+    lcrUpdatedBy: "Ward Clerk",
+    lcrUpdatedAt: "2026-04-07T00:00:00Z",
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-03-20T00:00:00Z",
+    updatedAt: "2026-04-07T00:00:00Z",
+  },
+
+  // ── Complete / Recorded ───────────────────────────────────────────────────
+  {
+    id: "c11",
+    memberId: "m09",
+    memberName: "Robert Johnson",
+    position: "Elders Quorum President",
+    organization: "Elders Quorum",
+    stage: "recorded",
+    approvedBy: "Stake President",
+    approvedAt: "2026-02-10T00:00:00Z",
+    extendedBy: "Bishop Anderson",
+    extendedAt: "2026-02-13T00:00:00Z",
+    sustainedIn: "sacrament_meeting",
+    sustainedDate: "2026-02-23",
+    businessItemAdded: true,
+    setApartBy: "Stake President",
+    setApartDate: "2026-02-23",
+    lcrUpdated: true,
+    lcrUpdatedBy: "Ward Clerk",
+    lcrUpdatedAt: "2026-02-24T00:00:00Z",
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-02-05T00:00:00Z",
+    updatedAt: "2026-02-24T00:00:00Z",
+  },
+];
+
+// ── Tasks ─────────────────────────────────────────────────────────────────────
+
+export const MOCK_TASKS: Task[] = [
+  {
+    id: "t01",
+    title: "Temple recommend interview — David Park",
+    type: "interview",
+    status: "active",
+    memberName: "David Park",
+    dueDate: "2026-06-01",
+    description: "Scheduled after sacrament meeting.",
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-05-22T00:00:00Z",
+    updatedAt: "2026-05-22T00:00:00Z",
+  },
+  {
+    id: "t02",
+    title: "Follow up with Martinez family on welfare visit",
+    type: "follow_up",
+    status: "in_progress",
+    memberName: "Anna Martinez",
+    description: "Check in about employment situation.",
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-05-18T00:00:00Z",
+    updatedAt: "2026-05-20T00:00:00Z",
+  },
+  {
+    id: "t03",
+    title: "Add Thomas Hughes to business items document",
+    type: "agenda_item",
+    status: "active",
+    memberName: "Thomas Hughes",
+    description: "Ward Mission Leader — scheduled for June 1 sacrament meeting.",
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-05-22T00:00:00Z",
+    updatedAt: "2026-05-22T00:00:00Z",
+  },
+  {
+    id: "t04",
+    title: "Update LCR for Mark Williams (Ward Clerk)",
+    type: "calling",
+    status: "active",
+    memberName: "Mark Williams",
+    description: "Set apart April 20 — record in LCR.",
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-04-21T00:00:00Z",
+    updatedAt: "2026-04-21T00:00:00Z",
+  },
+  {
+    id: "t05",
+    title: "Prepare tithing settlement schedule",
+    type: "todo",
+    status: "waiting",
+    dueDate: "2026-06-15",
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-05-15T00:00:00Z",
+    updatedAt: "2026-05-15T00:00:00Z",
+  },
+  {
+    id: "t06",
+    title: "Youth temple recommend — Emma Wilson",
+    type: "interview",
+    status: "active",
+    memberName: "Emma Wilson",
+    dueDate: "2026-06-08",
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-05-24T00:00:00Z",
+    updatedAt: "2026-05-24T00:00:00Z",
+  },
+  {
+    id: "t07",
+    title: "Budget approval — Primary summer activity",
+    type: "agenda_item",
+    status: "active",
+    description: "Needs bishopric sign-off before June 10.",
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-05-20T00:00:00Z",
+    updatedAt: "2026-05-20T00:00:00Z",
+  },
+  {
+    id: "t08",
+    title: "Review ward directory updates",
+    type: "general",
+    status: "completed",
+    description: "Completed after clerk submitted changes.",
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-05-10T00:00:00Z",
+    updatedAt: "2026-05-17T00:00:00Z",
+  },
+];

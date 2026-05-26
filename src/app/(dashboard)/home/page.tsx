@@ -1,95 +1,38 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { collection, query, where, getDocs, orderBy, limit } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { useMemo } from "react";
 import {
-  CheckSquare,
-  Users,
-  Church,
-  Calendar,
-  ArrowRight,
-  MessageSquare,
+  CheckSquare, Users, Church, Calendar, ArrowRight, MessageSquare,
 } from "lucide-react";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
-import type { Task, Calling } from "@/types";
+import { MOCK_CALLINGS, MOCK_TASKS, MOCK_MEMBERS } from "@/lib/mock-data";
 import { TASK_STATUS_COLORS } from "@/types";
 
 export default function DashboardPage() {
   const { appUser } = useAuth();
-  const [stats, setStats] = useState({
-    activeTasks: 0,
-    members: 0,
-    callingsInProgress: 0,
-    vacantCallings: 0,
-    interviews: 0,
-  });
-  const [recentTasks, setRecentTasks] = useState<Task[]>([]);
-  const [recentCallings, setRecentCallings] = useState<Calling[]>([]);
-  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    async function fetchData() {
-      try {
-        const [tasksSnap, membersSnap, callingsSnap] = await Promise.all([
-          getDocs(query(collection(db, "tasks"), where("status", "in", ["active", "in_progress", "waiting"]))),
-          getDocs(collection(db, "members")),
-          getDocs(query(collection(db, "callings"), where("stage", "not-in", ["recorded"]))),
-        ]);
-
-        const tasks = tasksSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Task));
-        const callings = callingsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Calling));
-
-        setStats({
-          activeTasks: tasks.length,
-          members: membersSnap.size,
-          callingsInProgress: callings.filter((c) => c.stage !== "vacant").length,
-          vacantCallings: callings.filter((c) => c.stage === "vacant").length,
-          interviews: tasks.filter((t) => t.type === "interview").length,
-        });
-        setRecentTasks(tasks.slice(0, 5));
-        setRecentCallings(callings.slice(0, 3));
-      } finally {
-        setLoading(false);
-      }
-    }
-    fetchData();
+  // Compute stats from mock data (memo so they don't recalculate on every render)
+  const stats = useMemo(() => {
+    const activeTasks        = MOCK_TASKS.filter((t) => ["active", "in_progress", "waiting"].includes(t.status)).length;
+    const interviews         = MOCK_TASKS.filter((t) => t.type === "interview" && t.status !== "completed").length;
+    const callingsInProgress = MOCK_CALLINGS.filter((c) => c.stage !== "recorded" && c.stage !== "vacant").length;
+    const vacantCallings     = MOCK_CALLINGS.filter((c) => c.stage === "vacant").length;
+    const members            = MOCK_MEMBERS.length;
+    return { activeTasks, interviews, callingsInProgress, vacantCallings, members };
   }, []);
 
+  const recentTasks    = MOCK_TASKS.filter((t) => t.status !== "completed").slice(0, 5);
+  const recentCallings = MOCK_CALLINGS.filter((c) => c.stage !== "recorded").slice(0, 3);
+
   const statCards = [
-    {
-      label: "Active Tasks",
-      value: stats.activeTasks,
-      icon: CheckSquare,
-      href: "/tasks",
-      color: "text-blue-600",
-    },
-    {
-      label: "Members",
-      value: stats.members,
-      icon: Users,
-      href: "/members",
-      color: "text-green-600",
-    },
-    {
-      label: "Callings In Progress",
-      value: stats.callingsInProgress,
-      icon: Church,
-      href: "/callings",
-      color: "text-purple-600",
-      badge: stats.vacantCallings > 0 ? `${stats.vacantCallings} vacant` : undefined,
-    },
-    {
-      label: "Pending Interviews",
-      value: stats.interviews,
-      icon: Calendar,
-      href: "/tasks?type=interview",
-      color: "text-orange-600",
-    },
+    { label: "Active Tasks",        value: stats.activeTasks,        icon: CheckSquare, href: "/tasks",                color: "text-blue-600",   badge: undefined               },
+    { label: "Members",             value: stats.members,            icon: Users,       href: "/members",              color: "text-green-600",  badge: undefined               },
+    { label: "Callings In Progress",value: stats.callingsInProgress, icon: Church,      href: "/callings",             color: "text-purple-600", badge: stats.vacantCallings > 0 ? `${stats.vacantCallings} vacant` : undefined },
+    { label: "Pending Interviews",  value: stats.interviews,         icon: Calendar,    href: "/tasks?type=interview", color: "text-orange-600", badge: undefined               },
   ];
 
   return (
@@ -111,13 +54,9 @@ export default function DashboardPage() {
                 <div className="flex items-start justify-between">
                   <div>
                     <p className="text-xs text-muted-foreground">{label}</p>
-                    <p className={`text-2xl font-bold mt-1 ${loading ? "opacity-0" : ""}`}>
-                      {loading ? "—" : value}
-                    </p>
-                    {"badge" in { badge } && badge && (
-                      <p className="text-xs text-red-600 dark:text-red-400 mt-0.5 font-medium">
-                        {badge}
-                      </p>
+                    <p className="text-2xl font-bold mt-1">{value}</p>
+                    {badge && (
+                      <p className="text-xs text-red-600 dark:text-red-400 mt-0.5 font-medium">{badge}</p>
                     )}
                   </div>
                   <Icon className={`h-5 w-5 ${color} shrink-0`} />
@@ -152,9 +91,7 @@ export default function DashboardPage() {
             </Link>
           </CardHeader>
           <CardContent className="p-0">
-            {loading ? (
-              <div className="px-6 py-8 text-center text-muted-foreground text-sm">Loading…</div>
-            ) : recentTasks.length === 0 ? (
+            {recentTasks.length === 0 ? (
               <div className="px-6 py-8 text-center text-muted-foreground text-sm">No active tasks</div>
             ) : (
               <ul className="divide-y divide-border">
@@ -162,9 +99,7 @@ export default function DashboardPage() {
                   <li key={task.id} className="flex items-start gap-3 px-6 py-3">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{task.title}</p>
-                      {task.memberName && (
-                        <p className="text-xs text-muted-foreground truncate">{task.memberName}</p>
-                      )}
+                      {task.memberName && <p className="text-xs text-muted-foreground truncate">{task.memberName}</p>}
                     </div>
                     <span className={`text-xs px-2 py-0.5 rounded-full shrink-0 ${TASK_STATUS_COLORS[task.status]}`}>
                       {task.status.replace("_", " ")}
@@ -184,9 +119,7 @@ export default function DashboardPage() {
             </Link>
           </CardHeader>
           <CardContent className="p-0">
-            {loading ? (
-              <div className="px-6 py-8 text-center text-muted-foreground text-sm">Loading…</div>
-            ) : recentCallings.length === 0 ? (
+            {recentCallings.length === 0 ? (
               <div className="px-6 py-8 text-center text-muted-foreground text-sm">No callings in progress</div>
             ) : (
               <ul className="divide-y divide-border">
@@ -194,17 +127,13 @@ export default function DashboardPage() {
                   <li key={calling.id} className="flex items-start gap-3 px-6 py-3">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">
-                        {calling.memberName || (
-                          <span className="text-muted-foreground italic">Vacant Position</span>
-                        )}
+                        {calling.memberName || <span className="text-muted-foreground italic">Vacant Position</span>}
                       </p>
                       <p className="text-xs text-muted-foreground truncate">{calling.position}</p>
                     </div>
                     <Badge
                       variant="outline"
-                      className={`text-xs shrink-0 capitalize ${
-                        calling.stage === "vacant" ? "border-red-300 text-red-700 dark:text-red-400" : ""
-                      }`}
+                      className={`text-xs shrink-0 capitalize ${calling.stage === "vacant" ? "border-red-300 text-red-700 dark:text-red-400" : ""}`}
                     >
                       {calling.stage.replace("_", " ")}
                     </Badge>

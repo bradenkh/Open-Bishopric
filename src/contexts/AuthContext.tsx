@@ -1,18 +1,27 @@
 "use client";
 
+/**
+ * Mock AuthContext — no Firebase, no network calls.
+ * Auth state is persisted in localStorage so the login page still works
+ * as a gate (any email + password is accepted).
+ */
+
 import React, { createContext, useContext, useEffect, useState } from "react";
-import {
-  User,
-  signInWithEmailAndPassword,
-  signOut as firebaseSignOut,
-  onAuthStateChanged,
-} from "firebase/auth";
-import { doc, getDoc, setDoc } from "firebase/firestore";
-import { auth, db } from "@/lib/firebase";
+import { useRouter } from "next/navigation";
 import type { AppUser } from "@/types";
 
+const MOCK_BISHOP: AppUser = {
+  uid: "mock-bishop-001",
+  email: "bishop@ward.demo",
+  displayName: "Bishop Anderson",
+  role: "bishop",
+};
+
+const STORAGE_KEY = "demo-auth";
+
 interface AuthContextValue {
-  user: User | null;
+  /** Lightweight user object (just uid) — mirrors Firebase User shape used by pages. */
+  user: { uid: string } | null;
   appUser: AppUser | null;
   loading: boolean;
   authError: string | null;
@@ -23,69 +32,39 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [appUser, setAppUser] = useState<AppUser | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  const [authError, setAuthError] = useState<string | null>(null);
+  const [loggedIn, setLoggedIn] = useState(false);
+  const [loading, setLoading]   = useState(true);
+  const [authError]              = useState<string | null>(null);
+  const router = useRouter();
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      setUser(firebaseUser);
-      setAuthError(null);
-
-      try {
-        if (firebaseUser) {
-          const token = await firebaseUser.getIdToken();
-          const sessionRes = await fetch("/api/auth/session", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ token }),
-          });
-
-          if (!sessionRes.ok) {
-            const body = await sessionRes.json().catch(() => ({}));
-            console.error("[Auth] Session cookie creation failed:", sessionRes.status, body);
-          }
-
-          const profileDoc = await getDoc(doc(db, "users", firebaseUser.uid));
-          if (profileDoc.exists()) {
-            setAppUser(profileDoc.data() as AppUser);
-          } else {
-            const newUser: AppUser = {
-              uid: firebaseUser.uid,
-              email: firebaseUser.email!,
-              displayName: firebaseUser.displayName ?? firebaseUser.email!,
-              role: "clerk",
-            };
-            await setDoc(doc(db, "users", firebaseUser.uid), newUser);
-            setAppUser(newUser);
-          }
-        } else {
-          setAppUser(null);
-          await fetch("/api/auth/session", { method: "DELETE" });
-        }
-      } catch (err) {
-        console.error("[Auth] onAuthStateChanged error:", err);
-        setAuthError(err instanceof Error ? err.message : "Authentication error");
-      } finally {
-        setLoading(false);
-      }
-    });
-
-    return unsubscribe;
+    // localStorage is only available on the client
+    setLoggedIn(localStorage.getItem(STORAGE_KEY) === "1");
+    setLoading(false);
   }, []);
 
-  const signIn = async (email: string, password: string) => {
-    await signInWithEmailAndPassword(auth, email, password);
+  const signIn = async (_email: string, _password: string) => {
+    localStorage.setItem(STORAGE_KEY, "1");
+    setLoggedIn(true);
   };
 
   const signOut = async () => {
-    await firebaseSignOut(auth);
+    localStorage.removeItem(STORAGE_KEY);
+    setLoggedIn(false);
+    router.replace("/login");
   };
 
   return (
-    <AuthContext.Provider value={{ user, appUser, loading, authError, signIn, signOut }}>
+    <AuthContext.Provider
+      value={{
+        user:    loggedIn ? { uid: MOCK_BISHOP.uid } : null,
+        appUser: loggedIn ? MOCK_BISHOP : null,
+        loading,
+        authError,
+        signIn,
+        signOut,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );
