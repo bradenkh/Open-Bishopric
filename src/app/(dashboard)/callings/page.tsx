@@ -10,13 +10,29 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { useAuth } from "@/contexts/AuthContext";
-import type { Calling, CallingStage, SustainedVenue } from "@/types";
+import { useTasks } from "@/contexts/TasksContext";
+import type { Calling, CallingStage, SustainedVenue, Task } from "@/types";
 import { CALLING_STAGES, CALLING_PIPELINE } from "@/types";
-import { MOCK_CALLINGS } from "@/lib/mock-data";
+import { MOCK_CALLINGS, MOCK_BISHOPRIC_MEMBERS } from "@/lib/mock-data";
 import { cn } from "@/lib/utils";
+
+// ── Bishopric helpers ─────────────────────────────────────────────────────────
+
+/** Members who can extend callings or set apart (bishop + counselors) */
+const EXTENDING_MEMBERS = MOCK_BISHOPRIC_MEMBERS.filter(
+  (m) => m.role === "bishop" || m.role === "counselor"
+);
+
+/** All bishopric members (for set-apart — could include stake members in real use) */
+const SET_APART_MEMBERS = MOCK_BISHOPRIC_MEMBERS.filter(
+  (m) => m.role === "bishop" || m.role === "counselor"
+);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -95,7 +111,7 @@ function attentionMessage(c: Calling): string | null {
   return null;
 }
 
-// ── Stage Advance Panel (unchanged logic) ─────────────────────────────────────
+// ── Stage Advance Panel ───────────────────────────────────────────────────────
 
 interface AdvancePanelProps {
   calling: Calling;
@@ -107,19 +123,46 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
   const stage = calling.stage;
   const name  = calling.memberName || "this person";
 
-  const [candidateName,  setCandidateName]  = useState("");
-  const [approvedBy,     setApprovedBy]     = useState(calling.approvedBy ?? "");
-  const [extendedBy,     setExtendedBy]     = useState(calling.extendedBy ?? "");
-  const [sustainedIn,    setSustainedIn]    = useState<SustainedVenue>("sacrament_meeting");
-  const [sustainedDate,  setSustainedDate]  = useState(calling.sustainedDate ?? "");
-  const [bizAdded,       setBizAdded]       = useState(calling.businessItemAdded ?? false);
-  const [setApartBy,     setSetApartBy]     = useState(calling.setApartBy ?? "");
-  const [setApartDate,   setSetApartDate]   = useState(calling.setApartDate ?? "");
-  const [lcrUpdatedBy,   setLcrUpdatedBy]   = useState(calling.lcrUpdatedBy ?? "");
-  const [lcrConfirmed,   setLcrConfirmed]   = useState(false);
-  const [declineReason,  setDeclineReason]  = useState("");
-  const [declineRestart, setDeclineRestart] = useState<"vacant" | "discussing">("vacant");
-  const [showDeclineForm,setShowDeclineForm]= useState(false);
+  const { addTask, completeCallingTasks } = useTasks();
+
+  // ── Form state ────────────────────────────────────────────────────────────
+  const [candidateName,   setCandidateName]   = useState("");
+  const [approvedBy,      setApprovedBy]      = useState(calling.approvedBy ?? "");
+  // Extending — bishopric member dropdown
+  const [extendingMember, setExtendingMember] = useState(
+    EXTENDING_MEMBERS.find((m) => m.name === calling.extendedBy)?.id ?? ""
+  );
+  const [sustainedIn,     setSustainedIn]     = useState<SustainedVenue>("sacrament_meeting");
+  const [sustainedDate,   setSustainedDate]   = useState(calling.sustainedDate ?? "");
+  const [bizAdded,        setBizAdded]        = useState(calling.businessItemAdded ?? false);
+  // Set apart — bishopric member dropdown
+  const [setApartMember,  setSetApartMember]  = useState(
+    SET_APART_MEMBERS.find((m) => m.name === calling.setApartBy)?.id ?? ""
+  );
+  const [setApartDate,    setSetApartDate]    = useState(calling.setApartDate ?? "");
+  const [lcrConfirmed,    setLcrConfirmed]    = useState(false);
+  const [declineReason,   setDeclineReason]   = useState("");
+  const [declineRestart,  setDeclineRestart]  = useState<"vacant" | "discussing">("vacant");
+  const [showDeclineForm, setShowDeclineForm] = useState(false);
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+
+  function makeCallingTask(overrides: Partial<Task>): Task {
+    const now = new Date().toISOString();
+    return {
+      id:        `t-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      type:      "calling",
+      status:    "active",
+      memberName: calling.memberName ?? undefined,
+      createdBy: "system",
+      createdAt: now,
+      updatedAt: now,
+      title:     "",
+      ...overrides,
+    };
+  }
+
+  // ── Stages ────────────────────────────────────────────────────────────────
 
   if (stage === "vacant") {
     return (
@@ -127,11 +170,19 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
         <p className="text-sm font-semibold">Identify a Candidate</p>
         <div className="space-y-1.5">
           <Label htmlFor="candidateName">Who is being discussed for this position?</Label>
-          <Input id="candidateName" value={candidateName} onChange={(e) => setCandidateName(e.target.value)} placeholder="Full name" />
+          <Input
+            id="candidateName"
+            value={candidateName}
+            onChange={(e) => setCandidateName(e.target.value)}
+            placeholder="Full name"
+          />
         </div>
         <div className="flex justify-end gap-2">
           <Button variant="outline" onClick={onClose}>Not Yet</Button>
-          <Button disabled={!candidateName.trim()} onClick={() => onSave({ stage: "discussing", memberName: candidateName.trim() })}>
+          <Button
+            disabled={!candidateName.trim()}
+            onClick={() => onSave({ stage: "discussing", memberName: candidateName.trim() })}
+          >
             Start Discussion
           </Button>
         </div>
@@ -143,14 +194,24 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
     return (
       <div className="border-t pt-4 space-y-3">
         <p className="text-sm font-semibold">Bishopric Approval</p>
-        <p className="text-sm text-muted-foreground">Has the bishopric approved calling <strong>{name}</strong>?</p>
+        <p className="text-sm text-muted-foreground">
+          Has the bishopric approved calling <strong>{name}</strong>?
+        </p>
         <div className="space-y-1.5">
           <Label htmlFor="approvedBy">Approved by</Label>
-          <Input id="approvedBy" value={approvedBy} onChange={(e) => setApprovedBy(e.target.value)} placeholder="e.g. Bishop Anderson" />
+          <Input
+            id="approvedBy"
+            value={approvedBy}
+            onChange={(e) => setApprovedBy(e.target.value)}
+            placeholder="e.g. Bishop Anderson"
+          />
         </div>
         <div className="flex justify-end gap-2">
           <Button variant="outline" onClick={onClose}>Not Yet</Button>
-          <Button disabled={!approvedBy.trim()} onClick={() => onSave({ stage: "approved", approvedBy: approvedBy.trim(), approvedAt: new Date().toISOString() })}>
+          <Button
+            disabled={!approvedBy.trim()}
+            onClick={() => onSave({ stage: "approved", approvedBy: approvedBy.trim(), approvedAt: new Date().toISOString() })}
+          >
             Mark Approved
           </Button>
         </div>
@@ -159,18 +220,55 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
   }
 
   if (stage === "approved") {
+    const selectedMember = EXTENDING_MEMBERS.find((m) => m.id === extendingMember);
     return (
       <div className="border-t pt-4 space-y-3">
-        <p className="text-sm font-semibold">Extend the Calling</p>
-        <p className="text-sm text-muted-foreground">Which bishopric member is reaching out to <strong>{name}</strong>?</p>
+        <p className="text-sm font-semibold">Assign: Extend the Calling</p>
+        <p className="text-sm text-muted-foreground">
+          Which bishopric member will reach out to <strong>{name}</strong> to extend this calling?
+        </p>
         <div className="space-y-1.5">
-          <Label htmlFor="extendedBy">Extended by</Label>
-          <Input id="extendedBy" value={extendedBy} onChange={(e) => setExtendedBy(e.target.value)} placeholder="e.g. Counselor Hughes" />
+          <Label>Assigned to</Label>
+          <Select value={extendingMember} onValueChange={setExtendingMember}>
+            <SelectTrigger>
+              <SelectValue placeholder="Select a bishopric member…" />
+            </SelectTrigger>
+            <SelectContent>
+              {EXTENDING_MEMBERS.map((m) => (
+                <SelectItem key={m.id} value={m.id}>
+                  {m.name} <span className="text-muted-foreground capitalize">({m.role})</span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
+        {selectedMember && (
+          <div className="rounded-lg border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/60 p-3 text-xs text-blue-800 dark:text-blue-200">
+            A task will be added to <strong>{selectedMember.name}&apos;s</strong> todos to call {name} and extend the calling.
+          </div>
+        )}
         <div className="flex justify-end gap-2">
           <Button variant="outline" onClick={onClose}>Not Yet</Button>
-          <Button disabled={!extendedBy.trim()} onClick={() => onSave({ stage: "extending", extendedBy: extendedBy.trim(), extendedAt: new Date().toISOString() })}>
-            Mark Extended
+          <Button
+            disabled={!extendingMember}
+            onClick={() => {
+              const member = EXTENDING_MEMBERS.find((m) => m.id === extendingMember)!;
+              // Create extend task for assigned bishopric member
+              addTask(makeCallingTask({
+                title:        `Extend calling — ${calling.position}${calling.memberName ? ` → ${calling.memberName}` : ""}`,
+                description:  `Contact ${name} to extend the calling of ${calling.position}${calling.organization ? ` (${calling.organization})` : ""}. Once they respond, record the outcome in the callings pipeline.`,
+                assigneeId:   member.id,
+                assigneeName: member.name,
+                context: {
+                  callingId: calling.id,
+                  taskType:  "extend",
+                  position:  calling.position,
+                },
+              }));
+              onSave({ stage: "extending", extendedBy: member.name, extendedAt: new Date().toISOString() });
+            }}
+          >
+            Assign &amp; Mark Extended
           </Button>
         </div>
       </div>
@@ -182,6 +280,11 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
       <div className="border-t pt-4 space-y-3">
         <p className="text-sm font-semibold">Record Response</p>
         <p className="text-sm text-muted-foreground">Did <strong>{name}</strong> accept the calling?</p>
+        {calling.extendedBy && (
+          <p className="text-xs text-muted-foreground">
+            Extended by: <span className="font-medium text-foreground">{calling.extendedBy}</span>
+          </p>
+        )}
         {!showDeclineForm ? (
           <div className="flex gap-2">
             <Button
@@ -191,7 +294,14 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
             >
               Declined
             </Button>
-            <Button className="flex-1" onClick={() => onSave({ stage: "accepted" })}>
+            <Button
+              className="flex-1"
+              onClick={() => {
+                // Auto-complete the open extend task for this calling
+                completeCallingTasks(calling.id);
+                onSave({ stage: "accepted" });
+              }}
+            >
               Accepted ✓
             </Button>
           </div>
@@ -200,14 +310,25 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
             <p className="text-sm font-medium">Record Decline</p>
             <div className="space-y-1.5">
               <Label htmlFor="declineReason">Reason (optional)</Label>
-              <Input id="declineReason" value={declineReason} onChange={(e) => setDeclineReason(e.target.value)} placeholder="Optional reason" />
+              <Input
+                id="declineReason"
+                value={declineReason}
+                onChange={(e) => setDeclineReason(e.target.value)}
+                placeholder="Optional reason"
+              />
             </div>
             <div className="space-y-1.5">
               <Label>Next step</Label>
               <div className="flex gap-4">
                 {(["vacant", "discussing"] as const).map((opt) => (
                   <label key={opt} className="flex items-center gap-2 text-sm cursor-pointer">
-                    <input type="radio" name="restart" value={opt} checked={declineRestart === opt} onChange={() => setDeclineRestart(opt)} />
+                    <input
+                      type="radio"
+                      name="restart"
+                      value={opt}
+                      checked={declineRestart === opt}
+                      onChange={() => setDeclineRestart(opt)}
+                    />
                     {opt === "vacant" ? "Leave as vacant" : "Discuss new candidate"}
                   </label>
                 ))}
@@ -218,12 +339,16 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
               <Button
                 variant="destructive"
                 size="sm"
-                onClick={() => onSave({
-                  stage: declineRestart,
-                  declineReason: declineReason.trim() || undefined,
-                  declinedAt: new Date().toISOString(),
-                  memberName: declineRestart === "vacant" ? "" : calling.memberName,
-                })}
+                onClick={() => {
+                  // Auto-complete the open extend task
+                  completeCallingTasks(calling.id);
+                  onSave({
+                    stage:         declineRestart,
+                    declineReason: declineReason.trim() || undefined,
+                    declinedAt:    new Date().toISOString(),
+                    memberName:    declineRestart === "vacant" ? "" : calling.memberName,
+                  });
+                }}
               >
                 Record Decline
               </Button>
@@ -238,13 +363,21 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
     return (
       <div className="border-t pt-4 space-y-3">
         <p className="text-sm font-semibold">Schedule Sustaining</p>
-        <p className="text-sm text-muted-foreground">Where and when will <strong>{name}</strong> be sustained?</p>
+        <p className="text-sm text-muted-foreground">
+          Where and when will <strong>{name}</strong> be sustained?
+        </p>
         <div className="space-y-1.5">
           <Label>Where</Label>
           <div className="flex gap-4">
             {([["sacrament_meeting", "Sacrament Meeting"], ["class", "Class / Quorum"]] as [SustainedVenue, string][]).map(([val, label]) => (
               <label key={val} className="flex items-center gap-2 text-sm cursor-pointer">
-                <input type="radio" name="sustainedIn" value={val} checked={sustainedIn === val} onChange={() => setSustainedIn(val)} />
+                <input
+                  type="radio"
+                  name="sustainedIn"
+                  value={val}
+                  checked={sustainedIn === val}
+                  onChange={() => setSustainedIn(val)}
+                />
                 {label}
               </label>
             ))}
@@ -252,17 +385,31 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="sustainedDate">Date</Label>
-          <Input id="sustainedDate" type="date" value={sustainedDate} onChange={(e) => setSustainedDate(e.target.value)} />
+          <Input
+            id="sustainedDate"
+            type="date"
+            value={sustainedDate}
+            onChange={(e) => setSustainedDate(e.target.value)}
+          />
         </div>
         {sustainedIn === "sacrament_meeting" && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/60 p-3 flex gap-2 text-sm text-amber-800 dark:text-amber-200">
             <ClipboardList className="h-4 w-4 shrink-0 mt-0.5" />
-            <span><strong>Reminder:</strong> Add this to the business items document so counselors know to announce it.</span>
+            <span>
+              <strong>Reminder:</strong> Add this to the business items document so counselors know to announce it.
+            </span>
           </div>
         )}
         <div className="flex justify-end gap-2">
           <Button variant="outline" onClick={onClose}>Not Yet</Button>
-          <Button onClick={() => onSave({ stage: "sustaining", sustainedIn, sustainedDate: sustainedDate || undefined, businessItemAdded: sustainedIn === "class" })}>
+          <Button
+            onClick={() => onSave({
+              stage:             "sustaining",
+              sustainedIn,
+              sustainedDate:     sustainedDate || undefined,
+              businessItemAdded: sustainedIn === "class",
+            })}
+          >
             Schedule
           </Button>
         </div>
@@ -284,17 +431,26 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
           <div className="rounded-lg border border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/60 p-3 space-y-2">
             <div className="flex gap-2 text-sm text-red-800 dark:text-red-200">
               <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
-              <span><strong>Action required:</strong> This calling has not been added to the business items document yet.</span>
+              <span>
+                <strong>Action required:</strong> This calling has not been added to the business items document yet.
+              </span>
             </div>
             <label className="flex items-center gap-2 text-sm cursor-pointer">
-              <input type="checkbox" checked={bizAdded} onChange={(e) => setBizAdded(e.target.checked)} />
+              <input
+                type="checkbox"
+                checked={bizAdded}
+                onChange={(e) => setBizAdded(e.target.checked)}
+              />
               I have added this to the business items document
             </label>
           </div>
         )}
         <div className="flex justify-end gap-2">
           <Button variant="outline" onClick={onClose}>Not Yet</Button>
-          <Button disabled={needsBizItem && !bizAdded} onClick={() => onSave({ stage: "sustained", businessItemAdded: true })}>
+          <Button
+            disabled={needsBizItem && !bizAdded}
+            onClick={() => onSave({ stage: "sustained", businessItemAdded: true })}
+          >
             Confirm Sustained
           </Button>
         </div>
@@ -303,22 +459,69 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
   }
 
   if (stage === "sustained") {
+    const selectedMember = SET_APART_MEMBERS.find((m) => m.id === setApartMember);
     return (
       <div className="border-t pt-4 space-y-3">
-        <p className="text-sm font-semibold">Record Setting Apart</p>
-        <p className="text-sm text-muted-foreground">Who will set <strong>{name}</strong> apart, and when?</p>
+        <p className="text-sm font-semibold">Assign: Setting Apart</p>
+        <p className="text-sm text-muted-foreground">
+          Who will set <strong>{name}</strong> apart, and when?
+        </p>
         <div className="space-y-1.5">
-          <Label htmlFor="setApartBy">Set apart by</Label>
-          <Input id="setApartBy" value={setApartBy} onChange={(e) => setSetApartBy(e.target.value)} placeholder="e.g. Bishop Anderson" />
+          <Label>Assigned to</Label>
+          <Select value={setApartMember} onValueChange={setSetApartMember}>
+            <SelectTrigger>
+              <SelectValue placeholder="Select a bishopric member…" />
+            </SelectTrigger>
+            <SelectContent>
+              {SET_APART_MEMBERS.map((m) => (
+                <SelectItem key={m.id} value={m.id}>
+                  {m.name} <span className="text-muted-foreground capitalize">({m.role})</span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="setApartDate">Date</Label>
-          <Input id="setApartDate" type="date" value={setApartDate} onChange={(e) => setSetApartDate(e.target.value)} />
+          <Input
+            id="setApartDate"
+            type="date"
+            value={setApartDate}
+            onChange={(e) => setSetApartDate(e.target.value)}
+          />
         </div>
+        {selectedMember && (
+          <div className="rounded-lg border border-violet-200 bg-violet-50 dark:border-violet-800 dark:bg-violet-950/60 p-3 space-y-1 text-xs text-violet-800 dark:text-violet-200">
+            <p>A task will be added to <strong>{selectedMember.name}&apos;s</strong> todos to set {name} apart.</p>
+            <p className="text-violet-600 dark:text-violet-300">
+              ✓ After they check it off, the ward clerk will be automatically notified to update LCR.
+            </p>
+          </div>
+        )}
         <div className="flex justify-end gap-2">
           <Button variant="outline" onClick={onClose}>Not Yet</Button>
-          <Button disabled={!setApartBy.trim()} onClick={() => onSave({ stage: "set_apart", setApartBy: setApartBy.trim(), setApartDate: setApartDate || undefined })}>
-            Mark Set Apart
+          <Button
+            disabled={!setApartMember}
+            onClick={() => {
+              const member = SET_APART_MEMBERS.find((m) => m.id === setApartMember)!;
+              // Create set-apart task — when checked off, clerk LCR task is auto-created
+              addTask(makeCallingTask({
+                title:        `Set apart — ${name} as ${calling.position}`,
+                description:  `Set ${name} apart as ${calling.position}${calling.organization ? ` (${calling.organization})` : ""}${setApartDate ? ` on ${setApartDate}` : ""}.`,
+                assigneeId:   member.id,
+                assigneeName: member.name,
+                context: {
+                  callingId:    calling.id,
+                  taskType:     "set_apart",
+                  position:     calling.position,
+                  setApartDate: setApartDate || undefined,
+                  setApartBy:   member.name,
+                },
+              }));
+              onSave({ stage: "set_apart", setApartBy: member.name, setApartDate: setApartDate || undefined });
+            }}
+          >
+            Assign &amp; Schedule
           </Button>
         </div>
       </div>
@@ -326,27 +529,47 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
   }
 
   if (stage === "set_apart") {
+    // LCR update is handled by the clerk via the auto-created task.
+    // The bishop can also manually confirm here.
+    const clerk = MOCK_BISHOPRIC_MEMBERS.find((m) => m.role === "clerk");
     return (
       <div className="border-t pt-4 space-y-3">
-        <p className="text-sm font-semibold">Update LCR</p>
+        <p className="text-sm font-semibold">Awaiting LCR Update</p>
         <p className="text-sm text-muted-foreground">
-          Has <strong>{name}&apos;s</strong> calling been recorded in LCR (Leader &amp; Clerk Resources)?
+          <strong>{name}</strong> was set apart by{" "}
+          <strong>{calling.setApartBy ?? "bishopric member"}</strong>
+          {calling.setApartDate ? ` on ${calling.setApartDate}` : ""}.
         </p>
-        <div className="space-y-1.5">
-          <Label htmlFor="lcrUpdatedBy">Updated by</Label>
-          <Input id="lcrUpdatedBy" value={lcrUpdatedBy} onChange={(e) => setLcrUpdatedBy(e.target.value)} placeholder="e.g. Ward Clerk" />
+        <div className="rounded-lg border border-teal-200 bg-teal-50 dark:border-teal-800 dark:bg-teal-950/60 p-3 text-xs text-teal-800 dark:text-teal-200 space-y-1">
+          <p className="font-medium">Clerk notification</p>
+          <p>
+            {clerk
+              ? <><strong>{clerk.name}</strong> has a task to update LCR for this calling.</>
+              : "A task was created for the ward clerk to update LCR."
+            }{" "}
+            Once they check it off, you can mark this calling complete.
+          </p>
         </div>
         <label className="flex items-center gap-2 text-sm cursor-pointer">
-          <input type="checkbox" checked={lcrConfirmed} onChange={(e) => setLcrConfirmed(e.target.checked)} />
-          I confirm LCR has been updated and {name} is marked as set apart
+          <input
+            type="checkbox"
+            checked={lcrConfirmed}
+            onChange={(e) => setLcrConfirmed(e.target.checked)}
+          />
+          I confirm LCR has been updated and {name} is recorded as set apart
         </label>
         <div className="flex justify-end gap-2">
-          <Button variant="outline" onClick={onClose}>Not Yet</Button>
+          <Button variant="outline" onClick={onClose}>Close</Button>
           <Button
-            disabled={!lcrConfirmed || !lcrUpdatedBy.trim()}
-            onClick={() => onSave({ stage: "lcr_updated", lcrUpdated: true, lcrUpdatedBy: lcrUpdatedBy.trim(), lcrUpdatedAt: new Date().toISOString() })}
+            disabled={!lcrConfirmed}
+            onClick={() => onSave({
+              stage:        "lcr_updated",
+              lcrUpdated:   true,
+              lcrUpdatedBy: clerk?.name ?? "Ward Clerk",
+              lcrUpdatedAt: new Date().toISOString(),
+            })}
           >
-            Mark LCR Updated
+            Confirm LCR Updated
           </Button>
         </div>
       </div>
@@ -359,7 +582,8 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
         <div className="rounded-lg border border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950/60 p-3 flex gap-2 text-sm text-green-800 dark:text-green-200">
           <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
           <span>
-            All steps complete for <strong>{name}&apos;s</strong> calling as <strong>{calling.position}</strong>. Archive it to keep your pipeline clean.
+            All steps complete for <strong>{name}&apos;s</strong> calling as{" "}
+            <strong>{calling.position}</strong>. Archive it to keep your pipeline clean.
           </span>
         </div>
         <div className="flex justify-end gap-2">

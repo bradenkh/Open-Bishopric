@@ -2,7 +2,17 @@
  * Static mock data used in place of Firebase while the backend is stripped out.
  * All IDs are deterministic strings so they survive HMR refreshes.
  */
-import type { Calling, Task, Member } from "@/types";
+import type { BishopricMember, Calling, Task, Member } from "@/types";
+
+// ── Bishopric roster ──────────────────────────────────────────────────────────
+
+export const MOCK_BISHOPRIC_MEMBERS: BishopricMember[] = [
+  { id: "bm1", name: "Bishop Anderson",     role: "bishop" },
+  { id: "bm2", name: "Counselor Hughes",    role: "counselor" },
+  { id: "bm3", name: "Counselor Davis",     role: "counselor" },
+  { id: "bm4", name: "Mark Williams",       role: "clerk" },       // ward clerk
+  { id: "bm5", name: "Bro. Peterson",       role: "exec_secretary" },
+];
 
 // ── Members ───────────────────────────────────────────────────────────────────
 
