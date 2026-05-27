@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   Plus, Church, AlertTriangle, CheckCircle2, ClipboardList,
   GripVertical, User, ArrowRight, Users, UserMinus, ArrowRightLeft,
+  UserCheck, X, Search,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,7 +18,7 @@ import {
 } from "@/components/ui/dialog";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTasks } from "@/contexts/TasksContext";
-import type { Calling, CallingStage, SustainedVenue, Task } from "@/types";
+import type { Calling, CallingStage, CallingProposal, SustainedVenue, Task } from "@/types";
 import { CALLING_STAGES, CALLING_PIPELINE } from "@/types";
 import { MOCK_CALLINGS, MOCK_BISHOPRIC_MEMBERS, MOCK_MEMBERS } from "@/lib/mock-data";
 import { cn } from "@/lib/utils";
@@ -844,11 +845,24 @@ function memberFullName(m: { firstName: string; lastName: string }): string {
 interface OrgChartViewProps {
   /** ALL callings (including recorded) — the org chart is the current state of the ward. */
   callings: Calling[];
+  proposals: CallingProposal[];
   onSelect: (c: Calling) => void;
   onDropMember: (calling: Calling, memberName: string) => void;
+  onCommitProposal: (proposalId: string) => void;
+  onRemoveProposal: (proposalId: string) => void;
+  /** Mobile: tap "+ Add candidate" to open member picker */
+  onTapAssign: (calling: Calling) => void;
 }
 
-function OrgChartView({ callings, onSelect, onDropMember }: OrgChartViewProps) {
+function OrgChartView({
+  callings,
+  proposals,
+  onSelect,
+  onDropMember,
+  onCommitProposal,
+  onRemoveProposal,
+  onTapAssign,
+}: OrgChartViewProps) {
   const [draggingMember, setDraggingMember] = useState<string | null>(null);
   const [overCallingId,  setOverCallingId]  = useState<string | null>(null);
 
@@ -866,6 +880,8 @@ function OrgChartView({ callings, onSelect, onDropMember }: OrgChartViewProps) {
   const calledNames = new Set(
     callings.filter((c) => c.memberName && c.stage !== "vacant").map((c) => c.memberName)
   );
+  // Names with pending (uncommitted) proposals — shown with a blue indicator
+  const proposedNames = new Set(proposals.map((p) => p.memberName));
 
   function handleMemberDragStart(e: React.DragEvent, name: string) {
     setDraggingMember(name);
@@ -879,7 +895,7 @@ function OrgChartView({ callings, onSelect, onDropMember }: OrgChartViewProps) {
   }
 
   function handleCardDragOver(e: React.DragEvent, calling: Calling) {
-    if (!draggingMember) return;            // only react to member drags
+    if (!draggingMember) return;
     if (draggingMember === calling.memberName) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "copy";
@@ -905,20 +921,34 @@ function OrgChartView({ callings, onSelect, onDropMember }: OrgChartViewProps) {
             Ward Members
           </p>
           <span className="text-[11px] text-muted-foreground hidden sm:inline">
-            — drag a member onto a calling to propose them
+            — drag onto a calling to propose, or use the <strong>+</strong> button on mobile
+          </span>
+        </div>
+        {/* Legend */}
+        <div className="flex flex-wrap gap-3 mb-2 text-[10px] text-muted-foreground">
+          <span className="flex items-center gap-1">
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-400 inline-block" /> Currently serving
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="h-1.5 w-1.5 rounded-full bg-blue-400 inline-block" /> Pending proposal
           </span>
         </div>
         <div className="flex flex-wrap gap-1.5">
           {MOCK_MEMBERS.map((m) => {
-            const full     = memberFullName(m);
-            const isCalled = calledNames.has(full);
+            const full        = memberFullName(m);
+            const isCalled    = calledNames.has(full);
+            const isProposed  = proposedNames.has(full);
             return (
               <div
                 key={m.id}
                 draggable
                 onDragStart={(e) => handleMemberDragStart(e, full)}
                 onDragEnd={handleMemberDragEnd}
-                title={isCalled ? `${full} (currently has a calling)` : full}
+                title={
+                  isCalled   ? `${full} (currently serving)`
+                  : isProposed ? `${full} (has a pending proposal)`
+                  : full
+                }
                 className={cn(
                   "flex items-center gap-1.5 rounded-full border pl-1.5 pr-3 py-1 text-xs font-medium",
                   "cursor-grab active:cursor-grabbing select-none transition-all",
@@ -936,7 +966,8 @@ function OrgChartView({ callings, onSelect, onDropMember }: OrgChartViewProps) {
                   {getInitials(full)}
                 </span>
                 {full}
-                {isCalled && <span className="h-1.5 w-1.5 rounded-full bg-amber-400" title="Currently called" />}
+                {isCalled    && <span className="h-1.5 w-1.5 rounded-full bg-amber-400 shrink-0" />}
+                {isProposed  && !isCalled && <span className="h-1.5 w-1.5 rounded-full bg-blue-400 shrink-0" />}
               </div>
             );
           })}
@@ -953,6 +984,9 @@ function OrgChartView({ callings, onSelect, onDropMember }: OrgChartViewProps) {
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {orgs.map(([org, orgCallings]) => {
             const vacantCount = orgCallings.filter((c) => c.stage === "vacant").length;
+            const pendingCount = orgCallings.reduce(
+              (n, c) => n + proposals.filter((p) => p.callingId === c.id).length, 0
+            );
             return (
               <div key={org} className="rounded-xl border border-border bg-card overflow-hidden">
                 {/* Org header */}
@@ -964,6 +998,11 @@ function OrgChartView({ callings, onSelect, onDropMember }: OrgChartViewProps) {
                         {vacantCount} vacant
                       </span>
                     )}
+                    {pendingCount > 0 && (
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/60 dark:text-blue-200">
+                        {pendingCount} proposed
+                      </span>
+                    )}
                     <span className="text-[10px] font-medium text-muted-foreground tabular-nums">
                       {orgCallings.length}
                     </span>
@@ -973,10 +1012,11 @@ function OrgChartView({ callings, onSelect, onDropMember }: OrgChartViewProps) {
                 {/* Calling cards */}
                 <div className="p-3 space-y-2">
                   {orgCallings.map((calling) => {
-                    const isVacant  = calling.stage === "vacant";
-                    const isServing = calling.stage === "recorded";
-                    const isOver    = overCallingId === calling.id;
-                    const urgent    = attentionMessage(calling);
+                    const isVacant         = calling.stage === "vacant";
+                    const isServing        = calling.stage === "recorded";
+                    const isOver           = overCallingId === calling.id;
+                    const urgent           = attentionMessage(calling);
+                    const callingProposals = proposals.filter((p) => p.callingId === calling.id);
 
                     return (
                       <div
@@ -991,10 +1031,12 @@ function OrgChartView({ callings, onSelect, onDropMember }: OrgChartViewProps) {
                             ? "ring-2 ring-primary border-transparent bg-primary/5 scale-[1.01]"
                             : isVacant
                             ? "border-dashed border-red-300 bg-red-50/50 dark:border-red-800 dark:bg-red-950/20 hover:border-red-400"
+                            : callingProposals.length > 0
+                            ? "border-blue-200 dark:border-blue-800 bg-card hover:shadow-sm"
                             : "border-border bg-card hover:shadow-sm",
                         )}
                       >
-                        {/* Position */}
+                        {/* Position + stage badge */}
                         <div className="flex items-center justify-between gap-2">
                           <p className="text-xs font-semibold leading-tight truncate">{calling.position}</p>
                           {!isVacant && (
@@ -1004,15 +1046,15 @@ function OrgChartView({ callings, onSelect, onDropMember }: OrgChartViewProps) {
                           )}
                         </div>
 
-                        {/* Occupant */}
+                        {/* Current occupant / vacant hint */}
                         {isVacant ? (
                           <div className="flex items-center gap-1.5 mt-1.5 text-[11px] text-red-600 dark:text-red-400">
                             {isOver ? (
-                              <span className="font-medium">Drop to call <strong>{draggingMember}</strong></span>
+                              <span className="font-medium">Drop to propose <strong>{draggingMember}</strong></span>
                             ) : (
                               <>
                                 <UserMinus className="h-3 w-3 shrink-0" />
-                                <span className="italic">Vacant — drag a member here</span>
+                                <span className="italic">Vacant</span>
                               </>
                             )}
                           </div>
@@ -1032,7 +1074,7 @@ function OrgChartView({ callings, onSelect, onDropMember }: OrgChartViewProps) {
                             )}
                             {isOver && (
                               <p className="text-[10px] text-primary font-medium pl-6">
-                                Drop to replace with {draggingMember}
+                                Drop to propose {draggingMember}
                               </p>
                             )}
                             {urgent && !isOver && (
@@ -1043,6 +1085,53 @@ function OrgChartView({ callings, onSelect, onDropMember }: OrgChartViewProps) {
                             )}
                           </div>
                         )}
+
+                        {/* ── Proposal chips ── */}
+                        {callingProposals.length > 0 && (
+                          <div className="mt-2 pt-2 border-t border-dashed border-blue-200 dark:border-blue-800/60 space-y-1">
+                            <p className="text-[9px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">
+                              {callingProposals.length} Candidate{callingProposals.length > 1 ? "s Proposed" : " Proposed"}
+                            </p>
+                            {callingProposals.map((proposal) => (
+                              <div
+                                key={proposal.id}
+                                className="flex items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/30 px-2 py-1"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <span className="h-4 w-4 rounded-full bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300 flex items-center justify-center text-[9px] font-bold shrink-0">
+                                  {getInitials(proposal.memberName)}
+                                </span>
+                                <span className="text-[11px] font-medium flex-1 truncate text-blue-800 dark:text-blue-200">
+                                  {proposal.memberName}
+                                </span>
+                                <button
+                                  onClick={() => onCommitProposal(proposal.id)}
+                                  title="Start calling process for this person"
+                                  className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[9px] font-bold bg-primary/10 text-primary hover:bg-primary/20 transition-colors shrink-0"
+                                >
+                                  <UserCheck className="h-2.5 w-2.5" />
+                                  Start
+                                </button>
+                                <button
+                                  onClick={() => onRemoveProposal(proposal.id)}
+                                  title="Remove this proposal"
+                                  className="rounded p-0.5 text-muted-foreground hover:text-destructive transition-colors shrink-0"
+                                >
+                                  <X className="h-3 w-3" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Mobile: tap to add candidate */}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onTapAssign(calling); }}
+                          className="mt-2 flex items-center gap-1 text-[11px] text-muted-foreground hover:text-primary transition-colors sm:hidden"
+                        >
+                          <Plus className="h-3 w-3" />
+                          Add candidate
+                        </button>
                       </div>
                     );
                   })}
@@ -1148,6 +1237,13 @@ interface PendingDrop {
   memberName: string;
 }
 
+/** State for the "commit proposal → start pipeline" confirmation dialog. */
+interface PendingCommit {
+  proposal: CallingProposal;
+  /** The calling this proposal targets (looked up at open-time for convenience). */
+  calling: Calling;
+}
+
 const EMPTY_FORM = {
   memberName: "",
   position: "",
@@ -1166,8 +1262,15 @@ export default function CallingsPage() {
   const [newOpen,     setNewOpen]     = useState(false);
   const [form,        setForm]        = useState(EMPTY_FORM);
   const [saving,      setSaving]      = useState(false);
-  const [view,        setView]        = useState<PageView>("pipeline");
-  const [pendingDrop, setPendingDrop] = useState<PendingDrop | null>(null);
+  const [view,          setView]          = useState<PageView>("pipeline");
+  const [pendingDrop,   setPendingDrop]   = useState<PendingDrop | null>(null);
+  /** Uncommitted candidate proposals — multiple per calling, multiple per member. */
+  const [proposals,     setProposals]     = useState<CallingProposal[]>([]);
+  /** Proposal the user is about to commit (start the pipeline for). */
+  const [pendingCommit, setPendingCommit] = useState<PendingCommit | null>(null);
+  /** Calling the user tapped "Add candidate" on (mobile member picker). */
+  const [proposalTarget, setProposalTarget] = useState<Calling | null>(null);
+  const [memberSearch,  setMemberSearch]  = useState("");
 
   // ── Handlers ──────────────────────────────────────────────────────────────
 
@@ -1187,45 +1290,93 @@ export default function CallingsPage() {
     );
   }
 
-  // Drag a member onto a calling → open a confirmation
+  // Drag a member onto a calling → open an "add proposal" confirmation
   function handleDropMember(calling: Calling, memberName: string) {
     setPendingDrop({ calling, memberName });
   }
 
-  // Confirm the proposed call / release+recall
-  function confirmDrop() {
+  /**
+   * Confirm adding a proposal — creates a CallingProposal without touching
+   * the calling's pipeline stage. Multiple proposals can coexist.
+   */
+  function confirmAddProposal() {
     if (!pendingDrop) return;
     const { calling, memberName } = pendingDrop;
-    const isReplace = calling.stage !== "vacant";
+    const now = new Date().toISOString();
+    // Don't duplicate an identical proposal
+    const exists = proposals.some(
+      (p) => p.callingId === calling.id && p.memberName === memberName
+    );
+    if (!exists) {
+      const newProposal: CallingProposal = {
+        id:                  `prop-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        callingId:           calling.id,
+        position:            calling.position,
+        organization:        calling.organization,
+        memberName,
+        // Only track the outgoing person when the calling is fully recorded/serving
+        outgoingMemberName:  calling.stage === "recorded" ? calling.memberName : undefined,
+        createdAt:           now,
+      };
+      setProposals((prev) => [...prev, newProposal]);
+    }
+    setPendingDrop(null);
+  }
+
+  /**
+   * Remove a proposal without starting the pipeline.
+   */
+  function removeProposal(proposalId: string) {
+    setProposals((prev) => prev.filter((p) => p.id !== proposalId));
+  }
+
+  /**
+   * Open the commit-confirmation dialog for a proposal.
+   */
+  function handleCommitProposal(proposalId: string) {
+    const proposal = proposals.find((p) => p.id === proposalId);
+    if (!proposal) return;
+    const calling = callings.find((c) => c.id === proposal.callingId);
+    if (!calling) return;
+    setPendingCommit({ proposal, calling });
+  }
+
+  /**
+   * Formally start the pipeline for a proposal: moves the calling to
+   * "discussing" with the proposed person, clears all other proposals for
+   * that calling, and auto-completes any tasks from a prior process.
+   */
+  function confirmCommitProposal() {
+    if (!pendingCommit) return;
+    const { proposal } = pendingCommit;
     const now = new Date().toISOString();
 
     setCallings((prev) =>
       prev.map((c) =>
-        c.id === calling.id
+        c.id === proposal.callingId
           ? {
               ...c,
-              memberName,
-              memberId: "",
-              stage: "discussing",
-              // Track the outgoing person when replacing someone who is serving
-              outgoingMemberName: isReplace && calling.stage === "recorded"
-                ? calling.memberName
-                : undefined,
-              // Reset all pipeline progress for the fresh process
-              approvedBy: undefined, approvedAt: undefined,
-              extendedBy: undefined, extendedAt: undefined,
-              sustainedIn: undefined, sustainedDate: undefined, businessItemAdded: undefined,
-              setApartBy: undefined, setApartDate: undefined,
-              lcrUpdated: undefined, lcrUpdatedBy: undefined, lcrUpdatedAt: undefined,
-              declineReason: undefined, declinedAt: undefined,
+              memberName:        proposal.memberName,
+              memberId:          "",
+              stage:             "discussing",
+              outgoingMemberName: proposal.outgoingMemberName,
+              // Reset all pipeline progress for the new candidate
+              approvedBy:   undefined, approvedAt:   undefined,
+              extendedBy:   undefined, extendedAt:   undefined,
+              sustainedIn:  undefined, sustainedDate: undefined, businessItemAdded: undefined,
+              setApartBy:   undefined, setApartDate:  undefined,
+              lcrUpdated:   undefined, lcrUpdatedBy:  undefined, lcrUpdatedAt: undefined,
+              declineReason: undefined, declinedAt:   undefined,
               updatedAt: now,
             }
           : c
       )
     );
-    // Clear any tasks tied to the previous candidate/holder
-    completeCallingTasks(calling.id);
-    setPendingDrop(null);
+    // Remove all proposals for this calling — we've committed to one
+    setProposals((prev) => prev.filter((p) => p.callingId !== proposal.callingId));
+    // Auto-complete any tasks from a prior process
+    completeCallingTasks(proposal.callingId);
+    setPendingCommit(null);
   }
 
   async function handleCreate() {
@@ -1263,9 +1414,9 @@ export default function CallingsPage() {
   );
 
   const TAB_CONFIG: { view: PageView; label: string; count?: number }[] = [
-    { view: "pipeline", label: "Pipeline",                                       },
-    { view: "orgchart", label: "Org Chart", count: callings.length              },
-    { view: "complete", label: "Complete",  count: completeCallings.length       },
+    { view: "pipeline", label: "Pipeline",                                                            },
+    { view: "orgchart", label: "Org Chart", count: callings.length                                    },
+    { view: "complete", label: "Complete",  count: completeCallings.length                            },
   ];
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -1281,6 +1432,9 @@ export default function CallingsPage() {
             {pipelineCallings.length} active
             {vacantCallings.length > 0 && (
               <span className="text-red-600 dark:text-red-400"> · {vacantCallings.length} vacant</span>
+            )}
+            {proposals.length > 0 && (
+              <span className="text-blue-600 dark:text-blue-400"> · {proposals.length} proposed</span>
             )}
             {attentionCallings.length > 0 && (
               <span className="text-amber-600 dark:text-amber-400"> · {attentionCallings.length} need attention</span>
@@ -1381,8 +1535,12 @@ export default function CallingsPage() {
       {view === "orgchart" && (
         <OrgChartView
           callings={callings}
+          proposals={proposals}
           onSelect={setSelected}
           onDropMember={handleDropMember}
+          onCommitProposal={handleCommitProposal}
+          onRemoveProposal={removeProposal}
+          onTapAssign={(c) => { setProposalTarget(c); setMemberSearch(""); }}
         />
       )}
 
@@ -1540,65 +1698,214 @@ export default function CallingsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Drag-drop proposal dialog ── */}
+      {/* ── Add-candidate proposal dialog (drag or mobile tap) ── */}
       <Dialog open={!!pendingDrop} onOpenChange={(open) => !open && setPendingDrop(null)}>
         <DialogContent>
           {pendingDrop && (() => {
             const { calling, memberName } = pendingDrop;
-            const isVacant   = calling.stage === "vacant";
             const isServing  = calling.stage === "recorded";
+            const isInProgress = !["vacant", "recorded"].includes(calling.stage);
+            const alreadyProposed = proposals.some(
+              (p) => p.callingId === calling.id && p.memberName === memberName
+            );
             return (
               <>
                 <DialogHeader>
                   <DialogTitle className="flex items-center gap-2">
-                    {isVacant ? (
-                      <><User className="h-5 w-5 text-primary" /> Propose Calling</>
-                    ) : (
-                      <><ArrowRightLeft className="h-5 w-5 text-amber-500" /> Propose Release &amp; Call</>
-                    )}
+                    <User className="h-5 w-5 text-primary" /> Add Candidate
                   </DialogTitle>
                 </DialogHeader>
 
                 <div className="space-y-3 text-sm">
-                  {isVacant ? (
-                    <p>
-                      Call <strong>{memberName}</strong> as <strong>{calling.position}</strong>
-                      {calling.organization ? <> in <strong>{calling.organization}</strong></> : null}?
-                      This starts the calling process at the discussion stage.
-                    </p>
-                  ) : isServing ? (
-                    <>
-                      <p>
-                        Release <strong>{calling.memberName}</strong> and call{" "}
-                        <strong>{memberName}</strong> as <strong>{calling.position}</strong>?
-                      </p>
-                      <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/60 p-3 text-xs text-amber-800 dark:text-amber-200 space-y-1">
-                        <p>• {calling.memberName} will be marked for release (record in LCR).</p>
-                        <p>• A fresh calling process begins for {memberName} at the discussion stage.</p>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <p>
-                        Replace the current candidate <strong>{calling.memberName}</strong> with{" "}
-                        <strong>{memberName}</strong> for <strong>{calling.position}</strong>?
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        The in-progress process for {calling.memberName} will be reset and restarted for {memberName}.
-                      </p>
-                    </>
+                  <p>
+                    Add <strong>{memberName}</strong> as a candidate for{" "}
+                    <strong>{calling.position}</strong>
+                    {calling.organization ? <> ({calling.organization})</> : null}?
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    This is a proposal only — no pipeline action happens yet. You can
+                    propose multiple people for the same position and compare before
+                    officially starting the calling process.
+                  </p>
+                  {isServing && (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/60 p-3 text-xs text-amber-800 dark:text-amber-200">
+                      <strong>Note:</strong> {calling.memberName} is currently serving. If
+                      you later commit this proposal, they will be marked for release.
+                    </div>
+                  )}
+                  {isInProgress && (
+                    <div className="rounded-lg border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/60 p-3 text-xs text-blue-800 dark:text-blue-200">
+                      <strong>Note:</strong> {calling.memberName} is already in the calling
+                      pipeline ({stageLabel(calling.stage)}). This adds an alternative
+                      candidate for consideration.
+                    </div>
+                  )}
+                  {alreadyProposed && (
+                    <div className="rounded-lg border border-muted bg-muted/40 p-3 text-xs text-muted-foreground">
+                      <strong>{memberName}</strong> is already proposed for this position.
+                    </div>
                   )}
                 </div>
 
                 <DialogFooter className="gap-2">
                   <Button variant="outline" onClick={() => setPendingDrop(null)}>Cancel</Button>
-                  <Button onClick={confirmDrop}>
-                    {isVacant ? "Propose Calling" : isServing ? "Release & Call" : "Replace Candidate"}
+                  <Button onClick={confirmAddProposal} disabled={alreadyProposed}>
+                    Add Candidate
                   </Button>
                 </DialogFooter>
               </>
             );
           })()}
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Commit-proposal dialog (start the formal pipeline) ── */}
+      <Dialog open={!!pendingCommit} onOpenChange={(open) => !open && setPendingCommit(null)}>
+        <DialogContent>
+          {pendingCommit && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <UserCheck className="h-5 w-5 text-primary" /> Start Calling Process
+                </DialogTitle>
+              </DialogHeader>
+
+              <div className="space-y-3 text-sm">
+                <p>
+                  Formally begin the calling process for{" "}
+                  <strong>{pendingCommit.proposal.memberName}</strong> as{" "}
+                  <strong>{pendingCommit.proposal.position}</strong>
+                  {pendingCommit.proposal.organization
+                    ? <> ({pendingCommit.proposal.organization})</>
+                    : null}?
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  This moves the calling into the discussion stage. Any other
+                  proposals for this position will be removed.
+                </p>
+                {pendingCommit.proposal.outgoingMemberName && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/60 p-3 text-xs text-amber-800 dark:text-amber-200">
+                    <strong>Release needed:</strong>{" "}
+                    {pendingCommit.proposal.outgoingMemberName} is currently serving and
+                    will need to be released in LCR once the new calling is complete.
+                  </div>
+                )}
+                {/* Show other competing proposals that will be dropped */}
+                {(() => {
+                  const others = proposals.filter(
+                    (p) =>
+                      p.callingId === pendingCommit.proposal.callingId &&
+                      p.id !== pendingCommit.proposal.id
+                  );
+                  if (others.length === 0) return null;
+                  return (
+                    <div className="rounded-lg border border-muted bg-muted/30 p-3 text-xs text-muted-foreground">
+                      <p className="font-medium mb-1">Other proposals that will be removed:</p>
+                      {others.map((o) => (
+                        <p key={o.id}>• {o.memberName}</p>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
+
+              <DialogFooter className="gap-2">
+                <Button variant="outline" onClick={() => setPendingCommit(null)}>Not Yet</Button>
+                <Button onClick={confirmCommitProposal}>Start Discussion</Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Mobile: member picker for adding a candidate ── */}
+      <Dialog
+        open={!!proposalTarget}
+        onOpenChange={(open) => { if (!open) { setProposalTarget(null); setMemberSearch(""); } }}
+      >
+        <DialogContent className="max-h-[85vh] flex flex-col">
+          {proposalTarget && (
+            <>
+              <DialogHeader>
+                <DialogTitle>Add Candidate</DialogTitle>
+                <p className="text-sm text-muted-foreground">
+                  Select a member to propose for <strong>{proposalTarget.position}</strong>
+                </p>
+              </DialogHeader>
+
+              {/* Search */}
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="Search members…"
+                  value={memberSearch}
+                  onChange={(e) => setMemberSearch(e.target.value)}
+                  className="w-full rounded-md border border-border bg-background pl-9 pr-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
+
+              {/* Member list */}
+              <div className="flex-1 overflow-y-auto space-y-1 -mx-2 px-2">
+                {MOCK_MEMBERS
+                  .filter((m) => {
+                    const full = memberFullName(m);
+                    return full.toLowerCase().includes(memberSearch.toLowerCase());
+                  })
+                  .map((m) => {
+                    const full = memberFullName(m);
+                    const alreadyProposed = proposals.some(
+                      (p) => p.callingId === proposalTarget.id && p.memberName === full
+                    );
+                    return (
+                      <button
+                        key={m.id}
+                        disabled={alreadyProposed}
+                        onClick={() => {
+                          const now = new Date().toISOString();
+                          if (!alreadyProposed) {
+                            setProposals((prev) => [
+                              ...prev,
+                              {
+                                id:                  `prop-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                                callingId:           proposalTarget.id,
+                                position:            proposalTarget.position,
+                                organization:        proposalTarget.organization,
+                                memberName:          full,
+                                outgoingMemberName:  proposalTarget.stage === "recorded" ? proposalTarget.memberName : undefined,
+                                createdAt:           now,
+                              },
+                            ]);
+                          }
+                          setProposalTarget(null);
+                          setMemberSearch("");
+                        }}
+                        className={cn(
+                          "w-full flex items-center gap-3 rounded-lg p-2.5 text-left transition-colors",
+                          alreadyProposed
+                            ? "opacity-50 cursor-default bg-muted/30"
+                            : "hover:bg-muted/50 cursor-pointer"
+                        )}
+                      >
+                        <span className="h-8 w-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold shrink-0">
+                          {getInitials(full)}
+                        </span>
+                        <span className="flex-1 text-sm font-medium">{full}</span>
+                        {alreadyProposed && (
+                          <span className="text-[10px] text-muted-foreground">already proposed</span>
+                        )}
+                      </button>
+                    );
+                  })}
+              </div>
+
+              <DialogFooter>
+                <Button variant="outline" onClick={() => { setProposalTarget(null); setMemberSearch(""); }}>
+                  Cancel
+                </Button>
+              </DialogFooter>
+            </>
+          )}
         </DialogContent>
       </Dialog>
     </div>

@@ -169,6 +169,28 @@ export interface Calling {
   updatedAt: string;
 }
 
+// ── Calling proposals ────────────────────────────────────────────────────────
+
+/**
+ * A non-committal suggestion to call someone.
+ * Multiple proposals can exist for the same position (compare candidates)
+ * or the same person can be proposed for multiple positions simultaneously.
+ * Committing a proposal is what starts the formal pipeline at "discussing".
+ */
+export interface CallingProposal {
+  id: string;
+  callingId: string;
+  position: string;
+  organization?: string;
+  memberName: string;
+  /**
+   * If proposing a replacement for a currently-serving person, their name.
+   * Populated only when the calling's stage is "recorded" at proposal time.
+   */
+  outgoingMemberName?: string;
+  createdAt: string;
+}
+
 // ── Misc constants ───────────────────────────────────────────────────────────
 
 export const TASK_TYPE_LABELS: Record<TaskType, string> = {
