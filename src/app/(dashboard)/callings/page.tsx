@@ -3,7 +3,7 @@
 import { useState } from "react";
 import {
   Plus, Church, AlertTriangle, CheckCircle2, ClipboardList,
-  GripVertical, User, ArrowRight,
+  GripVertical, User, ArrowRight, Users, UserMinus, ArrowRightLeft,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,7 +19,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useTasks } from "@/contexts/TasksContext";
 import type { Calling, CallingStage, SustainedVenue, Task } from "@/types";
 import { CALLING_STAGES, CALLING_PIPELINE } from "@/types";
-import { MOCK_CALLINGS, MOCK_BISHOPRIC_MEMBERS } from "@/lib/mock-data";
+import { MOCK_CALLINGS, MOCK_BISHOPRIC_MEMBERS, MOCK_MEMBERS } from "@/lib/mock-data";
 import { cn } from "@/lib/utils";
 
 // ── Bishopric helpers ─────────────────────────────────────────────────────────
@@ -516,6 +516,7 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
                   position:     calling.position,
                   setApartDate: setApartDate || undefined,
                   setApartBy:   member.name,
+                  outgoingMemberName: calling.outgoingMemberName,
                 },
               }));
               onSave({ stage: "set_apart", setApartBy: member.name, setApartDate: setApartDate || undefined });
@@ -834,133 +835,217 @@ function KanbanView({ callings, onSelect, onMove }: KanbanViewProps) {
   );
 }
 
-// ── Cards View ────────────────────────────────────────────────────────────────
+// ── Org Chart View ──────────────────────────────────────────────────────────
 
-const ALL_FILTER_STAGES: (CallingStage | "all")[] = [
-  "all",
-  ...CALLING_PIPELINE.filter((s) => s !== "recorded"),
-];
-
-interface CardsViewProps {
-  callings: Calling[];
-  onSelect: (c: Calling) => void;
-  onNew: () => void;
+function memberFullName(m: { firstName: string; lastName: string }): string {
+  return `${m.firstName} ${m.lastName}`;
 }
 
-function CardsView({ callings, onSelect, onNew }: CardsViewProps) {
-  const [filterStage, setFilterStage] = useState<CallingStage | "all">("all");
+interface OrgChartViewProps {
+  /** ALL callings (including recorded) — the org chart is the current state of the ward. */
+  callings: Calling[];
+  onSelect: (c: Calling) => void;
+  onDropMember: (calling: Calling, memberName: string) => void;
+}
 
-  const filtered =
-    filterStage === "all"
-      ? callings
-      : callings.filter((c) => c.stage === filterStage);
+function OrgChartView({ callings, onSelect, onDropMember }: OrgChartViewProps) {
+  const [draggingMember, setDraggingMember] = useState<string | null>(null);
+  const [overCallingId,  setOverCallingId]  = useState<string | null>(null);
+
+  // ── Group callings by organization ────────────────────────────────────────
+  const orgMap = new Map<string, Calling[]>();
+  for (const c of callings) {
+    const org = c.organization?.trim() || "Other";
+    if (!orgMap.has(org)) orgMap.set(org, []);
+    orgMap.get(org)!.push(c);
+  }
+  const orgs = [...orgMap.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  orgs.forEach(([, cs]) => cs.sort((a, b) => a.position.localeCompare(b.position)));
+
+  // Names already serving or in-process — shown muted in the palette
+  const calledNames = new Set(
+    callings.filter((c) => c.memberName && c.stage !== "vacant").map((c) => c.memberName)
+  );
+
+  function handleMemberDragStart(e: React.DragEvent, name: string) {
+    setDraggingMember(name);
+    e.dataTransfer.effectAllowed = "copy";
+    e.dataTransfer.setData("text/plain", name);
+  }
+
+  function handleMemberDragEnd() {
+    setDraggingMember(null);
+    setOverCallingId(null);
+  }
+
+  function handleCardDragOver(e: React.DragEvent, calling: Calling) {
+    if (!draggingMember) return;            // only react to member drags
+    if (draggingMember === calling.memberName) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    setOverCallingId(calling.id);
+  }
+
+  function handleCardDrop(e: React.DragEvent, calling: Calling) {
+    e.preventDefault();
+    const name = draggingMember;
+    setDraggingMember(null);
+    setOverCallingId(null);
+    if (!name || name === calling.memberName) return;
+    onDropMember(calling, name);
+  }
 
   return (
     <div className="space-y-4">
-      {/* Stage filter pills */}
-      <div className="flex gap-1.5 flex-wrap">
-        {ALL_FILTER_STAGES.map((s) => {
-          const count = s === "all" ? callings.length : callings.filter((c) => c.stage === s).length;
-          if (s !== "all" && count === 0) return null;
-          const isActive = filterStage === s;
-          return (
-            <button
-              key={s}
-              onClick={() => setFilterStage(s)}
-              className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all",
-                isActive
-                  ? s === "all"
-                    ? "bg-primary text-primary-foreground shadow-sm"
-                    : cn(STAGE_COLORS[s as CallingStage], "shadow-sm")
-                  : "bg-muted text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-              )}
-            >
-              {s === "all" ? "All callings" : stageLabel(s as CallingStage)}
-              <span className={cn(
-                "text-[10px] font-bold tabular-nums px-1.5 py-0 rounded-full",
-                isActive ? "bg-black/10 dark:bg-white/20" : "bg-muted-foreground/10"
-              )}>
-                {count}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Grid */}
-      {filtered.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 py-16 text-center">
-          <Church className="h-12 w-12 text-muted-foreground/30" />
-          <p className="text-sm text-muted-foreground">
-            {filterStage === "all" ? "No active callings" : `No callings in "${stageLabel(filterStage as CallingStage)}"`}
+      {/* ── Member palette ── */}
+      <div className="rounded-xl border border-border bg-muted/30 p-3">
+        <div className="flex items-center gap-2 mb-2.5 flex-wrap">
+          <Users className="h-4 w-4 text-muted-foreground shrink-0" />
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Ward Members
           </p>
-          {filterStage === "all" && (
-            <Button onClick={onNew} variant="outline" size="sm">Add a calling</Button>
-          )}
+          <span className="text-[11px] text-muted-foreground hidden sm:inline">
+            — drag a member onto a calling to propose them
+          </span>
         </div>
-      ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {filtered.map((calling) => {
-            const idx      = pipelineIndex(calling.stage);
-            const progress = Math.round((Math.max(0, idx) / (CALLING_PIPELINE.length - 2)) * 100);
-            const urgent   = attentionMessage(calling);
+        <div className="flex flex-wrap gap-1.5">
+          {MOCK_MEMBERS.map((m) => {
+            const full     = memberFullName(m);
+            const isCalled = calledNames.has(full);
             return (
               <div
-                key={calling.id}
-                onClick={() => onSelect(calling)}
+                key={m.id}
+                draggable
+                onDragStart={(e) => handleMemberDragStart(e, full)}
+                onDragEnd={handleMemberDragEnd}
+                title={isCalled ? `${full} (currently has a calling)` : full}
                 className={cn(
-                  "rounded-xl border bg-card p-4 cursor-pointer space-y-3",
-                  "hover:shadow-md transition-all duration-150 active:scale-[0.99]",
-                  urgent ? "border-amber-300 dark:border-amber-700" : "border-border"
+                  "flex items-center gap-1.5 rounded-full border pl-1.5 pr-3 py-1 text-xs font-medium",
+                  "cursor-grab active:cursor-grabbing select-none transition-all",
+                  "hover:shadow-sm hover:border-primary/40",
+                  draggingMember === full && "opacity-40",
+                  isCalled
+                    ? "bg-muted/50 border-border text-muted-foreground"
+                    : "bg-card border-border text-foreground"
                 )}
               >
-                {/* Top row: avatar + name + stage badge */}
-                <div className="flex items-start gap-3">
-                  <div className={cn(
-                    "h-10 w-10 rounded-full flex items-center justify-center text-sm font-bold shrink-0",
-                    calling.memberName
-                      ? "bg-primary/10 text-primary"
-                      : "bg-muted text-muted-foreground"
-                  )}>
-                    {calling.memberName ? getInitials(calling.memberName) : <User className="h-4 w-4" />}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-sm truncate leading-tight">
-                      {calling.memberName || <span className="italic font-normal text-muted-foreground">Vacant Position</span>}
-                    </p>
-                    <p className="text-xs text-muted-foreground truncate">{calling.position}</p>
-                    {calling.organization && (
-                      <p className="text-[11px] text-muted-foreground/60 truncate">{calling.organization}</p>
+                <span className={cn(
+                  "h-5 w-5 rounded-full flex items-center justify-center text-[9px] font-bold shrink-0",
+                  isCalled ? "bg-muted text-muted-foreground" : "bg-primary/10 text-primary"
+                )}>
+                  {getInitials(full)}
+                </span>
+                {full}
+                {isCalled && <span className="h-1.5 w-1.5 rounded-full bg-amber-400" title="Currently called" />}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── Organization boxes ── */}
+      {orgs.length === 0 ? (
+        <div className="flex flex-col items-center gap-3 py-16 text-center">
+          <Church className="h-12 w-12 text-muted-foreground/30" />
+          <p className="text-sm text-muted-foreground">No callings yet</p>
+        </div>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {orgs.map(([org, orgCallings]) => {
+            const vacantCount = orgCallings.filter((c) => c.stage === "vacant").length;
+            return (
+              <div key={org} className="rounded-xl border border-border bg-card overflow-hidden">
+                {/* Org header */}
+                <div className="px-4 py-2.5 border-b border-border bg-muted/40 flex items-center justify-between gap-2">
+                  <p className="font-semibold text-sm truncate">{org}</p>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {vacantCount > 0 && (
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-900/60 dark:text-red-200">
+                        {vacantCount} vacant
+                      </span>
                     )}
+                    <span className="text-[10px] font-medium text-muted-foreground tabular-nums">
+                      {orgCallings.length}
+                    </span>
                   </div>
                 </div>
 
-                {/* Stage badge */}
-                <div className="flex items-center justify-between gap-2">
-                  <Badge className={cn("text-xs", STAGE_COLORS[calling.stage])}>
-                    {stageLabel(calling.stage)}
-                  </Badge>
-                  {urgent && (
-                    <div className="flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-400">
-                      <AlertTriangle className="h-3 w-3 shrink-0" />
-                      <span className="truncate">{urgent}</span>
-                    </div>
-                  )}
-                </div>
+                {/* Calling cards */}
+                <div className="p-3 space-y-2">
+                  {orgCallings.map((calling) => {
+                    const isVacant  = calling.stage === "vacant";
+                    const isServing = calling.stage === "recorded";
+                    const isOver    = overCallingId === calling.id;
+                    const urgent    = attentionMessage(calling);
 
-                {/* Progress */}
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                    <span>{NEXT_ACTION[calling.stage] ?? "Complete"}</span>
-                    <span className="font-medium tabular-nums">{progress}%</span>
-                  </div>
-                  <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-                    <div
-                      className="h-full rounded-full bg-primary transition-all duration-300"
-                      style={{ width: `${progress}%` }}
-                    />
-                  </div>
+                    return (
+                      <div
+                        key={calling.id}
+                        onClick={() => onSelect(calling)}
+                        onDragOver={(e) => handleCardDragOver(e, calling)}
+                        onDragLeave={() => setOverCallingId((id) => (id === calling.id ? null : id))}
+                        onDrop={(e) => handleCardDrop(e, calling)}
+                        className={cn(
+                          "rounded-lg border p-2.5 cursor-pointer transition-all duration-150",
+                          isOver
+                            ? "ring-2 ring-primary border-transparent bg-primary/5 scale-[1.01]"
+                            : isVacant
+                            ? "border-dashed border-red-300 bg-red-50/50 dark:border-red-800 dark:bg-red-950/20 hover:border-red-400"
+                            : "border-border bg-card hover:shadow-sm",
+                        )}
+                      >
+                        {/* Position */}
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-xs font-semibold leading-tight truncate">{calling.position}</p>
+                          {!isVacant && (
+                            <Badge className={cn("text-[9px] h-4 px-1.5 shrink-0", STAGE_COLORS[calling.stage])}>
+                              {isServing ? "Serving" : stageLabel(calling.stage)}
+                            </Badge>
+                          )}
+                        </div>
+
+                        {/* Occupant */}
+                        {isVacant ? (
+                          <div className="flex items-center gap-1.5 mt-1.5 text-[11px] text-red-600 dark:text-red-400">
+                            {isOver ? (
+                              <span className="font-medium">Drop to call <strong>{draggingMember}</strong></span>
+                            ) : (
+                              <>
+                                <UserMinus className="h-3 w-3 shrink-0" />
+                                <span className="italic">Vacant — drag a member here</span>
+                              </>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="mt-1.5 space-y-0.5">
+                            <div className="flex items-center gap-1.5">
+                              <span className="h-5 w-5 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[9px] font-bold shrink-0">
+                                {getInitials(calling.memberName ?? "")}
+                              </span>
+                              <p className="text-xs font-medium truncate">{calling.memberName}</p>
+                            </div>
+                            {calling.outgoingMemberName && (
+                              <p className="flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400 pl-6">
+                                <ArrowRightLeft className="h-2.5 w-2.5 shrink-0" />
+                                Releasing {calling.outgoingMemberName}
+                              </p>
+                            )}
+                            {isOver && (
+                              <p className="text-[10px] text-primary font-medium pl-6">
+                                Drop to replace with {draggingMember}
+                              </p>
+                            )}
+                            {urgent && !isOver && (
+                              <p className="flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400 pl-6">
+                                <AlertTriangle className="h-2.5 w-2.5 shrink-0" />
+                                {urgent}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             );
@@ -1056,7 +1141,12 @@ function PipelineFlow({ callings }: PipelineFlowProps) {
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
-type PageView = "pipeline" | "cards" | "complete";
+type PageView = "pipeline" | "orgchart" | "complete";
+
+interface PendingDrop {
+  calling: Calling;
+  memberName: string;
+}
 
 const EMPTY_FORM = {
   memberName: "",
@@ -1068,14 +1158,16 @@ const EMPTY_FORM = {
 
 export default function CallingsPage() {
   const { user } = useAuth();
+  const { completeCallingTasks } = useTasks();
   const [callings, setCallings] = useState<Calling[]>(() =>
     MOCK_CALLINGS.map((c) => ({ ...c, stage: normalizeStage(c.stage as string) }))
   );
-  const [selected, setSelected] = useState<Calling | null>(null);
-  const [newOpen,  setNewOpen]  = useState(false);
-  const [form,     setForm]     = useState(EMPTY_FORM);
-  const [saving,   setSaving]   = useState(false);
-  const [view,     setView]     = useState<PageView>("pipeline");
+  const [selected,    setSelected]    = useState<Calling | null>(null);
+  const [newOpen,     setNewOpen]     = useState(false);
+  const [form,        setForm]        = useState(EMPTY_FORM);
+  const [saving,      setSaving]      = useState(false);
+  const [view,        setView]        = useState<PageView>("pipeline");
+  const [pendingDrop, setPendingDrop] = useState<PendingDrop | null>(null);
 
   // ── Handlers ──────────────────────────────────────────────────────────────
 
@@ -1093,6 +1185,47 @@ export default function CallingsPage() {
     setCallings((prev) =>
       prev.map((c) => (c.id === callingId ? { ...c, stage: toStage, updatedAt: now } : c))
     );
+  }
+
+  // Drag a member onto a calling → open a confirmation
+  function handleDropMember(calling: Calling, memberName: string) {
+    setPendingDrop({ calling, memberName });
+  }
+
+  // Confirm the proposed call / release+recall
+  function confirmDrop() {
+    if (!pendingDrop) return;
+    const { calling, memberName } = pendingDrop;
+    const isReplace = calling.stage !== "vacant";
+    const now = new Date().toISOString();
+
+    setCallings((prev) =>
+      prev.map((c) =>
+        c.id === calling.id
+          ? {
+              ...c,
+              memberName,
+              memberId: "",
+              stage: "discussing",
+              // Track the outgoing person when replacing someone who is serving
+              outgoingMemberName: isReplace && calling.stage === "recorded"
+                ? calling.memberName
+                : undefined,
+              // Reset all pipeline progress for the fresh process
+              approvedBy: undefined, approvedAt: undefined,
+              extendedBy: undefined, extendedAt: undefined,
+              sustainedIn: undefined, sustainedDate: undefined, businessItemAdded: undefined,
+              setApartBy: undefined, setApartDate: undefined,
+              lcrUpdated: undefined, lcrUpdatedBy: undefined, lcrUpdatedAt: undefined,
+              declineReason: undefined, declinedAt: undefined,
+              updatedAt: now,
+            }
+          : c
+      )
+    );
+    // Clear any tasks tied to the previous candidate/holder
+    completeCallingTasks(calling.id);
+    setPendingDrop(null);
   }
 
   async function handleCreate() {
@@ -1130,9 +1263,9 @@ export default function CallingsPage() {
   );
 
   const TAB_CONFIG: { view: PageView; label: string; count?: number }[] = [
-    { view: "pipeline", label: "Pipeline",                                    },
-    { view: "cards",    label: "Cards",    count: pipelineCallings.length     },
-    { view: "complete", label: "Complete", count: completeCallings.length     },
+    { view: "pipeline", label: "Pipeline",                                       },
+    { view: "orgchart", label: "Org Chart", count: callings.length              },
+    { view: "complete", label: "Complete",  count: completeCallings.length       },
   ];
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -1245,11 +1378,11 @@ export default function CallingsPage() {
         />
       )}
 
-      {view === "cards" && (
-        <CardsView
-          callings={pipelineCallings}
+      {view === "orgchart" && (
+        <OrgChartView
+          callings={callings}
           onSelect={setSelected}
-          onNew={() => setNewOpen(true)}
+          onDropMember={handleDropMember}
         />
       )}
 
@@ -1279,6 +1412,11 @@ export default function CallingsPage() {
                 <div className="text-sm space-y-1 text-muted-foreground">
                   <p><span className="font-medium text-foreground">Position:</span> {selected.position}</p>
                   {selected.organization && <p><span className="font-medium text-foreground">Organization:</span> {selected.organization}</p>}
+                  {selected.outgoingMemberName && (
+                    <p className="text-amber-600 dark:text-amber-400">
+                      <span className="font-medium">Replacing:</span> {selected.outgoingMemberName} (needs to be released in LCR)
+                    </p>
+                  )}
                   {selected.approvedBy    && <p><span className="font-medium text-foreground">Approved by:</span> {selected.approvedBy}</p>}
                   {selected.extendedBy    && <p><span className="font-medium text-foreground">Extended by:</span> {selected.extendedBy}</p>}
                   {selected.sustainedIn   && <p><span className="font-medium text-foreground">Venue:</span> {selected.sustainedIn === "sacrament_meeting" ? "Sacrament Meeting" : "Class / Quorum"}</p>}
@@ -1399,6 +1537,68 @@ export default function CallingsPage() {
               {saving ? "Creating…" : "Create Calling"}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Drag-drop proposal dialog ── */}
+      <Dialog open={!!pendingDrop} onOpenChange={(open) => !open && setPendingDrop(null)}>
+        <DialogContent>
+          {pendingDrop && (() => {
+            const { calling, memberName } = pendingDrop;
+            const isVacant   = calling.stage === "vacant";
+            const isServing  = calling.stage === "recorded";
+            return (
+              <>
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2">
+                    {isVacant ? (
+                      <><User className="h-5 w-5 text-primary" /> Propose Calling</>
+                    ) : (
+                      <><ArrowRightLeft className="h-5 w-5 text-amber-500" /> Propose Release &amp; Call</>
+                    )}
+                  </DialogTitle>
+                </DialogHeader>
+
+                <div className="space-y-3 text-sm">
+                  {isVacant ? (
+                    <p>
+                      Call <strong>{memberName}</strong> as <strong>{calling.position}</strong>
+                      {calling.organization ? <> in <strong>{calling.organization}</strong></> : null}?
+                      This starts the calling process at the discussion stage.
+                    </p>
+                  ) : isServing ? (
+                    <>
+                      <p>
+                        Release <strong>{calling.memberName}</strong> and call{" "}
+                        <strong>{memberName}</strong> as <strong>{calling.position}</strong>?
+                      </p>
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/60 p-3 text-xs text-amber-800 dark:text-amber-200 space-y-1">
+                        <p>• {calling.memberName} will be marked for release (record in LCR).</p>
+                        <p>• A fresh calling process begins for {memberName} at the discussion stage.</p>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <p>
+                        Replace the current candidate <strong>{calling.memberName}</strong> with{" "}
+                        <strong>{memberName}</strong> for <strong>{calling.position}</strong>?
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        The in-progress process for {calling.memberName} will be reset and restarted for {memberName}.
+                      </p>
+                    </>
+                  )}
+                </div>
+
+                <DialogFooter className="gap-2">
+                  <Button variant="outline" onClick={() => setPendingDrop(null)}>Cancel</Button>
+                  <Button onClick={confirmDrop}>
+                    {isVacant ? "Propose Calling" : isServing ? "Release & Call" : "Replace Candidate"}
+                  </Button>
+                </DialogFooter>
+              </>
+            );
+          })()}
         </DialogContent>
       </Dialog>
     </div>

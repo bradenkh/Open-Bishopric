@@ -131,6 +131,12 @@ export interface Calling {
   stage: CallingStage;
   notes?: string;
 
+  /**
+   * When a replacement is proposed for a filled calling, the person currently
+   * serving who needs to be released. Cleared once the calling is recorded.
+   */
+  outgoingMemberName?: string;
+
   // ── Approval
   approvedBy?: string;
   approvedAt?: string;

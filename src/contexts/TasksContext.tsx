@@ -49,18 +49,20 @@ export function TasksProvider({ children }: { children: React.ReactNode }) {
 
       // ── Auto-create clerk LCR task when a set-apart task is checked off ──
       if (task.context?.taskType === "set_apart") {
-        const clerk = MOCK_BISHOPRIC_MEMBERS.find((m) => m.role === "clerk");
-        const position    = task.context?.position as string | undefined;
-        const memberName  = task.memberName ?? "Unknown";
+        const clerk        = MOCK_BISHOPRIC_MEMBERS.find((m) => m.role === "clerk");
+        const position     = task.context?.position as string | undefined;
+        const memberName   = task.memberName ?? "Unknown";
         const setApartDate = task.context?.setApartDate as string | undefined;
         const setApartBy   = task.context?.setApartBy  as string | undefined;
+        const outgoing     = task.context?.outgoingMemberName as string | undefined;
 
         const clerkTask: Task = {
           id:           `t-lcr-${Date.now()}`,
           title:        `Update LCR — ${memberName}${position ? ` / ${position}` : ""}`,
           description:  [
             `${memberName} was set apart${setApartDate ? ` on ${setApartDate}` : ""}${setApartBy ? ` by ${setApartBy}` : ""}.`,
-            "Please record the calling in LCR (Leader & Clerk Resources) and mark them as set apart.",
+            outgoing ? `Release ${outgoing} from this calling and record ${memberName} in LCR (Leader & Clerk Resources) as set apart.`
+                     : "Please record the calling in LCR (Leader & Clerk Resources) and mark them as set apart.",
           ].join(" "),
           type:         "calling",
           status:       "active",
@@ -71,6 +73,7 @@ export function TasksProvider({ children }: { children: React.ReactNode }) {
             callingId:  task.context?.callingId,
             taskType:   "lcr_update",
             position,
+            outgoingMemberName: outgoing,
           },
           createdBy: "system",
           createdAt: now,
