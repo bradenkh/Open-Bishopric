@@ -8,6 +8,16 @@ export interface AppUser {
   photoURL?: string;
 }
 
+// ── Bishopric roster ─────────────────────────────────────────────────────────
+
+export type BishopricRole = "bishop" | "counselor" | "clerk" | "exec_secretary";
+
+export interface BishopricMember {
+  id: string;
+  name: string;
+  role: BishopricRole;
+}
+
 export interface Member {
   id: string;
   firstName: string;
@@ -45,6 +55,14 @@ export interface Task {
   memberId?: string;
   memberName?: string;
   dueDate?: string;
+  /**
+   * Extra metadata. For calling tasks:
+   *   callingId    — links back to the Calling record
+   *   taskType     — "extend" | "set_apart" | "lcr_update"
+   *   position     — calling position name
+   *   setApartDate — ISO date string (set_apart tasks only)
+   *   setApartBy   — who set them apart (set_apart tasks only)
+   */
   context?: Record<string, unknown>;
   createdBy: string;
   createdAt: string;
