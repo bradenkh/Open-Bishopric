@@ -63,6 +63,7 @@ function getInitials(name: string): string {
 }
 
 const STAGE_COLORS: Record<CallingStage, string> = {
+  needs_release: "bg-orange-100 text-orange-800 dark:bg-orange-900/60 dark:text-orange-200",
   vacant:      "bg-red-100 text-red-800 dark:bg-red-900/60 dark:text-red-200",
   discussing:  "bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200",
   approved:    "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/60 dark:text-yellow-200",
@@ -77,6 +78,7 @@ const STAGE_COLORS: Record<CallingStage, string> = {
 
 // Per-stage column header styling
 const STAGE_COLUMN_COLORS: Record<CallingStage, { header: string; ring: string; drop: string }> = {
+  needs_release: { header: "bg-orange-50 border-orange-200 dark:bg-orange-950/30 dark:border-orange-800", ring: "ring-orange-400", drop: "bg-orange-50/60 dark:bg-orange-950/20" },
   vacant:      { header: "bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-800",       ring: "ring-red-400",    drop: "bg-red-50/60 dark:bg-red-950/20" },
   discussing:  { header: "bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-800", ring: "ring-amber-400",  drop: "bg-amber-50/60 dark:bg-amber-950/20" },
   approved:    { header: "bg-yellow-50 border-yellow-200 dark:bg-yellow-950/30 dark:border-yellow-800", ring: "ring-yellow-400", drop: "bg-yellow-50/60 dark:bg-yellow-950/20" },
@@ -90,6 +92,7 @@ const STAGE_COLUMN_COLORS: Record<CallingStage, { header: string; ring: string; 
 };
 
 const NEXT_ACTION: Partial<Record<CallingStage, string>> = {
+  needs_release: "Release the current holder",
   vacant:      "Identify a candidate",
   discussing:  "Get bishopric approval",
   approved:    "Extend the calling",
@@ -127,6 +130,7 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
 
   // ── Form state ────────────────────────────────────────────────────────────
   const [candidateName,   setCandidateName]   = useState("");
+  const [releasedBy,      setReleasedBy]      = useState("");
   const [approvedBy,      setApprovedBy]      = useState(calling.approvedBy ?? "");
   // Extending — bishopric member dropdown
   const [extendingMember, setExtendingMember] = useState(
@@ -163,6 +167,43 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
   }
 
   // ── Stages ────────────────────────────────────────────────────────────────
+
+  if (stage === "needs_release") {
+    return (
+      <div className="border-t pt-4 space-y-3">
+        <p className="text-sm font-semibold">Release the Current Holder</p>
+        <p className="text-sm text-muted-foreground">
+          Once <strong>{name}</strong> has been released from {calling.position}, the position becomes
+          vacant and moves into the pipeline to be filled.
+        </p>
+        <div className="space-y-1.5">
+          <Label htmlFor="releasedBy">Released by (optional)</Label>
+          <Input
+            id="releasedBy"
+            value={releasedBy}
+            onChange={(e) => setReleasedBy(e.target.value)}
+            placeholder="e.g. Bishop Phillips"
+          />
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={onClose}>Not Yet</Button>
+          <Button
+            onClick={() => {
+              const released = calling.memberName || "the previous holder";
+              const note = `Released ${released}${releasedBy.trim() ? ` by ${releasedBy.trim()}` : ""}`;
+              onSave({
+                stage:      "vacant",
+                memberName: "",
+                notes:      calling.notes ? `${calling.notes} · ${note}` : note,
+              });
+            }}
+          >
+            Mark Released
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   if (stage === "vacant") {
     return (

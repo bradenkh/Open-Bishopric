@@ -37,6 +37,32 @@ export const MOCK_MEMBERS: Member[] = [
 // businessItemAdded — this deliberately triggers the business-items banner.
 
 export const MOCK_CALLINGS: Calling[] = [
+  // ── Needs release (current holder being moved out) ──────────────────────────
+  {
+    id: "c00a",
+    memberId: "m04",
+    memberName: "Andrew Olson",
+    position: "Elders Quorum Secretary",
+    organization: "Elders Quorum",
+    stage: "needs_release",
+    notes: "Moving out of the ward this summer.",
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-06-01T00:00:00Z",
+    updatedAt: "2026-06-01T00:00:00Z",
+  },
+  {
+    id: "c00b",
+    memberId: "m08",
+    memberName: "Richard Gagne",
+    position: "Sunday School Teacher",
+    organization: "Sunday School",
+    stage: "needs_release",
+    notes: "Has served faithfully for 3 years — ready for a change.",
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-05-28T00:00:00Z",
+    updatedAt: "2026-05-28T00:00:00Z",
+  },
+
   // ── Vacant positions ──────────────────────────────────────────────────────
   {
     id: "c01",

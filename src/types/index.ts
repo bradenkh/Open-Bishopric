@@ -74,12 +74,13 @@ export interface Task {
 /**
  * The ordered pipeline every calling moves through.
  *
- *   vacant → discussing → approved → extending → accepted
+ *   needs_release → vacant → discussing → approved → extending → accepted
  *     → sustaining → sustained → set_apart → lcr_updated → recorded
  *
  * "declined" is not a stage; a decline resets to vacant/discussing.
  */
 export type CallingStage =
+  | "needs_release" // Current holder needs to be released (creates the vacancy)
   | "vacant"      // Position open, no candidate yet
   | "discussing"  // Bishopric discussing / selecting a candidate
   | "approved"    // Candidate approved by bishopric
@@ -95,6 +96,7 @@ export type SustainedVenue = "sacrament_meeting" | "class";
 
 /** Ordered list used for pipeline display and progress math. */
 export const CALLING_PIPELINE: CallingStage[] = [
+  "needs_release",
   "vacant",
   "discussing",
   "approved",
@@ -108,6 +110,7 @@ export const CALLING_PIPELINE: CallingStage[] = [
 ];
 
 export const CALLING_STAGES: { stage: CallingStage; label: string }[] = [
+  { stage: "needs_release", label: "Needs Release" },
   { stage: "vacant",      label: "Vacant" },
   { stage: "discussing",  label: "Discussing" },
   { stage: "approved",    label: "Approved" },
