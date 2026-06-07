@@ -3,7 +3,7 @@
 import { useState, useMemo } from "react";
 import {
   Plus, AlertTriangle, CheckCircle2, ClipboardList,
-  GripVertical, User, ArrowRight, Search, ChevronDown, ChevronRight, X,
+  GripVertical, User, ArrowRight, Search, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -920,7 +920,6 @@ function ChartView({ roster }: ChartViewProps) {
   const [query, setQuery]               = useState("");
   const [vacantOnly, setVacantOnly]     = useState(false);
   const [activeMember, setActiveMember] = useState<string | null>(null);
-  const [collapsed, setCollapsed]       = useState<Set<string>>(new Set());
 
   const q = query.trim().toLowerCase();
 
@@ -956,17 +955,7 @@ function ChartView({ roster }: ChartViewProps) {
     return order.map((org) => ({ org, groups: byOrg.get(org)! }));
   }, [roster]);
 
-  // When filtering, force every (matching) section open.
   const filtering = q !== "" || vacantOnly || activeMember !== null;
-
-  function toggle(org: string) {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(org)) next.delete(org); else next.add(org);
-      return next;
-    });
-  }
-
   const matchCount = filtering ? allEntries.filter(matches).length : totalCount;
 
   return (
@@ -979,10 +968,19 @@ function ChartView({ roster }: ChartViewProps) {
           <span className="text-red-600 dark:text-red-400">{vacantCount} vacant</span>
         </div>
         <div className="flex items-center gap-2">
+          <div className="relative flex-1 sm:w-64">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search person or calling…"
+              className="pl-9"
+            />
+          </div>
           <button
             onClick={() => setVacantOnly((v) => !v)}
             className={cn(
-              "px-3 py-1.5 rounded-full text-xs font-medium transition-colors",
+              "px-3 py-1.5 rounded-full text-xs font-medium transition-colors shrink-0 whitespace-nowrap",
               vacantOnly
                 ? "bg-red-100 text-red-800 dark:bg-red-900/60 dark:text-red-200"
                 : "bg-muted text-muted-foreground hover:bg-accent hover:text-accent-foreground"
@@ -990,31 +988,7 @@ function ChartView({ roster }: ChartViewProps) {
           >
             Vacancies only
           </button>
-          <button
-            onClick={() => setCollapsed(filtering ? new Set() : new Set(orgs.map((o) => o.org)))}
-            className="px-3 py-1.5 rounded-full text-xs font-medium bg-muted text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
-            disabled={filtering}
-          >
-            Collapse all
-          </button>
-          <button
-            onClick={() => setCollapsed(new Set())}
-            className="px-3 py-1.5 rounded-full text-xs font-medium bg-muted text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
-          >
-            Expand all
-          </button>
         </div>
-      </div>
-
-      {/* Search */}
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search by person or calling…"
-          className="pl-9"
-        />
       </div>
 
       {/* Active member banner */}
@@ -1037,7 +1011,9 @@ function ChartView({ roster }: ChartViewProps) {
           <p className="text-sm text-muted-foreground">No callings match your filters</p>
         </div>
       ) : (
-        <div className="space-y-3">
+        // Masonry-style columns so every organization is visible at once on a
+        // wide desktop screen — nothing is collapsed or hidden.
+        <div className="gap-3 columns-1 md:columns-2 xl:columns-3 [&>*]:mb-3 [&>*]:break-inside-avoid">
           {orgs.map(({ org, groups }) => {
             const orgEntries = groups.flatMap((g) => g.entries);
             const orgVacant  = orgEntries.filter((e) => !e.member).length;
@@ -1049,18 +1025,10 @@ function ChartView({ roster }: ChartViewProps) {
               .filter((g) => g.shown.length > 0);
             if (filtering && visibleGroups.length === 0) return null;
 
-            const isCollapsed = !filtering && collapsed.has(org);
-
             return (
-              <div key={org} className="rounded-xl border border-border bg-card overflow-hidden">
+              <div key={org} className="rounded-xl border border-border bg-card overflow-hidden inline-block w-full align-top">
                 {/* Org header */}
-                <button
-                  onClick={() => toggle(org)}
-                  className="w-full flex items-center gap-2 px-4 py-3 text-left hover:bg-muted/40 transition-colors"
-                >
-                  {isCollapsed
-                    ? <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
-                    : <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />}
+                <div className="flex items-center gap-2 px-4 py-3 bg-muted/40 border-b border-border">
                   <span className="font-semibold flex-1 truncate">{org}</span>
                   <span className="text-xs text-muted-foreground tabular-nums shrink-0">
                     {orgFilled}/{orgEntries.length}
@@ -1070,31 +1038,29 @@ function ChartView({ roster }: ChartViewProps) {
                       {orgVacant} vacant
                     </Badge>
                   )}
-                </button>
+                </div>
 
-                {/* Org body */}
-                {!isCollapsed && (
-                  <div className="px-2 pb-2 space-y-2">
-                    {visibleGroups.map((g, gi) => (
-                      <div key={`${g.subOrg ?? "_"}-${gi}`}>
-                        {g.subOrg && (
-                          <p className="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">
-                            {g.subOrg}
-                          </p>
-                        )}
-                        {(filtering ? g.shown : g.entries).map((entry, ei) => (
-                          <ChartRow
-                            key={`${entry.position}-${entry.member ?? "vacant"}-${ei}`}
-                            entry={entry}
-                            holdCount={entry.member ? holdCounts.get(entry.member) ?? 1 : 0}
-                            isActiveMember={!!entry.member && entry.member === activeMember}
-                            onMemberClick={(m) => setActiveMember((cur) => (cur === m ? null : m))}
-                          />
-                        ))}
-                      </div>
-                    ))}
-                  </div>
-                )}
+                {/* Org body — always expanded */}
+                <div className="px-2 py-2 space-y-2">
+                  {visibleGroups.map((g, gi) => (
+                    <div key={`${g.subOrg ?? "_"}-${gi}`}>
+                      {g.subOrg && (
+                        <p className="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+                          {g.subOrg}
+                        </p>
+                      )}
+                      {(filtering ? g.shown : g.entries).map((entry, ei) => (
+                        <ChartRow
+                          key={`${entry.position}-${entry.member ?? "vacant"}-${ei}`}
+                          entry={entry}
+                          holdCount={entry.member ? holdCounts.get(entry.member) ?? 1 : 0}
+                          isActiveMember={!!entry.member && entry.member === activeMember}
+                          onMemberClick={(m) => setActiveMember((cur) => (cur === m ? null : m))}
+                        />
+                      ))}
+                    </div>
+                  ))}
+                </div>
               </div>
             );
           })}
