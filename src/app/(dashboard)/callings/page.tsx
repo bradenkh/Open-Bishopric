@@ -843,20 +843,24 @@ interface ChartRowProps {
   entry: RosterEntry;
   holdCount: number;
   isActiveMember: boolean;
+  isHighlighted: boolean;
   onMemberClick: (member: string) => void;
 }
 
-function ChartRow({ entry, holdCount, isActiveMember, onMemberClick }: ChartRowProps) {
+function ChartRow({ entry, holdCount, isActiveMember, isHighlighted, onMemberClick }: ChartRowProps) {
   const isVacant = !entry.member;
   return (
     <div
       className={cn(
         "flex items-center gap-3 px-3 py-1.5 rounded-lg text-sm transition-colors",
-        isVacant
-          ? "bg-red-50/70 dark:bg-red-950/20"
-          : isActiveMember
-            ? "bg-primary/10 ring-1 ring-primary/40"
-            : "hover:bg-muted/60"
+        // Search highlight takes precedence so matches stand out everywhere.
+        isHighlighted
+          ? "bg-yellow-200/80 ring-1 ring-yellow-400 dark:bg-yellow-500/25 dark:ring-yellow-500/50"
+          : isVacant
+            ? "bg-red-50/70 dark:bg-red-950/20"
+            : isActiveMember
+              ? "bg-primary/10 ring-1 ring-primary/40"
+              : "hover:bg-muted/60"
       )}
     >
       <p className={cn("min-w-0 flex-1 truncate", isVacant && "text-muted-foreground")}>
@@ -937,12 +941,16 @@ function ChartView({ roster }: ChartViewProps) {
   const filledCount = allEntries.filter((e) => e.member).length;
   const vacantCount = totalCount - filledCount;
 
-  const matches = (e: RosterEntry): boolean => {
+  // Filters that hide rows (explicit, opt-in). Search is NOT one of them.
+  const passesFilter = (e: RosterEntry): boolean => {
     if (vacantOnly && e.member) return false;
     if (activeMember && e.member !== activeMember) return false;
-    if (q && !`${e.position} ${e.member ?? "vacant"}`.toLowerCase().includes(q)) return false;
     return true;
   };
+
+  // Search highlights matching rows without removing anything from view.
+  const isHighlighted = (e: RosterEntry): boolean =>
+    q !== "" && `${e.position} ${e.member ?? "vacant"}`.toLowerCase().includes(q);
 
   // Order orgs by first appearance; keep their sub-groups in order.
   const orgs = useMemo(() => {
@@ -955,8 +963,9 @@ function ChartView({ roster }: ChartViewProps) {
     return order.map((org) => ({ org, groups: byOrg.get(org)! }));
   }, [roster]);
 
-  const filtering = q !== "" || vacantOnly || activeMember !== null;
-  const matchCount = filtering ? allEntries.filter(matches).length : totalCount;
+  const filtering = vacantOnly || activeMember !== null;
+  const matchCount = filtering ? allEntries.filter(passesFilter).length : totalCount;
+  const highlightCount = q !== "" ? allEntries.filter(isHighlighted).length : 0;
 
   return (
     <div className="space-y-4">
@@ -968,14 +977,19 @@ function ChartView({ roster }: ChartViewProps) {
           <span className="text-red-600 dark:text-red-400">{vacantCount} vacant</span>
         </div>
         <div className="flex items-center gap-2">
-          <div className="relative flex-1 sm:w-64">
+          <div className="relative flex-1 sm:w-72">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search person or calling…"
-              className="pl-9"
+              placeholder="Search to highlight a person or calling…"
+              className="pl-9 pr-16"
             />
+            {q !== "" && (
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-medium text-muted-foreground tabular-nums">
+                {highlightCount} match{highlightCount !== 1 ? "es" : ""}
+              </span>
+            )}
           </div>
           <button
             onClick={() => setVacantOnly((v) => !v)}
@@ -1019,9 +1033,9 @@ function ChartView({ roster }: ChartViewProps) {
             const orgVacant  = orgEntries.filter((e) => !e.member).length;
             const orgFilled  = orgEntries.length - orgVacant;
 
-            // Sub-groups with at least one matching row.
+            // Sub-groups with at least one row left after filtering.
             const visibleGroups = groups
-              .map((g) => ({ ...g, shown: g.entries.filter(matches) }))
+              .map((g) => ({ ...g, shown: g.entries.filter(passesFilter) }))
               .filter((g) => g.shown.length > 0);
             if (filtering && visibleGroups.length === 0) return null;
 
@@ -1055,6 +1069,7 @@ function ChartView({ roster }: ChartViewProps) {
                           entry={entry}
                           holdCount={entry.member ? holdCounts.get(entry.member) ?? 1 : 0}
                           isActiveMember={!!entry.member && entry.member === activeMember}
+                          isHighlighted={isHighlighted(entry)}
                           onMemberClick={(m) => setActiveMember((cur) => (cur === m ? null : m))}
                         />
                       ))}
