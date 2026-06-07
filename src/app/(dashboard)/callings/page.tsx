@@ -416,7 +416,11 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
               />
             </div>
             <p className="text-xs text-muted-foreground">
-              The position will return to <strong>Vacant</strong> so you can suggest another candidate.
+              {(calling.suggestedReplacements?.length ?? 0) > 0 ? (
+                <>The position returns to <strong>Vacant</strong> with the same suggestions, so you can choose someone else.</>
+              ) : (
+                <>The position returns to <strong>Vacant</strong> so you can suggest another candidate.</>
+              )}
             </p>
             <div className="flex justify-end gap-2">
               <Button variant="ghost" size="sm" onClick={() => setShowDeclineForm(false)}>Back</Button>
@@ -426,11 +430,19 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
                 onClick={() => {
                   // Auto-complete the open extend task
                   completeCallingTasks(calling.id);
+                  const declined = calling.memberName;
                   onSave({
                     stage:         "vacant",
                     declineReason: declineReason.trim() || undefined,
                     declinedAt:    new Date().toISOString(),
                     memberName:    "",
+                    // Drop the declined pick but keep the suggestion list so the
+                    // bishopric can choose someone else (release context is kept too).
+                    replacementName:       undefined,
+                    suggestedReplacements: calling.suggestedReplacements ?? [],
+                    notes: declined
+                      ? `${calling.notes ? `${calling.notes} · ` : ""}${declined} declined`
+                      : calling.notes,
                   });
                 }}
               >
