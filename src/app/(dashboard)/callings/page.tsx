@@ -38,7 +38,9 @@ const SET_APART_MEMBERS = MOCK_BISHOPRIC_MEMBERS.filter(
 
 function normalizeStage(stage: string): CallingStage {
   const legacy: Record<string, CallingStage> = {
-    identified: "discussing",
+    identified: "vacant",
+    discussing: "vacant",
+    approved: "extending",
     extended: "extending",
     responded: "accepted",
   };
@@ -65,8 +67,6 @@ function getInitials(name: string): string {
 const STAGE_COLORS: Record<CallingStage, string> = {
   needs_release: "bg-orange-100 text-orange-800 dark:bg-orange-900/60 dark:text-orange-200",
   vacant:      "bg-red-100 text-red-800 dark:bg-red-900/60 dark:text-red-200",
-  discussing:  "bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200",
-  approved:    "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/60 dark:text-yellow-200",
   extending:   "bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-200",
   accepted:    "bg-sky-100 text-sky-800 dark:bg-sky-900/60 dark:text-sky-200",
   sustaining:  "bg-purple-100 text-purple-800 dark:bg-purple-900/60 dark:text-purple-200",
@@ -80,8 +80,6 @@ const STAGE_COLORS: Record<CallingStage, string> = {
 const STAGE_COLUMN_COLORS: Record<CallingStage, { header: string; ring: string; drop: string }> = {
   needs_release: { header: "bg-orange-50 border-orange-200 dark:bg-orange-950/30 dark:border-orange-800", ring: "ring-orange-400", drop: "bg-orange-50/60 dark:bg-orange-950/20" },
   vacant:      { header: "bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-800",       ring: "ring-red-400",    drop: "bg-red-50/60 dark:bg-red-950/20" },
-  discussing:  { header: "bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-800", ring: "ring-amber-400",  drop: "bg-amber-50/60 dark:bg-amber-950/20" },
-  approved:    { header: "bg-yellow-50 border-yellow-200 dark:bg-yellow-950/30 dark:border-yellow-800", ring: "ring-yellow-400", drop: "bg-yellow-50/60 dark:bg-yellow-950/20" },
   extending:   { header: "bg-blue-50 border-blue-200 dark:bg-blue-950/30 dark:border-blue-800",   ring: "ring-blue-400",   drop: "bg-blue-50/60 dark:bg-blue-950/20" },
   accepted:    { header: "bg-sky-50 border-sky-200 dark:bg-sky-950/30 dark:border-sky-800",       ring: "ring-sky-400",    drop: "bg-sky-50/60 dark:bg-sky-950/20" },
   sustaining:  { header: "bg-purple-50 border-purple-200 dark:bg-purple-950/30 dark:border-purple-800", ring: "ring-purple-400", drop: "bg-purple-50/60 dark:bg-purple-950/20" },
@@ -92,10 +90,8 @@ const STAGE_COLUMN_COLORS: Record<CallingStage, { header: string; ring: string; 
 };
 
 const NEXT_ACTION: Partial<Record<CallingStage, string>> = {
-  needs_release: "Release the current holder",
-  vacant:      "Identify a candidate",
-  discussing:  "Get bishopric approval",
-  approved:    "Extend the calling",
+  needs_release: "Suggest & choose a replacement",
+  vacant:      "Suggest a candidate & extend",
   extending:   "Follow up — awaiting response",
   accepted:    "Schedule sustaining",
   sustaining:  "Confirm at meeting",
@@ -122,6 +118,21 @@ interface AdvancePanelProps {
   onClose: () => void;
 }
 
+function makeCallingTask(calling: Calling, overrides: Partial<Task>): Task {
+  const now = new Date().toISOString();
+  return {
+    id:        `t-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    type:      "calling",
+    status:    "active",
+    memberName: calling.memberName ?? undefined,
+    createdBy: "system",
+    createdAt: now,
+    updatedAt: now,
+    title:     "",
+    ...overrides,
+  };
+}
+
 function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
   const stage = calling.stage;
   const name  = calling.memberName || "this person";
@@ -129,13 +140,11 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
   const { addTask, completeCallingTasks } = useTasks();
 
   // ── Form state ────────────────────────────────────────────────────────────
-  const [candidateName,   setCandidateName]   = useState("");
   const [releasedBy,      setReleasedBy]      = useState("");
-  // Release — suggested replacements
+  // Suggested candidates / replacements (needs_release + vacant)
   const [replacements,    setReplacements]    = useState<string[]>(calling.suggestedReplacements ?? []);
   const [replacementInput,setReplacementInput]= useState("");
   const [chosen,          setChosen]          = useState(calling.replacementName ?? "");
-  const [approvedBy,      setApprovedBy]      = useState(calling.approvedBy ?? "");
   // Extending — bishopric member dropdown
   const [extendingMember, setExtendingMember] = useState(
     EXTENDING_MEMBERS.find((m) => m.name === calling.extendedBy)?.id ?? ""
@@ -150,40 +159,26 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
   const [setApartDate,    setSetApartDate]    = useState(calling.setApartDate ?? "");
   const [lcrConfirmed,    setLcrConfirmed]    = useState(false);
   const [declineReason,   setDeclineReason]   = useState("");
-  const [declineRestart,  setDeclineRestart]  = useState<"vacant" | "discussing">("vacant");
   const [showDeclineForm, setShowDeclineForm] = useState(false);
-
-  // ── Helpers ───────────────────────────────────────────────────────────────
-
-  function makeCallingTask(overrides: Partial<Task>): Task {
-    const now = new Date().toISOString();
-    return {
-      id:        `t-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      type:      "calling",
-      status:    "active",
-      memberName: calling.memberName ?? undefined,
-      createdBy: "system",
-      createdAt: now,
-      updatedAt: now,
-      title:     "",
-      ...overrides,
-    };
-  }
 
   // ── Stages ────────────────────────────────────────────────────────────────
 
-  if (stage === "needs_release") {
-    const released = calling.memberName || "the current holder";
-    const addReplacement = () => {
-      const v = replacementInput.trim();
-      if (!v || replacements.includes(v)) { setReplacementInput(""); return; }
-      setReplacements((prev) => [...prev, v]);
-      setReplacementInput("");
-    };
-    const removeReplacement = (n: string) => {
-      setReplacements((prev) => prev.filter((r) => r !== n));
-      if (chosen === n) setChosen("");
-    };
+  // ── Suggest candidates → assign a counselor to extend (needs_release + vacant)
+  const addSuggestion = () => {
+    const v = replacementInput.trim();
+    if (!v || replacements.includes(v)) { setReplacementInput(""); return; }
+    setReplacements((prev) => [...prev, v]);
+    setReplacementInput("");
+  };
+  const removeSuggestion = (n: string) => {
+    setReplacements((prev) => prev.filter((r) => r !== n));
+    if (chosen === n) setChosen("");
+  };
+
+  function suggestExtendBody(isRelease: boolean) {
+    const released  = calling.memberName || "the current holder";
+    const noun      = isRelease ? "replacement" : "candidate";
+    const counselor = EXTENDING_MEMBERS.find((m) => m.id === extendingMember);
     const releaseNote = () => {
       const note = `Released ${released}${releasedBy.trim() ? ` by ${releasedBy.trim()}` : ""}`;
       return calling.notes ? `${calling.notes} · ${note}` : note;
@@ -192,24 +187,27 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
     return (
       <div className="border-t pt-4 space-y-4">
         <div>
-          <p className="text-sm font-semibold">Release & Replace</p>
+          <p className="text-sm font-semibold">{isRelease ? "Release & Replace" : "Fill This Position"}</p>
           <p className="text-sm text-muted-foreground mt-0.5">
-            <strong>{released}</strong> is being released from {calling.position}. Track who could replace
-            them, then pick one to take through the pipeline.
+            {isRelease ? (
+              <><strong>{released}</strong> is being released from {calling.position}. Suggest replacements, choose one, then assign a counselor to extend.</>
+            ) : (
+              <>Suggest candidates for {calling.position}, choose one, then assign a counselor to extend.</>
+            )}
           </p>
         </div>
 
-        {/* Suggested replacements */}
+        {/* Suggestions */}
         <div className="space-y-2">
-          <Label>Suggested replacements</Label>
+          <Label>{isRelease ? "Suggested replacements" : "Suggested candidates"}</Label>
           <div className="flex gap-2">
             <Input
               value={replacementInput}
               onChange={(e) => setReplacementInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addReplacement(); } }}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addSuggestion(); } }}
               placeholder="Add a name…"
             />
-            <Button type="button" variant="outline" onClick={addReplacement} disabled={!replacementInput.trim()}>
+            <Button type="button" variant="outline" onClick={addSuggestion} disabled={!replacementInput.trim()}>
               Add
             </Button>
           </div>
@@ -217,7 +215,7 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
             <p className="text-xs text-muted-foreground">No suggestions yet — add a few names to consider.</p>
           ) : (
             <div className="space-y-1.5">
-              <p className="text-[11px] text-muted-foreground">Tap a name to choose the replacement.</p>
+              <p className="text-[11px] text-muted-foreground">Tap a name to choose the {noun}.</p>
               <div className="flex flex-wrap gap-1.5">
                 {replacements.map((nm) => (
                   <span
@@ -233,7 +231,7 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
                     {chosen === nm && <CheckCircle2 className="h-3 w-3" />}
                     {nm}
                     <button
-                      onClick={(e) => { e.stopPropagation(); removeReplacement(nm); }}
+                      onClick={(e) => { e.stopPropagation(); removeSuggestion(nm); }}
                       className="ml-0.5 rounded-full p-0.5 hover:bg-black/10 dark:hover:bg-white/10"
                       aria-label={`Remove ${nm}`}
                     >
@@ -246,163 +244,109 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
           )}
         </div>
 
-        <div className="space-y-1.5">
-          <Label htmlFor="releasedBy">Released by (optional)</Label>
-          <Input
-            id="releasedBy"
-            value={releasedBy}
-            onChange={(e) => setReleasedBy(e.target.value)}
-            placeholder="e.g. Bishop Phillips"
-          />
-        </div>
+        {/* Counselor — appears once a candidate is chosen */}
+        {chosen && (
+          <div className="space-y-1.5">
+            <Label>Assign a counselor to extend</Label>
+            <Select value={extendingMember} onValueChange={setExtendingMember}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select a counselor…" />
+              </SelectTrigger>
+              <SelectContent>
+                {EXTENDING_MEMBERS.map((m) => (
+                  <SelectItem key={m.id} value={m.id}>
+                    {m.name} <span className="text-muted-foreground capitalize">({m.role})</span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {counselor && (
+              <div className="rounded-lg border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/60 p-3 text-xs text-blue-800 dark:text-blue-200">
+                A task will be added to <strong>{counselor.name}&apos;s</strong> todos to{" "}
+                {isRelease
+                  ? <>release {released} and extend {calling.position} to {chosen}.</>
+                  : <>extend {calling.position} to {chosen}.</>}
+              </div>
+            )}
+          </div>
+        )}
+
+        {isRelease && (
+          <div className="space-y-1.5">
+            <Label htmlFor="releasedBy">Released by (optional)</Label>
+            <Input
+              id="releasedBy"
+              value={releasedBy}
+              onChange={(e) => setReleasedBy(e.target.value)}
+              placeholder="e.g. Bishop Phillips"
+            />
+          </div>
+        )}
 
         {/* Actions */}
         <div className="flex flex-col gap-2 pt-1">
           <Button
-            disabled={!chosen}
-            onClick={() =>
+            disabled={!chosen || !extendingMember}
+            onClick={() => {
+              const member = EXTENDING_MEMBERS.find((m) => m.id === extendingMember)!;
+              addTask(makeCallingTask(calling, {
+                title: isRelease
+                  ? `Release & extend — ${calling.position}`
+                  : `Extend calling — ${calling.position} → ${chosen}`,
+                description: isRelease
+                  ? `Speak with ${released} about being released as ${calling.position}${calling.organization ? ` (${calling.organization})` : ""}, and extend the calling to ${chosen}.`
+                  : `Contact ${chosen} to extend the calling of ${calling.position}${calling.organization ? ` (${calling.organization})` : ""}. Once they respond, record the outcome in the pipeline.`,
+                assigneeId:   member.id,
+                assigneeName: member.name,
+                memberName:   chosen,
+                context: {
+                  callingId: calling.id,
+                  taskType:  isRelease ? "release_extend" : "extend",
+                  position:  calling.position,
+                },
+              }));
               onSave({
-                stage:                 "approved",
+                stage:                 "extending",
                 memberName:            chosen,
-                replacementName:       chosen,
-                releasedName:          calling.memberName || undefined,
                 suggestedReplacements: replacements,
-                notes:                 releaseNote(),
-              })
-            }
+                extendedBy:            member.name,
+                extendedAt:            new Date().toISOString(),
+                ...(isRelease
+                  ? { replacementName: chosen, releasedName: calling.memberName || undefined, notes: releaseNote() }
+                  : {}),
+              });
+            }}
           >
-            {chosen ? `Release & call ${chosen}` : "Choose a replacement to continue"}
+            {!chosen
+              ? `Choose a ${noun} to continue`
+              : !extendingMember
+                ? "Assign a counselor to continue"
+                : `Assign & extend to ${chosen}`}
           </Button>
-          <Button
-            variant="outline"
-            onClick={() =>
-              onSave({
-                stage:                 "vacant",
-                memberName:            "",
-                releasedName:          calling.memberName || undefined,
-                suggestedReplacements: replacements,
-                notes:                 releaseNote(),
-              })
-            }
-          >
-            Release & leave vacant
-          </Button>
+          {isRelease && (
+            <Button
+              variant="outline"
+              onClick={() =>
+                onSave({
+                  stage:                 "vacant",
+                  memberName:            "",
+                  releasedName:          calling.memberName || undefined,
+                  suggestedReplacements: replacements,
+                  notes:                 releaseNote(),
+                })
+              }
+            >
+              Release & leave vacant
+            </Button>
+          )}
           <Button variant="ghost" onClick={onClose}>Not Yet</Button>
         </div>
       </div>
     );
   }
 
-  if (stage === "vacant") {
-    return (
-      <div className="border-t pt-4 space-y-3">
-        <p className="text-sm font-semibold">Identify a Candidate</p>
-        <div className="space-y-1.5">
-          <Label htmlFor="candidateName">Who is being discussed for this position?</Label>
-          <Input
-            id="candidateName"
-            value={candidateName}
-            onChange={(e) => setCandidateName(e.target.value)}
-            placeholder="Full name"
-          />
-        </div>
-        <div className="flex justify-end gap-2">
-          <Button variant="outline" onClick={onClose}>Not Yet</Button>
-          <Button
-            disabled={!candidateName.trim()}
-            onClick={() => onSave({ stage: "discussing", memberName: candidateName.trim() })}
-          >
-            Start Discussion
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  if (stage === "discussing") {
-    return (
-      <div className="border-t pt-4 space-y-3">
-        <p className="text-sm font-semibold">Bishopric Approval</p>
-        <p className="text-sm text-muted-foreground">
-          Has the bishopric approved calling <strong>{name}</strong>?
-        </p>
-        <div className="space-y-1.5">
-          <Label htmlFor="approvedBy">Approved by</Label>
-          <Input
-            id="approvedBy"
-            value={approvedBy}
-            onChange={(e) => setApprovedBy(e.target.value)}
-            placeholder="e.g. Bishop Anderson"
-          />
-        </div>
-        <div className="flex justify-end gap-2">
-          <Button variant="outline" onClick={onClose}>Not Yet</Button>
-          <Button
-            disabled={!approvedBy.trim()}
-            onClick={() => onSave({ stage: "approved", approvedBy: approvedBy.trim(), approvedAt: new Date().toISOString() })}
-          >
-            Mark Approved
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  if (stage === "approved") {
-    const selectedMember = EXTENDING_MEMBERS.find((m) => m.id === extendingMember);
-    return (
-      <div className="border-t pt-4 space-y-3">
-        <p className="text-sm font-semibold">Assign: Extend the Calling</p>
-        <p className="text-sm text-muted-foreground">
-          Which bishopric member will reach out to <strong>{name}</strong> to extend this calling?
-        </p>
-        <div className="space-y-1.5">
-          <Label>Assigned to</Label>
-          <Select value={extendingMember} onValueChange={setExtendingMember}>
-            <SelectTrigger>
-              <SelectValue placeholder="Select a bishopric member…" />
-            </SelectTrigger>
-            <SelectContent>
-              {EXTENDING_MEMBERS.map((m) => (
-                <SelectItem key={m.id} value={m.id}>
-                  {m.name} <span className="text-muted-foreground capitalize">({m.role})</span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        {selectedMember && (
-          <div className="rounded-lg border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/60 p-3 text-xs text-blue-800 dark:text-blue-200">
-            A task will be added to <strong>{selectedMember.name}&apos;s</strong> todos to call {name} and extend the calling.
-          </div>
-        )}
-        <div className="flex justify-end gap-2">
-          <Button variant="outline" onClick={onClose}>Not Yet</Button>
-          <Button
-            disabled={!extendingMember}
-            onClick={() => {
-              const member = EXTENDING_MEMBERS.find((m) => m.id === extendingMember)!;
-              // Create extend task for assigned bishopric member
-              addTask(makeCallingTask({
-                title:        `Extend calling — ${calling.position}${calling.memberName ? ` → ${calling.memberName}` : ""}`,
-                description:  `Contact ${name} to extend the calling of ${calling.position}${calling.organization ? ` (${calling.organization})` : ""}. Once they respond, record the outcome in the callings pipeline.`,
-                assigneeId:   member.id,
-                assigneeName: member.name,
-                context: {
-                  callingId: calling.id,
-                  taskType:  "extend",
-                  position:  calling.position,
-                },
-              }));
-              onSave({ stage: "extending", extendedBy: member.name, extendedAt: new Date().toISOString() });
-            }}
-          >
-            Assign &amp; Mark Extended
-          </Button>
-        </div>
-      </div>
-    );
-  }
+  if (stage === "needs_release") return suggestExtendBody(true);
+  if (stage === "vacant")        return suggestExtendBody(false);
 
   if (stage === "extending") {
     return (
@@ -446,23 +390,9 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
                 placeholder="Optional reason"
               />
             </div>
-            <div className="space-y-1.5">
-              <Label>Next step</Label>
-              <div className="flex gap-4">
-                {(["vacant", "discussing"] as const).map((opt) => (
-                  <label key={opt} className="flex items-center gap-2 text-sm cursor-pointer">
-                    <input
-                      type="radio"
-                      name="restart"
-                      value={opt}
-                      checked={declineRestart === opt}
-                      onChange={() => setDeclineRestart(opt)}
-                    />
-                    {opt === "vacant" ? "Leave as vacant" : "Discuss new candidate"}
-                  </label>
-                ))}
-              </div>
-            </div>
+            <p className="text-xs text-muted-foreground">
+              The position will return to <strong>Vacant</strong> so you can suggest another candidate.
+            </p>
             <div className="flex justify-end gap-2">
               <Button variant="ghost" size="sm" onClick={() => setShowDeclineForm(false)}>Back</Button>
               <Button
@@ -472,10 +402,10 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
                   // Auto-complete the open extend task
                   completeCallingTasks(calling.id);
                   onSave({
-                    stage:         declineRestart,
+                    stage:         "vacant",
                     declineReason: declineReason.trim() || undefined,
                     declinedAt:    new Date().toISOString(),
-                    memberName:    declineRestart === "vacant" ? "" : calling.memberName,
+                    memberName:    "",
                   });
                 }}
               >
@@ -634,7 +564,7 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
             onClick={() => {
               const member = SET_APART_MEMBERS.find((m) => m.id === setApartMember)!;
               // Create set-apart task — when checked off, clerk LCR task is auto-created
-              addTask(makeCallingTask({
+              addTask(makeCallingTask(calling, {
                 title:        `Set apart — ${name} as ${calling.position}`,
                 description:  `Set ${name} apart as ${calling.position}${calling.organization ? ` (${calling.organization})` : ""}${setApartDate ? ` on ${setApartDate}` : ""}.`,
                 assigneeId:   member.id,
@@ -802,7 +732,8 @@ function CallingCard({
         </div>
       </div>
 
-      {calling.stage === "needs_release" && (() => {
+      {(calling.stage === "needs_release" || calling.stage === "vacant") && (() => {
+        const isRelease   = calling.stage === "needs_release";
         const suggestions = calling.suggestedReplacements ?? [];
         const chosenExtra =
           calling.replacementName && !suggestions.includes(calling.replacementName)
@@ -812,13 +743,17 @@ function CallingCard({
         if (all.length === 0) {
           return (
             <div className="mt-2 pl-5">
-              <p className="text-[10px] text-muted-foreground/60 italic">No replacement suggested yet</p>
+              <p className="text-[10px] text-muted-foreground/60 italic">
+                No {isRelease ? "replacement" : "candidate"} suggested yet
+              </p>
             </div>
           );
         }
         return (
           <div className="mt-2 pl-5 space-y-1">
-            <p className="text-[10px] text-muted-foreground">Suggested replacements</p>
+            <p className="text-[10px] text-muted-foreground">
+              {isRelease ? "Suggested replacements" : "Suggested candidates"}
+            </p>
             <div className="flex flex-wrap gap-1">
               {all.map((nm) => {
                 const isChosen = nm === calling.replacementName;
@@ -831,7 +766,7 @@ function CallingCard({
                         ? "bg-primary text-primary-foreground"
                         : "bg-muted text-muted-foreground"
                     )}
-                    title={isChosen ? `${nm} (chosen replacement)` : nm}
+                    title={isChosen ? `${nm} (chosen)` : nm}
                   >
                     {isChosen && <CheckCircle2 className="h-2.5 w-2.5 shrink-0" />}
                     <span className="truncate">{nm}</span>
@@ -1416,14 +1351,18 @@ export default function CallingsPage() {
     setSaving(true);
     await new Promise((r) => setTimeout(r, 200));
     const now = new Date().toISOString();
+    // A named candidate seeds the vacant stage's suggestion list; the bishopric
+    // then chooses them and assigns a counselor to extend.
+    const seededName = form.isVacant ? "" : form.memberName.trim();
     const newCalling: Calling = {
       id:           `c-${Date.now()}`,
-      memberName:   form.isVacant ? "" : form.memberName.trim(),
+      memberName:   "",
       memberId:     "",
       position:     form.position.trim(),
       organization: form.organization.trim(),
       notes:        form.notes.trim(),
-      stage:        form.isVacant ? "vacant" : "discussing",
+      stage:        "vacant",
+      suggestedReplacements: seededName ? [seededName] : [],
       createdBy:    user?.uid ?? "mock",
       createdAt:    now,
       updatedAt:    now,
@@ -1620,7 +1559,11 @@ export default function CallingsPage() {
                 <div className="text-sm space-y-1 text-muted-foreground">
                   <p><span className="font-medium text-foreground">Position:</span> {selected.position}</p>
                   {selected.organization && <p><span className="font-medium text-foreground">Organization:</span> {selected.organization}</p>}
-                  {selected.approvedBy    && <p><span className="font-medium text-foreground">Approved by:</span> {selected.approvedBy}</p>}
+                  {selected.releasedName  && <p><span className="font-medium text-foreground">Replacing:</span> {selected.releasedName}</p>}
+                  {selected.replacementName && <p><span className="font-medium text-foreground">Replacement:</span> {selected.replacementName}</p>}
+                  {selected.stage === "needs_release" && (selected.suggestedReplacements?.length ?? 0) > 0 && (
+                    <p><span className="font-medium text-foreground">Suggested:</span> {selected.suggestedReplacements!.join(", ")}</p>
+                  )}
                   {selected.extendedBy    && <p><span className="font-medium text-foreground">Extended by:</span> {selected.extendedBy}</p>}
                   {selected.sustainedIn   && <p><span className="font-medium text-foreground">Venue:</span> {selected.sustainedIn === "sacrament_meeting" ? "Sacrament Meeting" : "Class / Quorum"}</p>}
                   {selected.sustainedDate && <p><span className="font-medium text-foreground">Sustaining date:</span> {selected.sustainedDate}</p>}

@@ -74,16 +74,15 @@ export interface Task {
 /**
  * The ordered pipeline every calling moves through.
  *
- *   needs_release → vacant → discussing → approved → extending → accepted
+ *   needs_release → vacant → extending → accepted
  *     → sustaining → sustained → set_apart → lcr_updated → recorded
  *
- * "declined" is not a stage; a decline resets to vacant/discussing.
+ * Candidates are suggested during needs_release / vacant; once one is chosen a
+ * counselor is assigned to extend. A decline resets the position to vacant.
  */
 export type CallingStage =
   | "needs_release" // Current holder needs to be released (creates the vacancy)
-  | "vacant"      // Position open, no candidate yet
-  | "discussing"  // Bishopric discussing / selecting a candidate
-  | "approved"    // Candidate approved by bishopric
+  | "vacant"      // Position open — suggest candidates, then extend
   | "extending"   // Bishopric member reaching out to extend
   | "accepted"    // Person accepted the calling
   | "sustaining"  // Scheduled for sustaining vote
@@ -98,8 +97,6 @@ export type SustainedVenue = "sacrament_meeting" | "class";
 export const CALLING_PIPELINE: CallingStage[] = [
   "needs_release",
   "vacant",
-  "discussing",
-  "approved",
   "extending",
   "accepted",
   "sustaining",
@@ -112,8 +109,6 @@ export const CALLING_PIPELINE: CallingStage[] = [
 export const CALLING_STAGES: { stage: CallingStage; label: string }[] = [
   { stage: "needs_release", label: "Needs Release" },
   { stage: "vacant",      label: "Vacant" },
-  { stage: "discussing",  label: "Discussing" },
-  { stage: "approved",    label: "Approved" },
   { stage: "extending",   label: "Extending" },
   { stage: "accepted",    label: "Accepted" },
   { stage: "sustaining",  label: "To Be Sustained" },
@@ -141,10 +136,6 @@ export interface Calling {
   replacementName?: string;
   /** The person who held the calling before this one (set when released). */
   releasedName?: string;
-
-  // ── Approval
-  approvedBy?: string;
-  approvedAt?: string;
 
   // ── Extension
   extendedBy?: string;
