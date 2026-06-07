@@ -136,6 +136,8 @@ export interface Calling {
   replacementName?: string;
   /** The person who held the calling before this one (set when released). */
   releasedName?: string;
+  /** Bishopric member assigned to inform the outgoing holder of their release. */
+  releasedBy?: string;
 
   // ── Extension
   extendedBy?: string;

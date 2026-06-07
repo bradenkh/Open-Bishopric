@@ -140,14 +140,17 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
   const { addTask, completeCallingTasks } = useTasks();
 
   // ── Form state ────────────────────────────────────────────────────────────
-  const [releasedBy,      setReleasedBy]      = useState("");
   // Suggested candidates / replacements (needs_release + vacant)
   const [replacements,    setReplacements]    = useState<string[]>(calling.suggestedReplacements ?? []);
   const [replacementInput,setReplacementInput]= useState("");
   const [chosen,          setChosen]          = useState(calling.replacementName ?? "");
-  // Extending — bishopric member dropdown
+  // Extending — bishopric member who contacts the new person
   const [extendingMember, setExtendingMember] = useState(
     EXTENDING_MEMBERS.find((m) => m.name === calling.extendedBy)?.id ?? ""
+  );
+  // Releasing — bishopric member who informs the outgoing holder (runs in parallel)
+  const [releasingMember, setReleasingMember] = useState(
+    EXTENDING_MEMBERS.find((m) => m.name === calling.releasedBy)?.id ?? ""
   );
   const [sustainedIn,     setSustainedIn]     = useState<SustainedVenue>("sacrament_meeting");
   const [sustainedDate,   setSustainedDate]   = useState(calling.sustainedDate ?? "");
@@ -178,11 +181,41 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
   function suggestExtendBody(isRelease: boolean) {
     const released  = calling.memberName || "the current holder";
     const noun      = isRelease ? "replacement" : "candidate";
-    const counselor = EXTENDING_MEMBERS.find((m) => m.id === extendingMember);
+    const extender  = EXTENDING_MEMBERS.find((m) => m.id === extendingMember);
+    const releaser  = EXTENDING_MEMBERS.find((m) => m.id === releasingMember);
+    const orgSuffix = calling.organization ? ` (${calling.organization})` : "";
     const releaseNote = () => {
-      const note = `Released ${released}${releasedBy.trim() ? ` by ${releasedBy.trim()}` : ""}`;
+      const note = `Released ${released}${releaser ? ` — informed by ${releaser.name}` : ""}`;
       return calling.notes ? `${calling.notes} · ${note}` : note;
     };
+    const memberSelect = (
+      value: string,
+      onChange: (v: string) => void,
+      placeholder: string,
+    ) => (
+      <Select value={value} onValueChange={onChange}>
+        <SelectTrigger>
+          <SelectValue placeholder={placeholder} />
+        </SelectTrigger>
+        <SelectContent>
+          {EXTENDING_MEMBERS.map((m) => (
+            <SelectItem key={m.id} value={m.id}>
+              {m.name} <span className="text-muted-foreground capitalize">({m.role})</span>
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    );
+    // Adds the parallel "inform the outgoing holder" task.
+    const addReleaseTask = (member: { id: string; name: string }) =>
+      addTask(makeCallingTask(calling, {
+        title:        `Inform of release — ${calling.position}`,
+        description:  `Contact ${released} to let them know they're being released as ${calling.position}${orgSuffix}.`,
+        assigneeId:   member.id,
+        assigneeName: member.name,
+        memberName:   calling.memberName || undefined,
+        context: { callingId: calling.id, taskType: "release_inform", position: calling.position },
+      }));
 
     return (
       <div className="border-t pt-4 space-y-4">
@@ -190,7 +223,7 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
           <p className="text-sm font-semibold">{isRelease ? "Release & Replace" : "Fill This Position"}</p>
           <p className="text-sm text-muted-foreground mt-0.5">
             {isRelease ? (
-              <><strong>{released}</strong> is being released from {calling.position}. Suggest replacements, choose one, then assign a counselor to extend.</>
+              <><strong>{released}</strong> is being released from {calling.position}. Assign someone to inform them, suggest replacements, then assign a counselor to extend — these happen in parallel.</>
             ) : (
               <>Suggest candidates for {calling.position}, choose one, then assign a counselor to extend.</>
             )}
@@ -244,75 +277,62 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
           )}
         </div>
 
-        {/* Counselor — appears once a candidate is chosen */}
-        {chosen && (
+        {/* Release: who informs the outgoing holder (runs in parallel) */}
+        {isRelease && (
           <div className="space-y-1.5">
-            <Label>Assign a counselor to extend</Label>
-            <Select value={extendingMember} onValueChange={setExtendingMember}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select a counselor…" />
-              </SelectTrigger>
-              <SelectContent>
-                {EXTENDING_MEMBERS.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>
-                    {m.name} <span className="text-muted-foreground capitalize">({m.role})</span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {counselor && (
-              <div className="rounded-lg border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/60 p-3 text-xs text-blue-800 dark:text-blue-200">
-                A task will be added to <strong>{counselor.name}&apos;s</strong> todos to{" "}
-                {isRelease
-                  ? <>release {released} and extend {calling.position} to {chosen}.</>
-                  : <>extend {calling.position} to {chosen}.</>}
-              </div>
-            )}
+            <Label>Who will inform {released} of their release?</Label>
+            {memberSelect(releasingMember, setReleasingMember, "Select a counselor…")}
           </div>
         )}
 
-        {isRelease && (
+        {/* Who extends the calling to the chosen person */}
+        {chosen && (
           <div className="space-y-1.5">
-            <Label htmlFor="releasedBy">Released by (optional)</Label>
-            <Input
-              id="releasedBy"
-              value={releasedBy}
-              onChange={(e) => setReleasedBy(e.target.value)}
-              placeholder="e.g. Bishop Phillips"
-            />
+            <Label>Who will extend the calling to {chosen}?</Label>
+            {memberSelect(extendingMember, setExtendingMember, "Select a counselor…")}
+          </div>
+        )}
+
+        {/* Summary of the tasks that will be created */}
+        {((isRelease && releaser) || (chosen && extender)) && (
+          <div className="rounded-lg border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/60 p-3 text-xs text-blue-800 dark:text-blue-200 space-y-1">
+            <ul className="space-y-1 list-disc pl-4">
+              {isRelease && releaser && (
+                <li><strong>{releaser.name}</strong> contacts {released} about the release.</li>
+              )}
+              {chosen && extender && (
+                <li><strong>{extender.name}</strong> extends {calling.position} to {chosen}.</li>
+              )}
+            </ul>
+            {isRelease && releaser && chosen && extender && (
+              <p className="text-[11px] opacity-80">Both tasks are created together and can happen in parallel.</p>
+            )}
           </div>
         )}
 
         {/* Actions */}
         <div className="flex flex-col gap-2 pt-1">
           <Button
-            disabled={!chosen || !extendingMember}
+            disabled={!chosen || !extendingMember || (isRelease && !releasingMember)}
             onClick={() => {
-              const member = EXTENDING_MEMBERS.find((m) => m.id === extendingMember)!;
+              const exMember = EXTENDING_MEMBERS.find((m) => m.id === extendingMember)!;
               addTask(makeCallingTask(calling, {
-                title: isRelease
-                  ? `Release & extend — ${calling.position}`
-                  : `Extend calling — ${calling.position} → ${chosen}`,
-                description: isRelease
-                  ? `Speak with ${released} about being released as ${calling.position}${calling.organization ? ` (${calling.organization})` : ""}, and extend the calling to ${chosen}.`
-                  : `Contact ${chosen} to extend the calling of ${calling.position}${calling.organization ? ` (${calling.organization})` : ""}. Once they respond, record the outcome in the pipeline.`,
-                assigneeId:   member.id,
-                assigneeName: member.name,
+                title:        `Extend calling — ${calling.position} → ${chosen}`,
+                description:  `Contact ${chosen} to extend the calling of ${calling.position}${orgSuffix}. Once they respond, record the outcome in the pipeline.`,
+                assigneeId:   exMember.id,
+                assigneeName: exMember.name,
                 memberName:   chosen,
-                context: {
-                  callingId: calling.id,
-                  taskType:  isRelease ? "release_extend" : "extend",
-                  position:  calling.position,
-                },
+                context: { callingId: calling.id, taskType: "extend", position: calling.position },
               }));
+              if (isRelease) addReleaseTask(releaser!);
               onSave({
                 stage:                 "extending",
                 memberName:            chosen,
                 suggestedReplacements: replacements,
-                extendedBy:            member.name,
+                extendedBy:            exMember.name,
                 extendedAt:            new Date().toISOString(),
                 ...(isRelease
-                  ? { replacementName: chosen, releasedName: calling.memberName || undefined, notes: releaseNote() }
+                  ? { replacementName: chosen, releasedName: calling.memberName || undefined, releasedBy: releaser!.name, notes: releaseNote() }
                   : {}),
               });
             }}
@@ -320,23 +340,28 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
             {!chosen
               ? `Choose a ${noun} to continue`
               : !extendingMember
-                ? "Assign a counselor to continue"
-                : `Assign & extend to ${chosen}`}
+                ? "Assign a counselor to extend"
+                : (isRelease && !releasingMember)
+                  ? "Assign a counselor to release"
+                  : `Assign & extend to ${chosen}`}
           </Button>
           {isRelease && (
             <Button
               variant="outline"
-              onClick={() =>
+              disabled={!releasingMember}
+              onClick={() => {
+                addReleaseTask(releaser!);
                 onSave({
                   stage:                 "vacant",
                   memberName:            "",
                   releasedName:          calling.memberName || undefined,
+                  releasedBy:            releaser!.name,
                   suggestedReplacements: replacements,
                   notes:                 releaseNote(),
-                })
-              }
+                });
+              }}
             >
-              Release & leave vacant
+              Release &amp; leave vacant
             </Button>
           )}
           <Button variant="ghost" onClick={onClose}>Not Yet</Button>
@@ -1560,6 +1585,7 @@ export default function CallingsPage() {
                   <p><span className="font-medium text-foreground">Position:</span> {selected.position}</p>
                   {selected.organization && <p><span className="font-medium text-foreground">Organization:</span> {selected.organization}</p>}
                   {selected.releasedName  && <p><span className="font-medium text-foreground">Replacing:</span> {selected.releasedName}</p>}
+                  {selected.releasedBy    && <p><span className="font-medium text-foreground">Release handled by:</span> {selected.releasedBy}</p>}
                   {selected.replacementName && <p><span className="font-medium text-foreground">Replacement:</span> {selected.replacementName}</p>}
                   {selected.stage === "needs_release" && (selected.suggestedReplacements?.length ?? 0) > 0 && (
                     <p><span className="font-medium text-foreground">Suggested:</span> {selected.suggestedReplacements!.join(", ")}</p>
