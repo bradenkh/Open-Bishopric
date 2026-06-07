@@ -3,7 +3,7 @@
 import { useState, useMemo } from "react";
 import {
   Plus, AlertTriangle, CheckCircle2, ClipboardList,
-  GripVertical, User, ArrowRight, Search, X,
+  GripVertical, User, ArrowRight, Search, X, UserPlus, UserMinus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -882,18 +882,20 @@ function KanbanView({ callings, onSelect, onMove }: KanbanViewProps) {
 
 interface ChartRowProps {
   entry: RosterEntry;
+  org: string;
   holdCount: number;
   isActiveMember: boolean;
   isHighlighted: boolean;
   onMemberClick: (member: string) => void;
+  onAction: (action: "release" | "fill", entry: RosterEntry, org: string) => void;
 }
 
-function ChartRow({ entry, holdCount, isActiveMember, isHighlighted, onMemberClick }: ChartRowProps) {
+function ChartRow({ entry, org, holdCount, isActiveMember, isHighlighted, onMemberClick, onAction }: ChartRowProps) {
   const isVacant = !entry.member;
   return (
     <div
       className={cn(
-        "flex items-center gap-3 px-3 py-1.5 rounded-lg text-sm transition-colors",
+        "group flex items-center gap-3 px-3 py-1.5 rounded-lg text-sm transition-colors",
         // Search highlight takes precedence so matches stand out everywhere.
         isHighlighted
           ? "bg-yellow-200/80 ring-1 ring-yellow-400 dark:bg-yellow-500/25 dark:ring-yellow-500/50"
@@ -952,6 +954,26 @@ function ChartRow({ entry, holdCount, isActiveMember, isHighlighted, onMemberCli
             )}
           </>
         )}
+
+        {/* Per-calling action — visible on hover (always on touch) */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onAction(isVacant ? "fill" : "release", entry, org);
+          }}
+          className={cn(
+            "shrink-0 inline-flex items-center justify-center h-6 w-6 rounded-md transition-colors",
+            "text-muted-foreground/60 hover:bg-muted hover:text-foreground focus-visible:opacity-100",
+            "opacity-100 md:opacity-0 md:group-hover:opacity-100",
+            isVacant
+              ? "hover:text-green-700 dark:hover:text-green-300"
+              : "hover:text-orange-700 dark:hover:text-orange-300"
+          )}
+          title={isVacant ? "Add to pipeline to fill" : "Mark for release"}
+          aria-label={isVacant ? "Add to pipeline to fill" : "Mark for release"}
+        >
+          {isVacant ? <UserPlus className="h-3.5 w-3.5" /> : <UserMinus className="h-3.5 w-3.5" />}
+        </button>
       </div>
     </div>
   );
@@ -959,9 +981,10 @@ function ChartRow({ entry, holdCount, isActiveMember, isHighlighted, onMemberCli
 
 interface ChartViewProps {
   roster: RosterGroup[];
+  onAction: (action: "release" | "fill", entry: RosterEntry, org: string) => void;
 }
 
-function ChartView({ roster }: ChartViewProps) {
+function ChartView({ roster, onAction }: ChartViewProps) {
   const [query, setQuery]               = useState("");
   const [vacantOnly, setVacantOnly]     = useState(false);
   const [activeMember, setActiveMember] = useState<string | null>(null);
@@ -1108,10 +1131,12 @@ function ChartView({ roster }: ChartViewProps) {
                         <ChartRow
                           key={`${entry.position}-${entry.member ?? "vacant"}-${ei}`}
                           entry={entry}
+                          org={org}
                           holdCount={entry.member ? holdCounts.get(entry.member) ?? 1 : 0}
                           isActiveMember={!!entry.member && entry.member === activeMember}
                           isHighlighted={isHighlighted(entry)}
                           onMemberClick={(m) => setActiveMember((cur) => (cur === m ? null : m))}
+                          onAction={onAction}
                         />
                       ))}
                     </div>
@@ -1274,6 +1299,33 @@ export default function CallingsPage() {
     setSaving(false);
   }
 
+  /** Bring a chart position into the pipeline — either to release its holder or to fill it. */
+  function handleChartAction(action: "release" | "fill", entry: RosterEntry, org: string) {
+    setView("pipeline");
+    // Don't duplicate a position that's already moving through the pipeline.
+    const existing = callings.find(
+      (c) => c.stage !== "recorded" && c.position === entry.position && (c.organization ?? "") === org
+    );
+    if (existing) {
+      setSelected(existing);
+      return;
+    }
+    const now = new Date().toISOString();
+    const newCalling: Calling = {
+      id:           `c-${Date.now()}`,
+      memberName:   action === "release" ? entry.member ?? "" : "",
+      memberId:     "",
+      position:     entry.position,
+      organization: org,
+      notes:        "",
+      stage:        action === "release" ? "needs_release" : "vacant",
+      createdBy:    user?.uid ?? "mock",
+      createdAt:    now,
+      updatedAt:    now,
+    };
+    setCallings((prev) => [newCalling, ...prev]);
+  }
+
   // ── Derived data ──────────────────────────────────────────────────────────
 
   const pipelineCallings  = callings.filter((c) => c.stage !== "recorded");
@@ -1405,7 +1457,7 @@ export default function CallingsPage() {
         />
       )}
 
-      {view === "chart" && <ChartView roster={MOCK_ROSTER} />}
+      {view === "chart" && <ChartView roster={MOCK_ROSTER} onAction={handleChartAction} />}
 
       {view === "complete" && (
         <CompleteView
