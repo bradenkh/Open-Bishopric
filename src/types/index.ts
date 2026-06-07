@@ -134,6 +134,14 @@ export interface Calling {
   stage: CallingStage;
   notes?: string;
 
+  // ── Release (needs_release stage)
+  /** Names suggested to replace the current holder. */
+  suggestedReplacements?: string[];
+  /** The suggested replacement chosen to fill the position once released. */
+  replacementName?: string;
+  /** The person who held the calling before this one (set when released). */
+  releasedName?: string;
+
   // ── Approval
   approvedBy?: string;
   approvedAt?: string;

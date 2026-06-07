@@ -131,6 +131,10 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
   // ── Form state ────────────────────────────────────────────────────────────
   const [candidateName,   setCandidateName]   = useState("");
   const [releasedBy,      setReleasedBy]      = useState("");
+  // Release — suggested replacements
+  const [replacements,    setReplacements]    = useState<string[]>(calling.suggestedReplacements ?? []);
+  const [replacementInput,setReplacementInput]= useState("");
+  const [chosen,          setChosen]          = useState(calling.replacementName ?? "");
   const [approvedBy,      setApprovedBy]      = useState(calling.approvedBy ?? "");
   // Extending — bishopric member dropdown
   const [extendingMember, setExtendingMember] = useState(
@@ -169,13 +173,79 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
   // ── Stages ────────────────────────────────────────────────────────────────
 
   if (stage === "needs_release") {
+    const released = calling.memberName || "the current holder";
+    const addReplacement = () => {
+      const v = replacementInput.trim();
+      if (!v || replacements.includes(v)) { setReplacementInput(""); return; }
+      setReplacements((prev) => [...prev, v]);
+      setReplacementInput("");
+    };
+    const removeReplacement = (n: string) => {
+      setReplacements((prev) => prev.filter((r) => r !== n));
+      if (chosen === n) setChosen("");
+    };
+    const releaseNote = () => {
+      const note = `Released ${released}${releasedBy.trim() ? ` by ${releasedBy.trim()}` : ""}`;
+      return calling.notes ? `${calling.notes} · ${note}` : note;
+    };
+
     return (
-      <div className="border-t pt-4 space-y-3">
-        <p className="text-sm font-semibold">Release the Current Holder</p>
-        <p className="text-sm text-muted-foreground">
-          Once <strong>{name}</strong> has been released from {calling.position}, the position becomes
-          vacant and moves into the pipeline to be filled.
-        </p>
+      <div className="border-t pt-4 space-y-4">
+        <div>
+          <p className="text-sm font-semibold">Release & Replace</p>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            <strong>{released}</strong> is being released from {calling.position}. Track who could replace
+            them, then pick one to take through the pipeline.
+          </p>
+        </div>
+
+        {/* Suggested replacements */}
+        <div className="space-y-2">
+          <Label>Suggested replacements</Label>
+          <div className="flex gap-2">
+            <Input
+              value={replacementInput}
+              onChange={(e) => setReplacementInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addReplacement(); } }}
+              placeholder="Add a name…"
+            />
+            <Button type="button" variant="outline" onClick={addReplacement} disabled={!replacementInput.trim()}>
+              Add
+            </Button>
+          </div>
+          {replacements.length === 0 ? (
+            <p className="text-xs text-muted-foreground">No suggestions yet — add a few names to consider.</p>
+          ) : (
+            <div className="space-y-1.5">
+              <p className="text-[11px] text-muted-foreground">Tap a name to choose the replacement.</p>
+              <div className="flex flex-wrap gap-1.5">
+                {replacements.map((nm) => (
+                  <span
+                    key={nm}
+                    className={cn(
+                      "inline-flex items-center gap-1 pl-2.5 pr-1 py-1 rounded-full text-xs font-medium border transition-colors cursor-pointer",
+                      chosen === nm
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-muted text-muted-foreground border-transparent hover:bg-accent"
+                    )}
+                    onClick={() => setChosen((c) => (c === nm ? "" : nm))}
+                  >
+                    {chosen === nm && <CheckCircle2 className="h-3 w-3" />}
+                    {nm}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); removeReplacement(nm); }}
+                      className="ml-0.5 rounded-full p-0.5 hover:bg-black/10 dark:hover:bg-white/10"
+                      aria-label={`Remove ${nm}`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
         <div className="space-y-1.5">
           <Label htmlFor="releasedBy">Released by (optional)</Label>
           <Input
@@ -185,21 +255,39 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
             placeholder="e.g. Bishop Phillips"
           />
         </div>
-        <div className="flex justify-end gap-2">
-          <Button variant="outline" onClick={onClose}>Not Yet</Button>
+
+        {/* Actions */}
+        <div className="flex flex-col gap-2 pt-1">
           <Button
-            onClick={() => {
-              const released = calling.memberName || "the previous holder";
-              const note = `Released ${released}${releasedBy.trim() ? ` by ${releasedBy.trim()}` : ""}`;
+            disabled={!chosen}
+            onClick={() =>
               onSave({
-                stage:      "vacant",
-                memberName: "",
-                notes:      calling.notes ? `${calling.notes} · ${note}` : note,
-              });
-            }}
+                stage:                 "approved",
+                memberName:            chosen,
+                replacementName:       chosen,
+                releasedName:          calling.memberName || undefined,
+                suggestedReplacements: replacements,
+                notes:                 releaseNote(),
+              })
+            }
           >
-            Mark Released
+            {chosen ? `Release & call ${chosen}` : "Choose a replacement to continue"}
           </Button>
+          <Button
+            variant="outline"
+            onClick={() =>
+              onSave({
+                stage:                 "vacant",
+                memberName:            "",
+                releasedName:          calling.memberName || undefined,
+                suggestedReplacements: replacements,
+                notes:                 releaseNote(),
+              })
+            }
+          >
+            Release & leave vacant
+          </Button>
+          <Button variant="ghost" onClick={onClose}>Not Yet</Button>
         </div>
       </div>
     );
@@ -713,6 +801,29 @@ function CallingCard({
           {urgent && <div className="h-2 w-2 rounded-full bg-amber-400" />}
         </div>
       </div>
+
+      {calling.stage === "needs_release" && (
+        <div className="mt-2 pl-5 text-[10px] truncate">
+          {calling.replacementName ? (
+            <span className="inline-flex items-center gap-1 text-primary font-medium">
+              <ArrowRight className="h-3 w-3 shrink-0" /> Replacement: {calling.replacementName}
+            </span>
+          ) : calling.suggestedReplacements && calling.suggestedReplacements.length > 0 ? (
+            <span className="text-muted-foreground">
+              {calling.suggestedReplacements.length} replacement suggestion
+              {calling.suggestedReplacements.length !== 1 ? "s" : ""}
+            </span>
+          ) : (
+            <span className="text-muted-foreground/60 italic">No replacement suggested yet</span>
+          )}
+        </div>
+      )}
+
+      {calling.stage !== "needs_release" && calling.releasedName && (
+        <div className="mt-2 pl-5 text-[10px] text-muted-foreground truncate">
+          Replacing {calling.releasedName}
+        </div>
+      )}
 
       {urgent && (
         <div className="flex items-center gap-1 mt-2 text-[10px] text-amber-600 dark:text-amber-400 pl-5">
