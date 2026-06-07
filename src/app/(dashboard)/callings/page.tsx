@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import {
-  Plus, Church, AlertTriangle, CheckCircle2, ClipboardList,
-  GripVertical, User, ArrowRight,
+  Plus, AlertTriangle, CheckCircle2, ClipboardList,
+  GripVertical, User, ArrowRight, Search, ChevronDown, ChevronRight, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,9 +17,9 @@ import {
 } from "@/components/ui/dialog";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTasks } from "@/contexts/TasksContext";
-import type { Calling, CallingStage, SustainedVenue, Task } from "@/types";
+import type { Calling, CallingStage, SustainedVenue, Task, RosterGroup, RosterEntry } from "@/types";
 import { CALLING_STAGES, CALLING_PIPELINE } from "@/types";
-import { MOCK_CALLINGS, MOCK_BISHOPRIC_MEMBERS } from "@/lib/mock-data";
+import { MOCK_CALLINGS, MOCK_BISHOPRIC_MEMBERS, MOCK_ROSTER } from "@/lib/mock-data";
 import { cn } from "@/lib/utils";
 
 // ── Bishopric helpers ─────────────────────────────────────────────────────────
@@ -834,134 +834,267 @@ function KanbanView({ callings, onSelect, onMove }: KanbanViewProps) {
   );
 }
 
-// ── Cards View ────────────────────────────────────────────────────────────────
+// ── Chart View (full ward roster) ─────────────────────────────────────────────
+// A complete, organization-grouped roster of every calling and who holds it.
+// Built for the bishopric to see the whole ward at a glance — spot vacancies,
+// find who holds what, and weigh options when moving people around.
 
-const ALL_FILTER_STAGES: (CallingStage | "all")[] = [
-  "all",
-  ...CALLING_PIPELINE.filter((s) => s !== "recorded"),
-];
-
-interface CardsViewProps {
-  callings: Calling[];
-  onSelect: (c: Calling) => void;
-  onNew: () => void;
+interface ChartRowProps {
+  entry: RosterEntry;
+  holdCount: number;
+  isActiveMember: boolean;
+  onMemberClick: (member: string) => void;
 }
 
-function CardsView({ callings, onSelect, onNew }: CardsViewProps) {
-  const [filterStage, setFilterStage] = useState<CallingStage | "all">("all");
+function ChartRow({ entry, holdCount, isActiveMember, onMemberClick }: ChartRowProps) {
+  const isVacant = !entry.member;
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-3 px-3 py-1.5 rounded-lg text-sm transition-colors",
+        isVacant
+          ? "bg-red-50/70 dark:bg-red-950/20"
+          : isActiveMember
+            ? "bg-primary/10 ring-1 ring-primary/40"
+            : "hover:bg-muted/60"
+      )}
+    >
+      <p className={cn("min-w-0 flex-1 truncate", isVacant && "text-muted-foreground")}>
+        {entry.position}
+        {entry.custom && (
+          <span className="text-muted-foreground/40" title="Custom (ward-defined) calling"> *</span>
+        )}
+      </p>
 
-  const filtered =
-    filterStage === "all"
-      ? callings
-      : callings.filter((c) => c.stage === filterStage);
+      <div className="flex items-center gap-2 shrink-0">
+        {isVacant ? (
+          <Badge className="bg-red-100 text-red-800 dark:bg-red-900/60 dark:text-red-200 text-[10px] h-5 px-2">
+            Vacant
+          </Badge>
+        ) : (
+          <>
+            <button
+              onClick={() => onMemberClick(entry.member!)}
+              className={cn(
+                "font-medium hover:underline truncate max-w-[10rem] sm:max-w-none text-right",
+                isActiveMember && "text-primary"
+              )}
+              title="Highlight every calling this person holds"
+            >
+              {entry.member}
+            </button>
+            {holdCount > 1 && (
+              <span
+                className="text-[10px] font-bold tabular-nums px-1.5 h-4 inline-flex items-center rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200"
+                title={`Holds ${holdCount} callings`}
+              >
+                ×{holdCount}
+              </span>
+            )}
+            {entry.sustained && (
+              <span className="hidden md:inline text-[11px] text-muted-foreground tabular-nums w-20 text-right">
+                {entry.sustained}
+              </span>
+            )}
+            {entry.setApart ? (
+              <CheckCircle2 className="h-3.5 w-3.5 text-green-600 dark:text-green-400 shrink-0" aria-label="Set apart" />
+            ) : (
+              <span
+                className="h-2 w-2 rounded-full bg-amber-400/70 shrink-0"
+                title="Not yet set apart"
+                aria-label="Not yet set apart"
+              />
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+interface ChartViewProps {
+  roster: RosterGroup[];
+}
+
+function ChartView({ roster }: ChartViewProps) {
+  const [query, setQuery]               = useState("");
+  const [vacantOnly, setVacantOnly]     = useState(false);
+  const [activeMember, setActiveMember] = useState<string | null>(null);
+  const [collapsed, setCollapsed]       = useState<Set<string>>(new Set());
+
+  const q = query.trim().toLowerCase();
+
+  // Flat list + per-person calling counts (over the full roster, not filtered).
+  const { allEntries, holdCounts } = useMemo(() => {
+    const entries = roster.flatMap((g) => g.entries);
+    const counts = new Map<string, number>();
+    for (const e of entries) {
+      if (e.member) counts.set(e.member, (counts.get(e.member) ?? 0) + 1);
+    }
+    return { allEntries: entries, holdCounts: counts };
+  }, [roster]);
+
+  const totalCount  = allEntries.length;
+  const filledCount = allEntries.filter((e) => e.member).length;
+  const vacantCount = totalCount - filledCount;
+
+  const matches = (e: RosterEntry): boolean => {
+    if (vacantOnly && e.member) return false;
+    if (activeMember && e.member !== activeMember) return false;
+    if (q && !`${e.position} ${e.member ?? "vacant"}`.toLowerCase().includes(q)) return false;
+    return true;
+  };
+
+  // Order orgs by first appearance; keep their sub-groups in order.
+  const orgs = useMemo(() => {
+    const order: string[] = [];
+    const byOrg = new Map<string, RosterGroup[]>();
+    for (const g of roster) {
+      if (!byOrg.has(g.org)) { byOrg.set(g.org, []); order.push(g.org); }
+      byOrg.get(g.org)!.push(g);
+    }
+    return order.map((org) => ({ org, groups: byOrg.get(org)! }));
+  }, [roster]);
+
+  // When filtering, force every (matching) section open.
+  const filtering = q !== "" || vacantOnly || activeMember !== null;
+
+  function toggle(org: string) {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(org)) next.delete(org); else next.add(org);
+      return next;
+    });
+  }
+
+  const matchCount = filtering ? allEntries.filter(matches).length : totalCount;
 
   return (
     <div className="space-y-4">
-      {/* Stage filter pills */}
-      <div className="flex gap-1.5 flex-wrap">
-        {ALL_FILTER_STAGES.map((s) => {
-          const count = s === "all" ? callings.length : callings.filter((c) => c.stage === s).length;
-          if (s !== "all" && count === 0) return null;
-          const isActive = filterStage === s;
-          return (
-            <button
-              key={s}
-              onClick={() => setFilterStage(s)}
-              className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all",
-                isActive
-                  ? s === "all"
-                    ? "bg-primary text-primary-foreground shadow-sm"
-                    : cn(STAGE_COLORS[s as CallingStage], "shadow-sm")
-                  : "bg-muted text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-              )}
-            >
-              {s === "all" ? "All callings" : stageLabel(s as CallingStage)}
-              <span className={cn(
-                "text-[10px] font-bold tabular-nums px-1.5 py-0 rounded-full",
-                isActive ? "bg-black/10 dark:bg-white/20" : "bg-muted-foreground/10"
-              )}>
-                {count}
-              </span>
-            </button>
-          );
-        })}
+      {/* Summary + controls */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-4 text-sm">
+          <span className="font-medium">{totalCount} positions</span>
+          <span className="text-green-600 dark:text-green-400">{filledCount} filled</span>
+          <span className="text-red-600 dark:text-red-400">{vacantCount} vacant</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setVacantOnly((v) => !v)}
+            className={cn(
+              "px-3 py-1.5 rounded-full text-xs font-medium transition-colors",
+              vacantOnly
+                ? "bg-red-100 text-red-800 dark:bg-red-900/60 dark:text-red-200"
+                : "bg-muted text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+            )}
+          >
+            Vacancies only
+          </button>
+          <button
+            onClick={() => setCollapsed(filtering ? new Set() : new Set(orgs.map((o) => o.org)))}
+            className="px-3 py-1.5 rounded-full text-xs font-medium bg-muted text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+            disabled={filtering}
+          >
+            Collapse all
+          </button>
+          <button
+            onClick={() => setCollapsed(new Set())}
+            className="px-3 py-1.5 rounded-full text-xs font-medium bg-muted text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+          >
+            Expand all
+          </button>
+        </div>
       </div>
 
-      {/* Grid */}
-      {filtered.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 py-16 text-center">
-          <Church className="h-12 w-12 text-muted-foreground/30" />
-          <p className="text-sm text-muted-foreground">
-            {filterStage === "all" ? "No active callings" : `No callings in "${stageLabel(filterStage as CallingStage)}"`}
+      {/* Search */}
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search by person or calling…"
+          className="pl-9"
+        />
+      </div>
+
+      {/* Active member banner */}
+      {activeMember && (
+        <div className="flex items-center justify-between gap-2 rounded-xl border border-primary/30 bg-primary/5 px-4 py-2.5">
+          <p className="text-sm">
+            Showing <strong>{holdCounts.get(activeMember) ?? 0}</strong>{" "}
+            calling{(holdCounts.get(activeMember) ?? 0) !== 1 ? "s" : ""} held by{" "}
+            <strong>{activeMember}</strong>
           </p>
-          {filterStage === "all" && (
-            <Button onClick={onNew} variant="outline" size="sm">Add a calling</Button>
-          )}
+          <Button variant="ghost" size="sm" className="h-7 gap-1" onClick={() => setActiveMember(null)}>
+            <X className="h-3.5 w-3.5" /> Clear
+          </Button>
+        </div>
+      )}
+
+      {filtering && matchCount === 0 ? (
+        <div className="flex flex-col items-center gap-2 py-16 text-center">
+          <Search className="h-10 w-10 text-muted-foreground/30" />
+          <p className="text-sm text-muted-foreground">No callings match your filters</p>
         </div>
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {filtered.map((calling) => {
-            const idx      = pipelineIndex(calling.stage);
-            const progress = Math.round((Math.max(0, idx) / (CALLING_PIPELINE.length - 2)) * 100);
-            const urgent   = attentionMessage(calling);
+        <div className="space-y-3">
+          {orgs.map(({ org, groups }) => {
+            const orgEntries = groups.flatMap((g) => g.entries);
+            const orgVacant  = orgEntries.filter((e) => !e.member).length;
+            const orgFilled  = orgEntries.length - orgVacant;
+
+            // Sub-groups with at least one matching row.
+            const visibleGroups = groups
+              .map((g) => ({ ...g, shown: g.entries.filter(matches) }))
+              .filter((g) => g.shown.length > 0);
+            if (filtering && visibleGroups.length === 0) return null;
+
+            const isCollapsed = !filtering && collapsed.has(org);
+
             return (
-              <div
-                key={calling.id}
-                onClick={() => onSelect(calling)}
-                className={cn(
-                  "rounded-xl border bg-card p-4 cursor-pointer space-y-3",
-                  "hover:shadow-md transition-all duration-150 active:scale-[0.99]",
-                  urgent ? "border-amber-300 dark:border-amber-700" : "border-border"
-                )}
-              >
-                {/* Top row: avatar + name + stage badge */}
-                <div className="flex items-start gap-3">
-                  <div className={cn(
-                    "h-10 w-10 rounded-full flex items-center justify-center text-sm font-bold shrink-0",
-                    calling.memberName
-                      ? "bg-primary/10 text-primary"
-                      : "bg-muted text-muted-foreground"
-                  )}>
-                    {calling.memberName ? getInitials(calling.memberName) : <User className="h-4 w-4" />}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-sm truncate leading-tight">
-                      {calling.memberName || <span className="italic font-normal text-muted-foreground">Vacant Position</span>}
-                    </p>
-                    <p className="text-xs text-muted-foreground truncate">{calling.position}</p>
-                    {calling.organization && (
-                      <p className="text-[11px] text-muted-foreground/60 truncate">{calling.organization}</p>
-                    )}
-                  </div>
-                </div>
-
-                {/* Stage badge */}
-                <div className="flex items-center justify-between gap-2">
-                  <Badge className={cn("text-xs", STAGE_COLORS[calling.stage])}>
-                    {stageLabel(calling.stage)}
-                  </Badge>
-                  {urgent && (
-                    <div className="flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-400">
-                      <AlertTriangle className="h-3 w-3 shrink-0" />
-                      <span className="truncate">{urgent}</span>
-                    </div>
+              <div key={org} className="rounded-xl border border-border bg-card overflow-hidden">
+                {/* Org header */}
+                <button
+                  onClick={() => toggle(org)}
+                  className="w-full flex items-center gap-2 px-4 py-3 text-left hover:bg-muted/40 transition-colors"
+                >
+                  {isCollapsed
+                    ? <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+                    : <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />}
+                  <span className="font-semibold flex-1 truncate">{org}</span>
+                  <span className="text-xs text-muted-foreground tabular-nums shrink-0">
+                    {orgFilled}/{orgEntries.length}
+                  </span>
+                  {orgVacant > 0 && (
+                    <Badge className="bg-red-100 text-red-800 dark:bg-red-900/60 dark:text-red-200 text-[10px] h-5 px-2 shrink-0">
+                      {orgVacant} vacant
+                    </Badge>
                   )}
-                </div>
+                </button>
 
-                {/* Progress */}
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                    <span>{NEXT_ACTION[calling.stage] ?? "Complete"}</span>
-                    <span className="font-medium tabular-nums">{progress}%</span>
+                {/* Org body */}
+                {!isCollapsed && (
+                  <div className="px-2 pb-2 space-y-2">
+                    {visibleGroups.map((g, gi) => (
+                      <div key={`${g.subOrg ?? "_"}-${gi}`}>
+                        {g.subOrg && (
+                          <p className="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+                            {g.subOrg}
+                          </p>
+                        )}
+                        {(filtering ? g.shown : g.entries).map((entry, ei) => (
+                          <ChartRow
+                            key={`${entry.position}-${entry.member ?? "vacant"}-${ei}`}
+                            entry={entry}
+                            holdCount={entry.member ? holdCounts.get(entry.member) ?? 1 : 0}
+                            isActiveMember={!!entry.member && entry.member === activeMember}
+                            onMemberClick={(m) => setActiveMember((cur) => (cur === m ? null : m))}
+                          />
+                        ))}
+                      </div>
+                    ))}
                   </div>
-                  <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-                    <div
-                      className="h-full rounded-full bg-primary transition-all duration-300"
-                      style={{ width: `${progress}%` }}
-                    />
-                  </div>
-                </div>
+                )}
               </div>
             );
           })}
@@ -1056,7 +1189,7 @@ function PipelineFlow({ callings }: PipelineFlowProps) {
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
-type PageView = "pipeline" | "cards" | "complete";
+type PageView = "pipeline" | "chart" | "complete";
 
 const EMPTY_FORM = {
   memberName: "",
@@ -1129,9 +1262,14 @@ export default function CallingsPage() {
     (c) => c.stage === "sustaining" && c.sustainedIn === "sacrament_meeting" && !c.businessItemAdded
   );
 
+  const rosterVacancies = useMemo(
+    () => MOCK_ROSTER.reduce((n, g) => n + g.entries.filter((e) => !e.member).length, 0),
+    []
+  );
+
   const TAB_CONFIG: { view: PageView; label: string; count?: number }[] = [
     { view: "pipeline", label: "Pipeline",                                    },
-    { view: "cards",    label: "Cards",    count: pipelineCallings.length     },
+    { view: "chart",    label: "Chart",    count: rosterVacancies             },
     { view: "complete", label: "Complete", count: completeCallings.length     },
   ];
 
@@ -1245,13 +1383,7 @@ export default function CallingsPage() {
         />
       )}
 
-      {view === "cards" && (
-        <CardsView
-          callings={pipelineCallings}
-          onSelect={setSelected}
-          onNew={() => setNewOpen(true)}
-        />
-      )}
+      {view === "chart" && <ChartView roster={MOCK_ROSTER} />}
 
       {view === "complete" && (
         <CompleteView

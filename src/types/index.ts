@@ -163,6 +163,33 @@ export interface Calling {
   updatedAt: string;
 }
 
+// ── Calling roster (full org chart) ───────────────────────────────────────────
+
+/**
+ * A single position in the ward's standing roster (as shown in LCR's
+ * "Organizations and Callings" report). Used by the Chart view to give the
+ * bishopric an at-a-glance picture of who holds what and where the holes are.
+ */
+export interface RosterEntry {
+  position: string;
+  /** Omitted = vacant. Stored "Last, First" exactly as LCR displays it. */
+  member?: string;
+  /** Sustained date string, shown verbatim (e.g. "2 Mar 2025"). */
+  sustained?: string;
+  /** True when set apart (the ✓ column in LCR). */
+  setApart?: boolean;
+  /** True for ward-defined custom callings (marked * in LCR). */
+  custom?: boolean;
+}
+
+export interface RosterGroup {
+  /** Top-level organization, e.g. "Elders Quorum". */
+  org: string;
+  /** Optional sub-section within the organization, e.g. "Presidency". */
+  subOrg?: string;
+  entries: RosterEntry[];
+}
+
 // ── Misc constants ───────────────────────────────────────────────────────────
 
 export const TASK_TYPE_LABELS: Record<TaskType, string> = {
