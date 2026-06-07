@@ -802,22 +802,46 @@ function CallingCard({
         </div>
       </div>
 
-      {calling.stage === "needs_release" && (
-        <div className="mt-2 pl-5 text-[10px] truncate">
-          {calling.replacementName ? (
-            <span className="inline-flex items-center gap-1 text-primary font-medium">
-              <ArrowRight className="h-3 w-3 shrink-0" /> Replacement: {calling.replacementName}
-            </span>
-          ) : calling.suggestedReplacements && calling.suggestedReplacements.length > 0 ? (
-            <span className="text-muted-foreground">
-              {calling.suggestedReplacements.length} replacement suggestion
-              {calling.suggestedReplacements.length !== 1 ? "s" : ""}
-            </span>
-          ) : (
-            <span className="text-muted-foreground/60 italic">No replacement suggested yet</span>
-          )}
-        </div>
-      )}
+      {calling.stage === "needs_release" && (() => {
+        const suggestions = calling.suggestedReplacements ?? [];
+        const chosenExtra =
+          calling.replacementName && !suggestions.includes(calling.replacementName)
+            ? [calling.replacementName]
+            : [];
+        const all = [...suggestions, ...chosenExtra];
+        if (all.length === 0) {
+          return (
+            <div className="mt-2 pl-5">
+              <p className="text-[10px] text-muted-foreground/60 italic">No replacement suggested yet</p>
+            </div>
+          );
+        }
+        return (
+          <div className="mt-2 pl-5 space-y-1">
+            <p className="text-[10px] text-muted-foreground">Suggested replacements</p>
+            <div className="flex flex-wrap gap-1">
+              {all.map((nm) => {
+                const isChosen = nm === calling.replacementName;
+                return (
+                  <span
+                    key={nm}
+                    className={cn(
+                      "inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-medium max-w-full truncate",
+                      isChosen
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted text-muted-foreground"
+                    )}
+                    title={isChosen ? `${nm} (chosen replacement)` : nm}
+                  >
+                    {isChosen && <CheckCircle2 className="h-2.5 w-2.5 shrink-0" />}
+                    <span className="truncate">{nm}</span>
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
 
       {calling.stage !== "needs_release" && calling.releasedName && (
         <div className="mt-2 pl-5 text-[10px] text-muted-foreground truncate">
