@@ -165,7 +165,7 @@ export interface Calling {
 
 // ── Meetings & agendas ─────────────────────────────────────────────────────────
 
-export type MeetingType = "bishopric" | "ward_council" | "youth_committee" | "presidency" | "other";
+export type MeetingType = "bishopric" | "sacrament_meeting" | "ward_council";
 
 export type MeetingStatus = "upcoming" | "completed" | "cancelled";
 
@@ -200,11 +200,9 @@ export interface Meeting {
 }
 
 export const MEETING_TYPE_LABELS: Record<MeetingType, string> = {
-  bishopric:       "Bishopric",
-  ward_council:    "Ward Council",
-  youth_committee: "Youth Committee",
-  presidency:      "Presidency",
-  other:           "Other",
+  bishopric:         "Bishopric",
+  sacrament_meeting: "Sacrament Meeting",
+  ward_council:      "Ward Council",
 };
 
 export const MEETING_STATUS_COLORS: Record<MeetingStatus, string> = {

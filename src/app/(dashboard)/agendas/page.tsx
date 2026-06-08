@@ -24,12 +24,18 @@ import { cn } from "@/lib/utils";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const TYPES: MeetingType[] = ["bishopric", "ward_council", "youth_committee", "presidency", "other"];
+const TYPES: MeetingType[] = ["bishopric", "sacrament_meeting", "ward_council"];
 const STATUSES: MeetingStatus[] = ["upcoming", "completed", "cancelled"];
 
 const EMPTY_FORM = {
   title: "", type: "bishopric" as MeetingType, status: "upcoming" as MeetingStatus,
   date: "", time: "", location: "", notes: "",
+};
+
+const DEFAULT_TITLE: Record<MeetingType, string> = {
+  bishopric:         "Bishopric Meeting",
+  sacrament_meeting: "Sacrament Meeting",
+  ward_council:      "Ward Council",
 };
 
 function formatTime(time?: string) {
@@ -49,6 +55,7 @@ function totalMinutes(agenda: AgendaItem[]) {
 export default function AgendasPage() {
   const { user } = useAuth();
   const [meetings,   setMeetings]   = useState<Meeting[]>([...MOCK_MEETINGS]);
+  const [activeTab,  setActiveTab]  = useState<MeetingType>("bishopric");
   const [filterStatus, setFilterStatus] = useState<MeetingStatus | "all">("upcoming");
   const [expanded,   setExpanded]   = useState<Set<string>>(new Set([MOCK_MEETINGS[0]?.id]));
 
@@ -62,8 +69,9 @@ export default function AgendasPage() {
   const [itemDialog, setItemDialog] = useState<{ meetingId: string; item: AgendaItem | null } | null>(null);
   const [itemForm,   setItemForm]   = useState({ title: "", presenter: "", durationMins: "", notes: "" });
 
+  const inTab = meetings.filter((m) => m.type === activeTab);
   const filtered =
-    filterStatus === "all" ? meetings : meetings.filter((m) => m.status === filterStatus);
+    filterStatus === "all" ? inTab : inTab.filter((m) => m.status === filterStatus);
 
   // Sort by date ascending (soonest first) for upcoming, descending otherwise
   const sorted = [...filtered].sort((a, b) => {
@@ -84,7 +92,7 @@ export default function AgendasPage() {
 
   function openNew() {
     setEditing(null);
-    setForm(EMPTY_FORM);
+    setForm({ ...EMPTY_FORM, type: activeTab, title: DEFAULT_TITLE[activeTab] });
     setDialogOpen(true);
   }
 
@@ -115,6 +123,7 @@ export default function AgendasPage() {
       };
       setMeetings((prev) => [...prev, newMeeting]);
       setExpanded((prev) => new Set(prev).add(newMeeting.id));
+      setActiveTab(newMeeting.type);
     }
     setDialogOpen(false);
     setSaving(false);
@@ -191,12 +200,42 @@ export default function AgendasPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Agendas</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            {meetings.filter((m) => m.status === "upcoming").length} upcoming meeting{meetings.filter((m) => m.status === "upcoming").length === 1 ? "" : "s"}
+            {inTab.filter((m) => m.status === "upcoming").length} upcoming {MEETING_TYPE_LABELS[activeTab].toLowerCase()} meeting{inTab.filter((m) => m.status === "upcoming").length === 1 ? "" : "s"}
           </p>
         </div>
         <Button onClick={openNew} size="sm" className="gap-2">
           <Plus className="h-4 w-4" /> New Meeting
         </Button>
+      </div>
+
+      {/* Meeting-type tabs */}
+      <div className="flex items-center gap-1 border-b border-border -mx-1 px-1 overflow-x-auto">
+        {TYPES.map((t) => {
+          const count = meetings.filter((m) => m.type === t && m.status === "upcoming").length;
+          const active = activeTab === t;
+          return (
+            <button
+              key={t}
+              onClick={() => setActiveTab(t)}
+              className={cn(
+                "shrink-0 flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition-colors -mb-px",
+                active
+                  ? "border-primary text-primary"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              )}
+            >
+              {MEETING_TYPE_LABELS[t]}
+              {count > 0 && (
+                <span className={cn(
+                  "rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none",
+                  active ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"
+                )}>
+                  {count}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
       {/* Status filter pills */}
@@ -223,7 +262,7 @@ export default function AgendasPage() {
         <div className="flex flex-col items-center gap-3 py-16 text-center">
           <CalendarDays className="h-12 w-12 text-muted-foreground/40" />
           <p className="text-muted-foreground">
-            {filterStatus === "all" ? "No meetings yet" : `No ${filterStatus} meetings`}
+            No {filterStatus === "all" ? "" : `${filterStatus} `}{MEETING_TYPE_LABELS[activeTab].toLowerCase()} meetings
           </p>
           <Button onClick={openNew} variant="outline" size="sm">Schedule a meeting</Button>
         </div>
@@ -245,12 +284,7 @@ export default function AgendasPage() {
                   </button>
 
                   <div className="flex-1 min-w-0 cursor-pointer" onClick={() => toggleExpand(m.id)}>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="text-sm font-semibold">{m.title}</p>
-                      <span className="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-                        {MEETING_TYPE_LABELS[m.type]}
-                      </span>
-                    </div>
+                    <p className="text-sm font-semibold">{m.title}</p>
                     <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
                       <span className="flex items-center gap-1 text-xs text-muted-foreground">
                         <CalendarDays className="h-3 w-3" /> {formatDate(m.date)}
