@@ -382,9 +382,6 @@ function InterviewCard({ interview: i, onClick, onDragStart, onDragEnd, isDraggi
             </p>
           </div>
         </div>
-        {i.requiresBishop && (
-          <Crown className="h-3.5 w-3.5 text-orange-500 shrink-0" aria-label="Must be with the bishop" />
-        )}
       </div>
 
       {/* Schedule info (once a date exists) */}
