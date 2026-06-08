@@ -3,7 +3,7 @@
 import { useState } from "react";
 import {
   Plus, CalendarClock, Clock, User, GripVertical, CalendarPlus,
-  CheckCircle2, AlertTriangle, Crown, Pencil, RotateCcw,
+  CheckCircle2, AlertTriangle, Pencil, RotateCcw,
   CalendarDays, CalendarOff, Trash2, Check,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -261,7 +261,7 @@ function SlotPicker({
               <Label>Interviewer</Label>
               {restrictToMember ? (
                 <div className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
-                  <Crown className="h-4 w-4 text-orange-500" /> {restrictToMember}
+                  {restrictToMember}
                 </div>
               ) : (
                 <Select value={mInterviewer || ""} onValueChange={setMInterviewer}>
@@ -1313,7 +1313,6 @@ export default function InterviewsPage() {
                         : "border-border text-muted-foreground hover:bg-accent"
                     )}
                   >
-                    {val && <Crown className="h-3.5 w-3.5" />}
                     {label}
                   </button>
                 ))}
