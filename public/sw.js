@@ -1,4 +1,4 @@
-const CACHE = "open-bishopric-v1";
+const CACHE = "open-bishopric-v2";
 
 // Assets to pre-cache on install
 const PRECACHE = ["/", "/home", "/login", "/manifest.json"];
