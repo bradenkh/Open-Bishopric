@@ -72,26 +72,23 @@ export interface Task {
 // ── Calling lifecycle ────────────────────────────────────────────────────────
 
 /**
- * A card is one of two kinds, each with its own lifecycle:
+ * One pipeline shared by two kinds of cards:
  *
- *   "calling" (fill):  vacant → extending → accepted → sustaining → sustained
+ *   "calling" (fill):  vacant → inform → accepted → sustaining → sustained
  *                        → set_apart → lcr_updated → recorded
- *   "release":         release_inform → release_announced → recorded
+ *   "release":         inform → sustaining → recorded
  *
- * A release and the fill it creates are tracked independently (linked by id);
- * either can advance or wait on the other.
+ * The "inform" stage holds both: extending a calling to the new person and
+ * informing the outgoing holder of their release. A release and the fill it
+ * creates are linked by id but advance independently.
  */
 export type CallingKind = "calling" | "release";
 
 export type CallingStage =
-  // Release lifecycle
-  | "release_inform"    // Assign someone to inform the outgoing holder
-  | "release_announced" // Release announced in sacrament meeting
-  // Fill lifecycle
   | "vacant"      // Position open — suggest candidates, then extend
-  | "extending"   // Bishopric member reaching out to extend
+  | "inform"      // Contacting: extend the calling, or inform of a release
   | "accepted"    // Person accepted the calling
-  | "sustaining"  // Scheduled for sustaining vote
+  | "sustaining"  // To be sustained / release to be announced
   | "sustained"   // Sustained in sacrament meeting or class
   | "set_apart"   // Set apart by priesthood leader
   | "lcr_updated" // Updated in Leader & Clerk Resources
@@ -99,10 +96,10 @@ export type CallingStage =
 
 export type SustainedVenue = "sacrament_meeting" | "class";
 
-/** Fill lifecycle (kind: "calling") — also drives progress math. */
+/** Ordered pipeline — drives columns and progress math. */
 export const CALLING_PIPELINE: CallingStage[] = [
   "vacant",
-  "extending",
+  "inform",
   "accepted",
   "sustaining",
   "sustained",
@@ -111,18 +108,9 @@ export const CALLING_PIPELINE: CallingStage[] = [
   "recorded",
 ];
 
-/** Release lifecycle (kind: "release"). */
-export const RELEASE_PIPELINE: CallingStage[] = [
-  "release_inform",
-  "release_announced",
-  "recorded",
-];
-
 export const CALLING_STAGES: { stage: CallingStage; label: string }[] = [
-  { stage: "release_inform",    label: "To Inform" },
-  { stage: "release_announced", label: "Announced" },
   { stage: "vacant",      label: "Vacant" },
-  { stage: "extending",   label: "Extending" },
+  { stage: "inform",      label: "Inform" },
   { stage: "accepted",    label: "Accepted" },
   { stage: "sustaining",  label: "To Be Sustained" },
   { stage: "sustained",   label: "Sustained" },

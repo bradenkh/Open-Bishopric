@@ -17,8 +17,8 @@ import {
 } from "@/components/ui/dialog";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTasks } from "@/contexts/TasksContext";
-import type { Calling, CallingStage, CallingKind, SustainedVenue, Task, RosterGroup, RosterEntry } from "@/types";
-import { CALLING_STAGES, CALLING_PIPELINE, RELEASE_PIPELINE } from "@/types";
+import type { Calling, CallingStage, SustainedVenue, Task, RosterGroup, RosterEntry } from "@/types";
+import { CALLING_STAGES, CALLING_PIPELINE } from "@/types";
 import { MOCK_CALLINGS, MOCK_BISHOPRIC_MEMBERS, MOCK_ROSTER } from "@/lib/mock-data";
 import { cn } from "@/lib/utils";
 
@@ -38,11 +38,14 @@ const SET_APART_MEMBERS = MOCK_BISHOPRIC_MEMBERS.filter(
 
 function normalizeStage(stage: string): CallingStage {
   const legacy: Record<string, CallingStage> = {
-    needs_release: "release_inform",
+    needs_release: "inform",
+    release_inform: "inform",
+    release_announced: "sustaining",
     identified: "vacant",
     discussing: "vacant",
-    approved: "extending",
-    extended: "extending",
+    approved: "inform",
+    extending: "inform",
+    extended: "inform",
     responded: "accepted",
   };
   return (legacy[stage] ?? stage) as CallingStage;
@@ -52,13 +55,8 @@ function stageLabel(stage: CallingStage): string {
   return CALLING_STAGES.find((s) => s.stage === stage)?.label ?? stage;
 }
 
-/** The lifecycle a card follows (fill vs release). */
-function pipelineFor(kind: CallingKind | undefined): CallingStage[] {
-  return kind === "release" ? RELEASE_PIPELINE : CALLING_PIPELINE;
-}
-
-function pipelineIndex(stage: CallingStage, kind?: CallingKind): number {
-  return pipelineFor(kind).indexOf(stage);
+function pipelineIndex(stage: CallingStage): number {
+  return CALLING_PIPELINE.indexOf(stage);
 }
 
 function getInitials(name: string): string {
@@ -71,10 +69,8 @@ function getInitials(name: string): string {
 }
 
 const STAGE_COLORS: Record<CallingStage, string> = {
-  release_inform:    "bg-orange-100 text-orange-800 dark:bg-orange-900/60 dark:text-orange-200",
-  release_announced: "bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200",
   vacant:      "bg-red-100 text-red-800 dark:bg-red-900/60 dark:text-red-200",
-  extending:   "bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-200",
+  inform:      "bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-200",
   accepted:    "bg-sky-100 text-sky-800 dark:bg-sky-900/60 dark:text-sky-200",
   sustaining:  "bg-purple-100 text-purple-800 dark:bg-purple-900/60 dark:text-purple-200",
   sustained:   "bg-violet-100 text-violet-800 dark:bg-violet-900/60 dark:text-violet-200",
@@ -85,10 +81,8 @@ const STAGE_COLORS: Record<CallingStage, string> = {
 
 // Per-stage column header styling
 const STAGE_COLUMN_COLORS: Record<CallingStage, { header: string; ring: string; drop: string }> = {
-  release_inform:    { header: "bg-orange-50 border-orange-200 dark:bg-orange-950/30 dark:border-orange-800", ring: "ring-orange-400", drop: "bg-orange-50/60 dark:bg-orange-950/20" },
-  release_announced: { header: "bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-800", ring: "ring-amber-400",  drop: "bg-amber-50/60 dark:bg-amber-950/20" },
   vacant:      { header: "bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-800",       ring: "ring-red-400",    drop: "bg-red-50/60 dark:bg-red-950/20" },
-  extending:   { header: "bg-blue-50 border-blue-200 dark:bg-blue-950/30 dark:border-blue-800",   ring: "ring-blue-400",   drop: "bg-blue-50/60 dark:bg-blue-950/20" },
+  inform:      { header: "bg-blue-50 border-blue-200 dark:bg-blue-950/30 dark:border-blue-800",   ring: "ring-blue-400",   drop: "bg-blue-50/60 dark:bg-blue-950/20" },
   accepted:    { header: "bg-sky-50 border-sky-200 dark:bg-sky-950/30 dark:border-sky-800",       ring: "ring-sky-400",    drop: "bg-sky-50/60 dark:bg-sky-950/20" },
   sustaining:  { header: "bg-purple-50 border-purple-200 dark:bg-purple-950/30 dark:border-purple-800", ring: "ring-purple-400", drop: "bg-purple-50/60 dark:bg-purple-950/20" },
   sustained:   { header: "bg-violet-50 border-violet-200 dark:bg-violet-950/30 dark:border-violet-800", ring: "ring-violet-400", drop: "bg-violet-50/60 dark:bg-violet-950/20" },
@@ -98,10 +92,8 @@ const STAGE_COLUMN_COLORS: Record<CallingStage, { header: string; ring: string; 
 };
 
 const NEXT_ACTION: Partial<Record<CallingStage, string>> = {
-  release_inform:    "Inform the outgoing holder",
-  release_announced: "Announce in sacrament meeting",
   vacant:      "Suggest a candidate & extend",
-  extending:   "Follow up — awaiting response",
+  inform:      "Extend the calling / inform of release",
   accepted:    "Schedule sustaining",
   sustaining:  "Confirm at meeting",
   sustained:   "Set apart",
@@ -296,7 +288,7 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
                 context: { callingId: calling.id, taskType: "extend", position: calling.position },
               }));
               onSave({
-                stage:                 "extending",
+                stage:                 "inform",
                 memberName:            chosen,
                 suggestedReplacements: replacements,
                 extendedBy:            exMember.name,
@@ -316,7 +308,7 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
     );
   }
 
-  // ── Release lifecycle: inform the outgoing holder
+  // ── Inform stage (release card): assign who informs the outgoing holder
   function releaseInformBody() {
     const releaser = EXTENDING_MEMBERS.find((m) => m.id === releasingMember);
     return (
@@ -335,6 +327,7 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
         {releaser && (
           <div className="rounded-lg border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/60 p-3 text-xs text-blue-800 dark:text-blue-200">
             A task will be added to <strong>{releaser.name}&apos;s</strong> todos to contact {name} about the release.
+            Once informed, the release moves on to be announced in sacrament meeting.
           </div>
         )}
         <div className="flex flex-col gap-2 pt-1">
@@ -350,7 +343,7 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
                 memberName:   calling.memberName || undefined,
                 context: { callingId: calling.id, taskType: "release_inform", position: calling.position },
               }));
-              onSave({ stage: "release_announced", releasedBy: relMember.name });
+              onSave({ stage: "sustaining", releasedBy: relMember.name, sustainedIn: "sacrament_meeting", businessItemAdded: false });
             }}
           >
             {releasingMember ? "Assign & mark informed" : "Assign someone to inform"}
@@ -361,46 +354,10 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
     );
   }
 
-  // ── Release lifecycle: announce in sacrament meeting → complete
-  function releaseAnnouncedBody() {
-    return (
-      <div className="border-t pt-4 space-y-3">
-        <p className="text-sm font-semibold">Announce the Release</p>
-        <p className="text-sm text-muted-foreground">
-          {calling.releasedBy
-            ? <><strong>{calling.releasedBy}</strong> has informed <strong>{name}</strong>. </>
-            : <><strong>{name}</strong> has been informed. </>}
-          Announce the release in sacrament meeting to complete it.
-        </p>
-        <div className="space-y-1.5">
-          <Label htmlFor="releaseAnnouncedDate">Announcement date</Label>
-          <Input
-            id="releaseAnnouncedDate"
-            type="date"
-            value={sustainedDate}
-            onChange={(e) => setSustainedDate(e.target.value)}
-          />
-        </div>
-        <div className="flex justify-end gap-2">
-          <Button variant="outline" onClick={onClose}>Not Yet</Button>
-          <Button
-            onClick={() => {
-              completeCallingTasks(calling.id);
-              onSave({ stage: "recorded", sustainedIn: "sacrament_meeting", sustainedDate: sustainedDate || undefined });
-            }}
-          >
-            Mark Announced &amp; Complete
-          </Button>
-        </div>
-      </div>
-    );
-  }
+  if (stage === "vacant") return fillBody();
+  if (stage === "inform" && calling.kind === "release") return releaseInformBody();
 
-  if (stage === "release_inform")    return releaseInformBody();
-  if (stage === "release_announced") return releaseAnnouncedBody();
-  if (stage === "vacant")            return fillBody();
-
-  if (stage === "extending") {
+  if (stage === "inform") {
     return (
       <div className="border-t pt-4 space-y-3">
         <p className="text-sm font-semibold">Record Response</p>
@@ -534,6 +491,54 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
             })}
           >
             Schedule
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (stage === "sustaining" && calling.kind === "release") {
+    const needsBizItem = !bizAdded;
+    return (
+      <div className="border-t pt-4 space-y-3">
+        <p className="text-sm font-semibold">Announce the Release</p>
+        <p className="text-sm text-muted-foreground">
+          {calling.releasedBy
+            ? <><strong>{calling.releasedBy}</strong> has informed <strong>{name}</strong>. </>
+            : <><strong>{name}</strong> has been informed. </>}
+          Announce the release in sacrament meeting to complete it.
+        </p>
+        {needsBizItem && (
+          <div className="rounded-lg border border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/60 p-3 space-y-2">
+            <div className="flex gap-2 text-sm text-red-800 dark:text-red-200">
+              <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+              <span><strong>Action required:</strong> add this release to the business items document.</span>
+            </div>
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <input type="checkbox" checked={bizAdded} onChange={(e) => setBizAdded(e.target.checked)} />
+              I have added this release to the business items document
+            </label>
+          </div>
+        )}
+        <div className="space-y-1.5">
+          <Label htmlFor="releaseAnnouncedDate">Announcement date</Label>
+          <Input
+            id="releaseAnnouncedDate"
+            type="date"
+            value={sustainedDate}
+            onChange={(e) => setSustainedDate(e.target.value)}
+          />
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={onClose}>Not Yet</Button>
+          <Button
+            disabled={needsBizItem && !bizAdded}
+            onClick={() => {
+              completeCallingTasks(calling.id);
+              onSave({ stage: "recorded", businessItemAdded: true, sustainedDate: sustainedDate || undefined });
+            }}
+          >
+            Mark Announced &amp; Complete
           </Button>
         </div>
       </div>
@@ -745,10 +750,9 @@ function CallingCard({
 }: CallingCardProps) {
   const urgent   = attentionMessage(calling);
   const initials = calling.memberName ? getInitials(calling.memberName) : "";
-  const pipeline = pipelineFor(calling.kind);
-  const idx      = pipeline.indexOf(calling.stage);
+  const idx      = pipelineIndex(calling.stage);
   // Denominator is length-2 (exclude "recorded" from 100%)
-  const progress = Math.round((Math.max(0, idx) / (pipeline.length - 2)) * 100);
+  const progress = Math.round((Math.max(0, idx) / (CALLING_PIPELINE.length - 2)) * 100);
 
   return (
     <div
@@ -875,16 +879,15 @@ function CallingCard({
 // ── Pipeline / Kanban View ────────────────────────────────────────────────────
 
 const KANBAN_STAGES = CALLING_PIPELINE.filter((s) => s !== "recorded");
-const RELEASE_KANBAN_STAGES = RELEASE_PIPELINE.filter((s) => s !== "recorded");
 
 interface KanbanViewProps {
   callings: Calling[];
-  stages?: CallingStage[];
   onSelect: (c: Calling) => void;
   onMove: (callingId: string, toStage: CallingStage) => void;
 }
 
-function KanbanView({ callings, stages = KANBAN_STAGES, onSelect, onMove }: KanbanViewProps) {
+function KanbanView({ callings, onSelect, onMove }: KanbanViewProps) {
+  const stages = KANBAN_STAGES;
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [overStage,  setOverStage]  = useState<CallingStage | null>(null);
 
@@ -1479,7 +1482,7 @@ export default function CallingsPage() {
         linkedId:   fillId,
         memberName: entry.member ?? "",
         notes:      "",
-        stage:      "release_inform",
+        stage:      "inform",
       };
       const fillCard: Calling = {
         ...base,
@@ -1509,8 +1512,6 @@ export default function CallingsPage() {
 
   // ── Derived data ──────────────────────────────────────────────────────────
 
-  const releaseCards      = callings.filter((c) => c.kind === "release" && c.stage !== "recorded");
-  const fillCallings      = callings.filter((c) => c.kind !== "release" && c.stage !== "recorded");
   const pipelineCallings  = callings.filter((c) => c.stage !== "recorded");
   const completeCallings  = callings.filter((c) => c.stage === "recorded");
   const vacantCallings    = callings.filter((c) => c.kind !== "release" && c.stage === "vacant");
@@ -1556,8 +1557,8 @@ export default function CallingsPage() {
         </Button>
       </div>
 
-      {/* Pipeline flow summary (desktop only) — fill lifecycle */}
-      {view === "pipeline" && <PipelineFlow callings={fillCallings} />}
+      {/* Pipeline flow summary (desktop only) */}
+      {view === "pipeline" && <PipelineFlow callings={pipelineCallings} />}
 
       {/* Business items banner */}
       {bizItemCallings.length > 0 && (
@@ -1633,33 +1634,11 @@ export default function CallingsPage() {
       {/* ── Views ── */}
 
       {view === "pipeline" && (
-        <div className="space-y-6">
-          {releaseCards.length > 0 && (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <h2 className="text-sm font-semibold">Releases</h2>
-                <span className="text-[10px] font-bold tabular-nums px-1.5 rounded-full bg-orange-100 text-orange-800 dark:bg-orange-900/60 dark:text-orange-200">
-                  {releaseCards.length}
-                </span>
-                <span className="text-xs text-muted-foreground">— outgoing holders, tracked separately from filling the position</span>
-              </div>
-              <KanbanView
-                callings={releaseCards}
-                stages={RELEASE_KANBAN_STAGES}
-                onSelect={setSelected}
-                onMove={handleMove}
-              />
-            </div>
-          )}
-          <div className="space-y-2">
-            {releaseCards.length > 0 && <h2 className="text-sm font-semibold">Callings</h2>}
-            <KanbanView
-              callings={fillCallings}
-              onSelect={setSelected}
-              onMove={handleMove}
-            />
-          </div>
-        </div>
+        <KanbanView
+          callings={pipelineCallings}
+          onSelect={setSelected}
+          onMove={handleMove}
+        />
       )}
 
       {view === "chart" && <ChartView roster={MOCK_ROSTER} onAction={handleChartAction} />}
@@ -1711,8 +1690,8 @@ export default function CallingsPage() {
 
                 {/* Progress dots */}
                 <div className="flex gap-1.5 items-center flex-wrap">
-                  {pipelineFor(selected.kind).map((s, i) => {
-                    const current = pipelineIndex(selected.stage, selected.kind);
+                  {CALLING_PIPELINE.map((s, i) => {
+                    const current = pipelineIndex(selected.stage);
                     return (
                       <div
                         key={s}
