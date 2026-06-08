@@ -110,7 +110,7 @@ export default function DashboardPage() {
               <ul className="divide-y divide-border">
                 {upcomingMeetings.map((meeting) => {
                   const itemCount = meeting.type === "sacrament_meeting"
-                    ? (meeting.program?.items.length ?? 0)
+                    ? (meeting.program?.rows.length ?? 0)
                     : meeting.agenda.length;
                   return (
                   <li key={meeting.id} className="flex items-start gap-3 px-6 py-3">

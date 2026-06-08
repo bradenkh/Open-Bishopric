@@ -182,52 +182,31 @@ export interface AgendaItem {
   done?: boolean;
 }
 
-// ── Sacrament meeting program ────────────────────────────────────────────────
+// ── Sacrament meeting program (bulletin JSON) ────────────────────────────────
 
-/** The kind of a single step in a sacrament meeting program. */
-export type ProgramItemKind =
-  | "hymn"
-  | "prayer"
-  | "sacrament"
-  | "testimony"
-  | "business"
-  | "announcements"
-  | "speaker"
-  | "musical_number"
-  | "other";
-
-export const PROGRAM_KIND_LABELS: Record<ProgramItemKind, string> = {
-  hymn:           "Hymn",
-  prayer:         "Prayer",
-  sacrament:      "Sacrament",
-  testimony:      "Testimonies",
-  business:       "Ward Business",
-  announcements:  "Announcements",
-  speaker:        "Speaker",
-  musical_number: "Musical Number",
-  other:          "Other",
-};
-
-/** A single ordered step in a sacrament meeting program. */
-export interface ProgramItem {
+/**
+ * One row of the bulletin's order-of-service table. Intentionally generic so
+ * a meeting can be anything (4 talks, an all-music program, etc.) and so an
+ * AI agent can emit arbitrary rows.
+ *
+ *   - `value` empty  → the row prints full-width and centered (e.g. the
+ *                       sacrament anchor, "Bearing of Testimonies").
+ *   - `value` set    → two columns: `label` on the left, `value` on the right
+ *                       (e.g. "Opening Hymn" → "#139, 'In Fasting We Approach Thee'").
+ */
+export interface BulletinRow {
   id: string;
-  kind: ProgramItemKind;
-  /** Position/role label, e.g. "Opening Hymn", "Invocation", "Youth Speaker". */
-  label?: string;
-  /** Person responsible: speaker, prayer giver, performer. */
-  person?: string;
-  /** Hymn number (hymn items). */
-  hymnNumber?: string;
-  /** Secondary text: hymn title, speaker topic, musical-number title. */
-  topic?: string;
-  notes?: string;
-  /** For announcement items: the running announcements pulled into this meeting. */
-  announcementIds?: string[];
-  /** Checked off during the meeting. */
-  done?: boolean;
+  label: string;
+  value?: string;
+  /** The Administration of the Sacrament anchor — fixed, cannot be deleted. */
+  anchor?: boolean;
 }
 
-/** The structured order of service for a sacrament meeting. */
+/**
+ * The bulletin data for a single sacrament meeting (everything except
+ * announcements). This is the JSON persisted in the DB and the shape the
+ * future AI agent produces — see `parseBulletin` in `lib/bulletin.ts`.
+ */
 export interface SacramentProgram {
   presiding?: string;
   conducting?: string;
@@ -237,7 +216,7 @@ export interface SacramentProgram {
   quote?: string;
   /** Attribution for the quote, e.g. "President Oaks". */
   quoteBy?: string;
-  items: ProgramItem[];
+  rows: BulletinRow[];
 }
 
 export interface Meeting {
@@ -275,19 +254,20 @@ export const MEETING_STATUS_COLORS: Record<MeetingStatus, string> = {
 // ── Announcements ────────────────────────────────────────────────────────────
 
 /**
- * A reusable ward announcement. Lives in a running list and is read at the
- * pulpit during sacrament meeting. Recurring announcements stay on the list
- * week to week until archived or expired.
+ * A ward announcement, stored as its own DB row. It is automatically included
+ * on the bulletin until its event `date` has passed; announcements with no
+ * date are standing and stay until archived.
  */
 export interface Announcement {
   id: string;
   title: string;
-  details?: string;
-  /** Optional date the announcement first becomes relevant (YYYY-MM-DD). */
-  startDate?: string;
-  /** Optional date after which it drops off the active list (YYYY-MM-DD). */
-  expiresOn?: string;
-  /** Manually retired regardless of expiry. */
+  description?: string;
+  /** Event date (YYYY-MM-DD). The announcement auto-drops once this is past. */
+  date?: string;
+  /** Event time (HH:MM). */
+  time?: string;
+  location?: string;
+  /** Manually retired regardless of date. */
   archived?: boolean;
   createdBy: string;
   createdAt: string;

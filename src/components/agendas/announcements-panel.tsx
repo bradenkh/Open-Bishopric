@@ -15,12 +15,21 @@ import type { Announcement } from "@/types";
 import { isAnnouncementActive, sortAnnouncements } from "@/lib/announcements";
 import { formatDate, cn } from "@/lib/utils";
 
-type Draft = { title: string; details: string; startDate: string; expiresOn: string };
-const EMPTY: Draft = { title: "", details: "", startDate: "", expiresOn: "" };
+export type AnnouncementDraft = {
+  title: string; description: string; date: string; time: string; location: string;
+};
+const EMPTY: AnnouncementDraft = { title: "", description: "", date: "", time: "", location: "" };
+
+function formatTime(time: string): string {
+  const [h, m] = time.split(":").map(Number);
+  const period = h >= 12 ? "PM" : "AM";
+  const hour = h % 12 === 0 ? 12 : h % 12;
+  return `${hour}:${String(m).padStart(2, "0")} ${period}`;
+}
 
 interface Props {
   announcements: Announcement[];
-  onSave: (draft: Draft, editingId: string | null) => void;
+  onSave: (draft: AnnouncementDraft, editingId: string | null) => void;
   onArchiveToggle: (id: string) => void;
   onDelete: (id: string) => void;
 }
@@ -28,7 +37,7 @@ interface Props {
 export function AnnouncementsPanel({ announcements, onSave, onArchiveToggle, onDelete }: Props) {
   const [open, setOpen]       = useState(false);
   const [editing, setEditing] = useState<Announcement | null>(null);
-  const [form, setForm]       = useState<Draft>(EMPTY);
+  const [form, setForm]       = useState<AnnouncementDraft>(EMPTY);
 
   const sorted = sortAnnouncements(announcements);
   const activeCount = announcements.filter((a) => isAnnouncementActive(a)).length;
@@ -43,9 +52,10 @@ export function AnnouncementsPanel({ announcements, onSave, onArchiveToggle, onD
     setEditing(a);
     setForm({
       title: a.title,
-      details: a.details ?? "",
-      startDate: a.startDate ?? "",
-      expiresOn: a.expiresOn ?? "",
+      description: a.description ?? "",
+      date: a.date ?? "",
+      time: a.time ?? "",
+      location: a.location ?? "",
     });
     setOpen(true);
   }
@@ -65,7 +75,7 @@ export function AnnouncementsPanel({ announcements, onSave, onArchiveToggle, onD
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold">Announcements</p>
           <p className="text-xs text-muted-foreground">
-            {activeCount} active · read at the pulpit and attached to programs
+            {activeCount} active · auto-added to every bulletin until their date passes
           </p>
         </div>
         <Button onClick={openNew} size="sm" variant="outline" className="gap-1.5 shrink-0">
@@ -86,16 +96,18 @@ export function AnnouncementsPanel({ announcements, onSave, onArchiveToggle, onD
                     </p>
                     {!active && (
                       <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                        {a.archived ? "Archived" : "Expired"}
+                        {a.archived ? "Archived" : "Past"}
                       </span>
                     )}
                   </div>
-                  {a.details && (
-                    <p className="mt-0.5 text-xs text-muted-foreground">{a.details}</p>
+                  {a.description && (
+                    <p className="mt-0.5 text-xs text-muted-foreground">{a.description}</p>
                   )}
-                  {a.expiresOn && (
+                  {(a.date || a.location) && (
                     <span className="mt-1 flex items-center gap-1 text-[11px] text-muted-foreground">
-                      <CalendarClock className="h-3 w-3" /> Through {formatDate(a.expiresOn)}
+                      <CalendarClock className="h-3 w-3" />
+                      {[a.date && formatDate(a.date), a.time && formatTime(a.time), a.location]
+                        .filter(Boolean).join(" · ")}
                     </span>
                   )}
                 </div>
@@ -145,27 +157,31 @@ export function AnnouncementsPanel({ announcements, onSave, onArchiveToggle, onD
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="ann-details">Details</Label>
+              <Label htmlFor="ann-desc">Description</Label>
               <Textarea
-                id="ann-details"
-                value={form.details}
-                onChange={(e) => setForm((f) => ({ ...f, details: e.target.value }))}
+                id="ann-desc"
+                value={form.description}
+                onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
                 placeholder="What should be read at the pulpit?"
                 rows={3}
               />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label htmlFor="ann-start">Starts</Label>
-                <Input id="ann-start" type="date" value={form.startDate} onChange={(e) => setForm((f) => ({ ...f, startDate: e.target.value }))} />
+                <Label htmlFor="ann-date">Date</Label>
+                <Input id="ann-date" type="date" value={form.date} onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))} />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="ann-expires">Expires</Label>
-                <Input id="ann-expires" type="date" value={form.expiresOn} onChange={(e) => setForm((f) => ({ ...f, expiresOn: e.target.value }))} />
+                <Label htmlFor="ann-time">Time</Label>
+                <Input id="ann-time" type="time" value={form.time} onChange={(e) => setForm((f) => ({ ...f, time: e.target.value }))} />
               </div>
             </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ann-loc">Location</Label>
+              <Input id="ann-loc" value={form.location} onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))} placeholder="e.g. the church building" />
+            </div>
             <p className="text-xs text-muted-foreground">
-              Leave expiry blank for a standing announcement. Expired items drop off the active list automatically.
+              Leave the date blank for a standing announcement. Once the date passes it drops off the bulletin automatically.
             </p>
           </div>
           <DialogFooter className="gap-2">

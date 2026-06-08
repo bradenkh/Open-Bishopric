@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import type { Meeting, WardInfo } from "@/types";
+import type { WardInfo } from "@/types";
 import { printNode } from "@/lib/print";
 
 const DOC_CSS = `
@@ -34,25 +34,19 @@ function docDate(iso: string): string {
   return `${months[m - 1]} ${ordinal(d)}, ${y}`;
 }
 
-/** All ward-business lines across the program's business items. */
-export function businessLines(meeting: Meeting): string[] {
-  return (meeting.program?.items ?? [])
-    .filter((i) => i.kind === "business")
-    .flatMap((i) => (i.notes ?? "").split("\n"))
-    .map((l) => l.trim())
-    .filter(Boolean);
-}
-
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  meeting: Meeting;
+  /** Meeting date (YYYY-MM-DD) the business is read in. */
+  date: string;
+  /** Sustaining / release lines, derived from callings. */
+  items: string[];
   ward: WardInfo;
 }
 
-export function BusinessDialog({ open, onOpenChange, meeting, ward }: Props) {
+export function BusinessDialog({ open, onOpenChange, date, items, ward }: Props) {
   const ref = useRef<HTMLDivElement>(null);
-  const lines = businessLines(meeting);
+  const lines = items;
 
   function print() {
     if (ref.current) printNode(ref.current, `${ward.wardName} Ward Business`);
@@ -69,7 +63,7 @@ export function BusinessDialog({ open, onOpenChange, meeting, ward }: Props) {
           <div className="biz-doc" ref={ref}>
             <style dangerouslySetInnerHTML={{ __html: DOC_CSS }} />
             <h1>Ward Business</h1>
-            <p className="sub">{ward.wardName} · {docDate(meeting.date)}</p>
+            <p className="sub">{ward.wardName} · {docDate(date)}</p>
 
             <h2>Proposed to be sustained</h2>
             {lines.length === 0 ? (

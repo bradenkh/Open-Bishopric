@@ -3,7 +3,7 @@
 import { useState } from "react";
 import {
   Plus, Filter, CalendarDays, Clock, MapPin, Pencil, Trash2,
-  CheckCircle2, Circle, ChevronDown, ChevronRight, User, FileText, Settings, Gavel,
+  CheckCircle2, Circle, ChevronDown, ChevronRight, ChevronLeft, User, FileText, Settings, Gavel,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,10 +23,11 @@ import { MEETING_TYPE_LABELS, MEETING_STATUS_COLORS } from "@/types";
 import { MOCK_MEETINGS, MOCK_ANNOUNCEMENTS, MOCK_CALLINGS } from "@/lib/mock-data";
 import { DEFAULT_WARD_INFO, deriveWardBusiness } from "@/lib/ward";
 import { isAnnouncementActive } from "@/lib/announcements";
+import { defaultBulletin, addDays, upcomingSunday, todayISODate, formatSunday } from "@/lib/bulletin";
 import { formatDate } from "@/lib/utils";
 import { cn } from "@/lib/utils";
-import { AnnouncementsPanel } from "@/components/agendas/announcements-panel";
-import { SacramentProgram as SacramentProgramView } from "@/components/agendas/sacrament-program";
+import { AnnouncementsPanel, type AnnouncementDraft } from "@/components/agendas/announcements-panel";
+import { BulletinEditor } from "@/components/agendas/sacrament-program";
 import { BulletinDialog } from "@/components/agendas/bulletin";
 import { BusinessDialog } from "@/components/agendas/business-doc";
 
@@ -46,33 +47,6 @@ const DEFAULT_TITLE: Record<MeetingType, string> = {
   sacrament_meeting: "Sacrament Meeting",
   ward_council:      "Ward Council",
 };
-
-/** A blank but ordered sacrament program to seed new sacrament meetings. */
-function defaultProgram(header: Partial<SacramentProgram>): SacramentProgram {
-  const mk = (kind: SacramentProgram["items"][number]["kind"], label: string) =>
-    ({ id: `pi-${Math.random().toString(36).slice(2, 8)}`, kind, label });
-  return {
-    presiding: header.presiding,
-    conducting: header.conducting,
-    chorister: header.chorister,
-    organist: header.organist,
-    quote: header.quote,
-    quoteBy: header.quoteBy,
-    items: [
-      mk("hymn", "Opening Hymn"),
-      mk("prayer", "Invocation"),
-      mk("business", "Ward Business"),
-      mk("announcements", "Announcements"),
-      mk("hymn", "Sacrament Hymn"),
-      mk("sacrament", "Administration of the Sacrament"),
-      mk("speaker", "First Speaker"),
-      mk("hymn", "Intermediate Hymn"),
-      mk("speaker", "Concluding Speaker"),
-      mk("hymn", "Closing Hymn"),
-      mk("prayer", "Benediction"),
-    ],
-  };
-}
 
 function formatTime(time?: string) {
   if (!time) return "";
@@ -113,8 +87,14 @@ export default function AgendasPage() {
   const [wardDialogOpen, setWardDialogOpen] = useState(false);
   const [wardForm, setWardForm]       = useState<WardInfo>(DEFAULT_WARD_INFO);
 
-  // Sustaining lines derived from callings (for the Ward Business item).
-  const businessSuggestions = deriveWardBusiness(MOCK_CALLINGS).map((b) => b.line);
+  // Sacrament tab navigates one Sunday at a time.
+  const [selectedSunday, setSelectedSunday] = useState<string>(() => upcomingSunday(todayISODate()));
+  const sacramentMeeting = meetings.find(
+    (m) => m.type === "sacrament_meeting" && m.date === selectedSunday,
+  ) ?? null;
+
+  // Sustaining lines derived from callings (the separate Ward Business document).
+  const wardBusiness = deriveWardBusiness(MOCK_CALLINGS).map((b) => b.line);
   const activeAnnouncements = announcements.filter((a) => isAnnouncementActive(a));
 
   const inTab = meetings.filter((m) => m.type === activeTab);
@@ -140,7 +120,10 @@ export default function AgendasPage() {
 
   function openNew() {
     setEditing(null);
-    setForm({ ...EMPTY_FORM, type: activeTab, title: DEFAULT_TITLE[activeTab] });
+    const base = { ...EMPTY_FORM, type: activeTab, title: DEFAULT_TITLE[activeTab] };
+    // On the sacrament tab, prefill the currently selected Sunday.
+    if (activeTab === "sacrament_meeting") base.date = selectedSunday;
+    setForm(base);
     setDialogOpen(true);
   }
 
@@ -177,7 +160,7 @@ export default function AgendasPage() {
       setMeetings((prev) => prev.map((m) => {
         if (m.id !== editing.id) return m;
         const program = form.type === "sacrament_meeting"
-          ? { ...(m.program ?? defaultProgram(header)), ...header }
+          ? { ...(m.program ?? defaultBulletin(header)), ...header }
           : m.program;
         return { ...m, ...meetingFields, program, updatedAt: now };
       }));
@@ -186,7 +169,7 @@ export default function AgendasPage() {
         id: `mtg-${Date.now()}`,
         ...meetingFields,
         agenda: [],
-        program: form.type === "sacrament_meeting" ? defaultProgram(header) : undefined,
+        program: form.type === "sacrament_meeting" ? defaultBulletin(header) : undefined,
         createdBy: user?.uid ?? "mock",
         createdAt: now,
         updatedAt: now,
@@ -194,6 +177,7 @@ export default function AgendasPage() {
       setMeetings((prev) => [...prev, newMeeting]);
       setExpanded((prev) => new Set(prev).add(newMeeting.id));
       setActiveTab(newMeeting.type);
+      if (newMeeting.type === "sacrament_meeting") setSelectedSunday(newMeeting.date);
     }
     setDialogOpen(false);
     setSaving(false);
@@ -205,27 +189,22 @@ export default function AgendasPage() {
 
   // ── Announcements ──────────────────────────────────────────────────────────
 
-  function saveAnnouncement(
-    draft: { title: string; details: string; startDate: string; expiresOn: string },
-    editingId: string | null,
-  ) {
+  function saveAnnouncement(draft: AnnouncementDraft, editingId: string | null) {
     const now = new Date().toISOString();
+    const fields = {
+      title: draft.title.trim(),
+      description: draft.description.trim() || undefined,
+      date: draft.date || undefined,
+      time: draft.time || undefined,
+      location: draft.location.trim() || undefined,
+    };
     if (editingId) {
-      setAnnouncements((prev) => prev.map((a) => a.id === editingId ? {
-        ...a,
-        title: draft.title.trim(),
-        details: draft.details.trim() || undefined,
-        startDate: draft.startDate || undefined,
-        expiresOn: draft.expiresOn || undefined,
-        updatedAt: now,
-      } : a));
+      setAnnouncements((prev) => prev.map((a) =>
+        a.id === editingId ? { ...a, ...fields, updatedAt: now } : a));
     } else {
       setAnnouncements((prev) => [...prev, {
         id: `ann-${Date.now()}`,
-        title: draft.title.trim(),
-        details: draft.details.trim() || undefined,
-        startDate: draft.startDate || undefined,
-        expiresOn: draft.expiresOn || undefined,
+        ...fields,
         createdBy: user?.uid ?? "mock",
         createdAt: now,
         updatedAt: now,
@@ -241,16 +220,6 @@ export default function AgendasPage() {
 
   function deleteAnnouncement(id: string) {
     setAnnouncements((prev) => prev.filter((a) => a.id !== id));
-    // Detach from any meeting program that referenced it.
-    setMeetings((prev) => prev.map((m) => m.program ? {
-      ...m,
-      program: {
-        ...m.program,
-        items: m.program.items.map((it) => it.announcementIds
-          ? { ...it, announcementIds: it.announcementIds.filter((x) => x !== id) }
-          : it),
-      },
-    } : m));
   }
 
   function updateProgram(meetingId: string, program: SacramentProgram) {
@@ -383,213 +352,249 @@ export default function AgendasPage() {
         })}
       </div>
 
-      {/* Status filter pills */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-1">
-        <Filter className="h-4 w-4 text-muted-foreground shrink-0" />
-        {(["all", ...STATUSES] as (MeetingStatus | "all")[]).map((s) => (
-          <button
-            key={s}
-            onClick={() => setFilterStatus(s)}
-            className={cn(
-              "shrink-0 rounded-full px-3 py-1 text-xs font-medium transition-colors capitalize",
-              filterStatus === s
-                ? "bg-primary text-primary-foreground"
-                : "bg-muted text-muted-foreground hover:bg-accent"
-            )}
-          >
-            {s === "all" ? "All" : s}
-          </button>
-        ))}
-      </div>
+      {activeTab === "sacrament_meeting" ? (
+        /* ── Sacrament Meeting: one Sunday at a time ── */
+        <div className="space-y-4">
+          {/* Ward settings */}
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-muted-foreground">
+              Bulletins use <span className="font-medium">{ward.wardName}</span> details.
+            </p>
+            <Button variant="ghost" size="sm" className="gap-1.5 h-7 text-xs" onClick={openWardSettings}>
+              <Settings className="h-3.5 w-3.5" /> Ward settings
+            </Button>
+          </div>
 
-      {/* Ward settings — Sacrament Meeting tab */}
-      {activeTab === "sacrament_meeting" && (
-        <div className="flex items-center justify-between">
-          <p className="text-xs text-muted-foreground">
-            Bulletins use <span className="font-medium">{ward.wardName}</span> details.
-          </p>
-          <Button variant="ghost" size="sm" className="gap-1.5 h-7 text-xs" onClick={openWardSettings}>
-            <Settings className="h-3.5 w-3.5" /> Ward settings
-          </Button>
-        </div>
-      )}
+          {/* Sunday navigator */}
+          <div className="flex items-center justify-center gap-3">
+            <Button variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={() => setSelectedSunday(addDays(selectedSunday, -7))} title="Previous Sunday">
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <p className="min-w-[15rem] text-center text-sm font-semibold">{formatSunday(selectedSunday)}</p>
+            <Button variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={() => setSelectedSunday(addDays(selectedSunday, 7))} title="Next Sunday">
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
 
-      {/* Meeting list */}
-      {sorted.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 py-16 text-center">
-          <CalendarDays className="h-12 w-12 text-muted-foreground/40" />
-          <p className="text-muted-foreground">
-            No {filterStatus === "all" ? "" : `${filterStatus} `}{MEETING_TYPE_LABELS[activeTab].toLowerCase()} meetings
-          </p>
-          <Button onClick={openNew} variant="outline" size="sm">Schedule a meeting</Button>
-        </div>
-      ) : (
-        <ul className="space-y-3">
-          {sorted.map((m) => {
-            const isOpen = expanded.has(m.id);
-            const isSacrament = m.type === "sacrament_meeting";
-            const mins = totalMinutes(m.agenda);
-            const itemCount = isSacrament ? (m.program?.items.length ?? 0) : m.agenda.length;
-            return (
-              <li key={m.id} className="rounded-xl border border-border bg-card overflow-hidden">
-                {/* Meeting header */}
-                <div className="flex items-start gap-3 p-4">
-                  <button
-                    className="mt-0.5 shrink-0 text-muted-foreground hover:text-foreground"
-                    onClick={() => toggleExpand(m.id)}
-                    title={isOpen ? "Collapse" : "Expand"}
-                  >
-                    {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                  </button>
-
-                  <div className="flex-1 min-w-0 cursor-pointer" onClick={() => toggleExpand(m.id)}>
-                    <p className="text-sm font-semibold">{m.title}</p>
-                    <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
+          {sacramentMeeting ? (
+            <div className="rounded-xl border border-border bg-card overflow-hidden">
+              <div className="flex items-start gap-3 p-4">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold">{sacramentMeeting.title}</p>
+                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
+                    {sacramentMeeting.time && (
                       <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                        <CalendarDays className="h-3 w-3" /> {formatDate(m.date)}
+                        <Clock className="h-3 w-3" /> {formatTime(sacramentMeeting.time)}
                       </span>
-                      {m.time && (
-                        <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                          <Clock className="h-3 w-3" /> {formatTime(m.time)}
-                        </span>
-                      )}
-                      {m.location && (
-                        <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                          <MapPin className="h-3 w-3" /> {m.location}
-                        </span>
-                      )}
-                      <span className="text-xs text-muted-foreground">
-                        {itemCount} item{itemCount === 1 ? "" : "s"}{!isSacrament && mins > 0 ? ` · ${mins} min` : ""}
+                    )}
+                    {sacramentMeeting.location && (
+                      <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <MapPin className="h-3 w-3" /> {sacramentMeeting.location}
                       </span>
-                    </div>
+                    )}
+                    <span className="text-xs text-muted-foreground">
+                      {sacramentMeeting.program?.rows.length ?? 0} rows
+                    </span>
                   </div>
-
-                  <span className={cn(
-                    "text-xs px-2 py-0.5 rounded-full shrink-0 capitalize",
-                    MEETING_STATUS_COLORS[m.status]
-                  )}>
-                    {m.status}
-                  </span>
-                  {isSacrament && (
-                    <>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 shrink-0"
-                        onClick={() => setBusinessFor(m)}
-                        title="Ward business document"
-                      >
-                        <Gavel className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 shrink-0"
-                        onClick={() => setBulletinFor(m)}
-                        title="View bulletin"
-                      >
-                        <FileText className="h-3.5 w-3.5" />
-                      </Button>
-                    </>
-                  )}
-                  <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => openEdit(m)}>
-                    <Pencil className="h-3.5 w-3.5" />
+                </div>
+                <span className={cn("text-xs px-2 py-0.5 rounded-full shrink-0 capitalize", MEETING_STATUS_COLORS[sacramentMeeting.status])}>
+                  {sacramentMeeting.status}
+                </span>
+                <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => setBusinessFor(sacramentMeeting)} title="Ward business document">
+                  <Gavel className="h-3.5 w-3.5" />
+                </Button>
+                <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => setBulletinFor(sacramentMeeting)} title="View bulletin">
+                  <FileText className="h-3.5 w-3.5" />
+                </Button>
+                <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => openEdit(sacramentMeeting)} title="Edit details">
+                  <Pencil className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+              <div className="border-t border-border bg-muted/30 px-4 py-3 space-y-2">
+                <BulletinEditor
+                  program={sacramentMeeting.program ?? defaultBulletin({})}
+                  onChange={(p) => updateProgram(sacramentMeeting.id, p)}
+                />
+                {sacramentMeeting.notes && (
+                  <p className="text-xs text-muted-foreground pt-1 italic">Notes: {sacramentMeeting.notes}</p>
+                )}
+                <div className="pt-1">
+                  <Button variant="ghost" size="sm" className="gap-1.5 h-7 text-xs text-muted-foreground hover:text-red-600" onClick={() => deleteMeeting(sacramentMeeting.id)}>
+                    <Trash2 className="h-3 w-3" /> Delete meeting
                   </Button>
                 </div>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center gap-3 py-16 text-center">
+              <CalendarDays className="h-12 w-12 text-muted-foreground/40" />
+              <p className="text-muted-foreground">No bulletin for this Sunday yet</p>
+              <Button onClick={openNew} variant="outline" size="sm">Create bulletin</Button>
+            </div>
+          )}
 
-                {/* Body */}
-                {isOpen && (
-                  <div className="border-t border-border bg-muted/30 px-4 py-3 space-y-2">
-                    {isSacrament ? (
-                      <SacramentProgramView
-                        program={m.program ?? { items: [] }}
-                        announcements={announcements}
-                        businessSuggestions={businessSuggestions}
-                        onChange={(p) => updateProgram(m.id, p)}
-                      />
-                    ) : m.agenda.length === 0 ? (
-                      <p className="text-xs text-muted-foreground py-2">No agenda items yet.</p>
-                    ) : (
-                      <ol className="space-y-1.5">
-                        {m.agenda.map((item, idx) => (
-                          <li key={item.id} className="group flex items-start gap-2 rounded-lg bg-card px-3 py-2 border border-border">
-                            <button
-                              className="mt-0.5 shrink-0"
-                              onClick={() => toggleItemDone(m.id, item.id)}
-                              title={item.done ? "Mark not done" : "Mark done"}
-                            >
-                              {item.done
-                                ? <CheckCircle2 className="h-4 w-4 text-green-600" />
-                                : <Circle className="h-4 w-4 text-muted-foreground/40 hover:text-primary" />}
-                            </button>
-                            <div className="flex-1 min-w-0 cursor-pointer" onClick={() => openEditItem(m.id, item)}>
-                              <div className="flex flex-wrap items-center gap-2">
-                                <span className="text-xs text-muted-foreground shrink-0">{idx + 1}.</span>
-                                <p className={cn("text-sm", item.done && "line-through text-muted-foreground")}>
-                                  {item.title}
-                                </p>
-                                {item.durationMins ? (
-                                  <span className="text-[10px] text-muted-foreground">{item.durationMins}m</span>
-                                ) : null}
-                              </div>
-                              <div className="flex flex-wrap gap-x-3 mt-0.5 pl-5">
-                                {item.presenter && (
-                                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                                    <User className="h-3 w-3" /> {item.presenter}
-                                  </span>
-                                )}
-                                {item.notes && (
-                                  <span className="text-xs text-muted-foreground">{item.notes}</span>
-                                )}
-                              </div>
-                            </div>
-                            <button
-                              className="shrink-0 text-muted-foreground/40 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
-                              onClick={() => deleteItem(m.id, item.id)}
-                              title="Remove item"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          </li>
-                        ))}
-                      </ol>
-                    )}
+          {/* Announcements pane beneath the bulletin */}
+          <AnnouncementsPanel
+            announcements={announcements}
+            onSave={saveAnnouncement}
+            onArchiveToggle={toggleArchiveAnnouncement}
+            onDelete={deleteAnnouncement}
+          />
+        </div>
+      ) : (
+        /* ── Bishopric / Ward Council: list view ── */
+        <>
+          {/* Status filter pills */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-1">
+            <Filter className="h-4 w-4 text-muted-foreground shrink-0" />
+            {(["all", ...STATUSES] as (MeetingStatus | "all")[]).map((s) => (
+              <button
+                key={s}
+                onClick={() => setFilterStatus(s)}
+                className={cn(
+                  "shrink-0 rounded-full px-3 py-1 text-xs font-medium transition-colors capitalize",
+                  filterStatus === s
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted text-muted-foreground hover:bg-accent"
+                )}
+              >
+                {s === "all" ? "All" : s}
+              </button>
+            ))}
+          </div>
 
-                    {m.notes && (
-                      <p className="text-xs text-muted-foreground pt-1 italic">Notes: {m.notes}</p>
-                    )}
-
-                    <div className="flex items-center gap-2 pt-1">
-                      {!isSacrament && (
-                        <Button variant="outline" size="sm" className="gap-1.5 h-7 text-xs" onClick={() => openNewItem(m.id)}>
-                          <Plus className="h-3 w-3" /> Add item
-                        </Button>
-                      )}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="gap-1.5 h-7 text-xs text-muted-foreground hover:text-red-600"
-                        onClick={() => deleteMeeting(m.id)}
+          {sorted.length === 0 ? (
+            <div className="flex flex-col items-center gap-3 py-16 text-center">
+              <CalendarDays className="h-12 w-12 text-muted-foreground/40" />
+              <p className="text-muted-foreground">
+                No {filterStatus === "all" ? "" : `${filterStatus} `}{MEETING_TYPE_LABELS[activeTab].toLowerCase()} meetings
+              </p>
+              <Button onClick={openNew} variant="outline" size="sm">Schedule a meeting</Button>
+            </div>
+          ) : (
+            <ul className="space-y-3">
+              {sorted.map((m) => {
+                const isOpen = expanded.has(m.id);
+                const mins = totalMinutes(m.agenda);
+                return (
+                  <li key={m.id} className="rounded-xl border border-border bg-card overflow-hidden">
+                    <div className="flex items-start gap-3 p-4">
+                      <button
+                        className="mt-0.5 shrink-0 text-muted-foreground hover:text-foreground"
+                        onClick={() => toggleExpand(m.id)}
+                        title={isOpen ? "Collapse" : "Expand"}
                       >
-                        <Trash2 className="h-3 w-3" /> Delete meeting
+                        {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                      </button>
+
+                      <div className="flex-1 min-w-0 cursor-pointer" onClick={() => toggleExpand(m.id)}>
+                        <p className="text-sm font-semibold">{m.title}</p>
+                        <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
+                          <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                            <CalendarDays className="h-3 w-3" /> {formatDate(m.date)}
+                          </span>
+                          {m.time && (
+                            <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                              <Clock className="h-3 w-3" /> {formatTime(m.time)}
+                            </span>
+                          )}
+                          {m.location && (
+                            <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                              <MapPin className="h-3 w-3" /> {m.location}
+                            </span>
+                          )}
+                          <span className="text-xs text-muted-foreground">
+                            {m.agenda.length} item{m.agenda.length === 1 ? "" : "s"}{mins > 0 ? ` · ${mins} min` : ""}
+                          </span>
+                        </div>
+                      </div>
+
+                      <span className={cn(
+                        "text-xs px-2 py-0.5 rounded-full shrink-0 capitalize",
+                        MEETING_STATUS_COLORS[m.status]
+                      )}>
+                        {m.status}
+                      </span>
+                      <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => openEdit(m)}>
+                        <Pencil className="h-3.5 w-3.5" />
                       </Button>
                     </div>
-                  </div>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
 
-      {/* Announcements pane — sits beneath the bulletin/meeting list */}
-      {activeTab === "sacrament_meeting" && (
-        <AnnouncementsPanel
-          announcements={announcements}
-          onSave={saveAnnouncement}
-          onArchiveToggle={toggleArchiveAnnouncement}
-          onDelete={deleteAnnouncement}
-        />
+                    {isOpen && (
+                      <div className="border-t border-border bg-muted/30 px-4 py-3 space-y-2">
+                        {m.agenda.length === 0 ? (
+                          <p className="text-xs text-muted-foreground py-2">No agenda items yet.</p>
+                        ) : (
+                          <ol className="space-y-1.5">
+                            {m.agenda.map((item, idx) => (
+                              <li key={item.id} className="group flex items-start gap-2 rounded-lg bg-card px-3 py-2 border border-border">
+                                <button
+                                  className="mt-0.5 shrink-0"
+                                  onClick={() => toggleItemDone(m.id, item.id)}
+                                  title={item.done ? "Mark not done" : "Mark done"}
+                                >
+                                  {item.done
+                                    ? <CheckCircle2 className="h-4 w-4 text-green-600" />
+                                    : <Circle className="h-4 w-4 text-muted-foreground/40 hover:text-primary" />}
+                                </button>
+                                <div className="flex-1 min-w-0 cursor-pointer" onClick={() => openEditItem(m.id, item)}>
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="text-xs text-muted-foreground shrink-0">{idx + 1}.</span>
+                                    <p className={cn("text-sm", item.done && "line-through text-muted-foreground")}>
+                                      {item.title}
+                                    </p>
+                                    {item.durationMins ? (
+                                      <span className="text-[10px] text-muted-foreground">{item.durationMins}m</span>
+                                    ) : null}
+                                  </div>
+                                  <div className="flex flex-wrap gap-x-3 mt-0.5 pl-5">
+                                    {item.presenter && (
+                                      <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                                        <User className="h-3 w-3" /> {item.presenter}
+                                      </span>
+                                    )}
+                                    {item.notes && (
+                                      <span className="text-xs text-muted-foreground">{item.notes}</span>
+                                    )}
+                                  </div>
+                                </div>
+                                <button
+                                  className="shrink-0 text-muted-foreground/40 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                                  onClick={() => deleteItem(m.id, item.id)}
+                                  title="Remove item"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </li>
+                            ))}
+                          </ol>
+                        )}
+
+                        {m.notes && (
+                          <p className="text-xs text-muted-foreground pt-1 italic">Notes: {m.notes}</p>
+                        )}
+
+                        <div className="flex items-center gap-2 pt-1">
+                          <Button variant="outline" size="sm" className="gap-1.5 h-7 text-xs" onClick={() => openNewItem(m.id)}>
+                            <Plus className="h-3 w-3" /> Add item
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="gap-1.5 h-7 text-xs text-muted-foreground hover:text-red-600"
+                            onClick={() => deleteMeeting(m.id)}
+                          >
+                            <Trash2 className="h-3 w-3" /> Delete meeting
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </>
       )}
 
       {/* ── Meeting dialog ── */}
@@ -749,7 +754,8 @@ export default function AgendasPage() {
         <BusinessDialog
           open={!!businessFor}
           onOpenChange={(o) => !o && setBusinessFor(null)}
-          meeting={businessFor}
+          date={businessFor.date}
+          items={wardBusiness}
           ward={ward}
         />
       )}

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import type { Announcement, Meeting, ProgramItem, WardInfo } from "@/types";
+import type { Announcement, Meeting, WardInfo } from "@/types";
 import { printNode } from "@/lib/print";
 
 // Self-contained styles travel with the bulletin markup so the exact same DOM
@@ -31,6 +31,7 @@ const BULLETIN_CSS = `
 .bulletin .right h2{text-align:center;font-size:12pt;font-weight:700;text-decoration:underline;margin:0 0 12px}
 .bulletin .right .ann{margin-bottom:11px;font-size:9pt}
 .bulletin .right .ann .t{font-weight:700}
+.bulletin .right .ann .meta{color:#555;font-style:italic}
 @media print{.bulletin{max-width:none;padding:0}}
 `;
 
@@ -48,23 +49,24 @@ function bulletinDate(iso: string): string {
   return `${months[m - 1]} ${ordinal(d)}, ${y}`;
 }
 
-/** Right-hand value for a program row; empty string means a full-width row. */
-function programValue(item: ProgramItem): string {
-  switch (item.kind) {
-    case "hymn":
-      if (item.hymnNumber && item.topic) return `#${item.hymnNumber}, '${item.topic}'`;
-      if (item.hymnNumber) return `#${item.hymnNumber}`;
-      return item.topic ? `'${item.topic}'` : "";
-    case "prayer":
-      return item.person ?? "";
-    case "speaker":
-    case "musical_number":
-      return item.person || item.topic || "";
-    case "other":
-      return item.person || item.topic || "";
-    default:
-      return "";
+/** A light "June 19 · 6:00 PM · location" meta line for an announcement. */
+function announcementMeta(a: Announcement): string {
+  const bits: string[] = [];
+  if (a.date) {
+    const [, m, d] = a.date.split("-").map(Number);
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    let when = `${months[m - 1]} ${d}`;
+    if (a.time) {
+      const [h, min] = a.time.split(":").map(Number);
+      const period = h >= 12 ? "PM" : "AM";
+      const hr = h % 12 === 0 ? 12 : h % 12;
+      when += ` · ${hr}:${String(min).padStart(2, "0")} ${period}`;
+    }
+    bits.push(when);
   }
+  if (a.location) bits.push(a.location);
+  return bits.join(" · ");
 }
 
 interface Props {
@@ -77,7 +79,7 @@ interface Props {
 
 export function BulletinDialog({ open, onOpenChange, meeting, ward, announcements }: Props) {
   const ref = useRef<HTMLDivElement>(null);
-  const program = meeting.program ?? { items: [] };
+  const program = meeting.program ?? { rows: [] };
 
   function print() {
     if (ref.current) printNode(ref.current, `${ward.wardName} Bulletin`);
@@ -106,19 +108,14 @@ export function BulletinDialog({ open, onOpenChange, meeting, ward, announcement
               </div>
 
               <ul className="program">
-                {program.items.map((item) => {
-                  // Announcements have their own column; ward business is a
-                  // separate document and never prints on the bulletin.
-                  if (item.kind === "announcements" || item.kind === "business") return null;
-                  const label = item.label || item.kind;
-                  const value = programValue(item);
-                  if (!value) {
-                    return <li key={item.id} className="full">{label}</li>;
+                {program.rows.map((row) => {
+                  if (!row.value) {
+                    return <li key={row.id} className="full">{row.label}</li>;
                   }
                   return (
-                    <li key={item.id}>
-                      <span className="label">{label}</span>
-                      <span className="value">{value}</span>
+                    <li key={row.id}>
+                      <span className="label">{row.label}</span>
+                      <span className="value">{row.value}</span>
                     </li>
                   );
                 })}
@@ -156,11 +153,15 @@ export function BulletinDialog({ open, onOpenChange, meeting, ward, announcement
               {announcements.length === 0 ? (
                 <p className="ann">No announcements.</p>
               ) : (
-                announcements.map((a) => (
-                  <p key={a.id} className="ann">
-                    <span className="t">{a.title}:</span> {a.details}
-                  </p>
-                ))
+                announcements.map((a) => {
+                  const meta = announcementMeta(a);
+                  return (
+                    <p key={a.id} className="ann">
+                      <span className="t">{a.title}:</span> {a.description}
+                      {meta && <span className="meta"> ({meta})</span>}
+                    </p>
+                  );
+                })
               )}
             </div>
           </div>
