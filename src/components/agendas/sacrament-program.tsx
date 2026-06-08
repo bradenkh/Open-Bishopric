@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import {
-  Music, Heart, Church, Gavel, Megaphone, Mic, Circle,
+  Music, Heart, Church, Gavel, Megaphone, Mic, Circle, MessageSquare,
   Plus, Trash2, CheckCircle2, ChevronUp, ChevronDown, User,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -21,13 +21,14 @@ import { isAnnouncementActive } from "@/lib/announcements";
 import { cn } from "@/lib/utils";
 
 const KINDS: ProgramItemKind[] = [
-  "hymn", "prayer", "sacrament", "business", "announcements", "speaker", "musical_number", "other",
+  "hymn", "prayer", "sacrament", "testimony", "business", "announcements", "speaker", "musical_number", "other",
 ];
 
 const KIND_ICON: Record<ProgramItemKind, typeof Music> = {
   hymn:           Music,
   prayer:         Heart,
   sacrament:      Church,
+  testimony:      MessageSquare,
   business:       Gavel,
   announcements:  Megaphone,
   speaker:        Mic,
@@ -52,10 +53,12 @@ const EMPTY: Draft = {
 interface Props {
   program: SacramentProgram;
   announcements: Announcement[];
+  /** Sustaining lines derived from callings, offered as one-click additions. */
+  businessSuggestions?: string[];
   onChange: (next: SacramentProgram) => void;
 }
 
-export function SacramentProgram({ program, announcements, onChange }: Props) {
+export function SacramentProgram({ program, announcements, businessSuggestions = [], onChange }: Props) {
   const [dialog, setDialog] = useState<{ item: ProgramItem | null } | null>(null);
   const [form, setForm]     = useState<Draft>(EMPTY);
 
@@ -125,6 +128,13 @@ export function SacramentProgram({ program, announcements, onChange }: Props) {
     update(next);
   }
 
+  function addBusinessLine(item: ProgramItem, line: string) {
+    const lines = (item.notes ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
+    if (lines.includes(line)) return;
+    const notes = [...lines, line].join("\n");
+    update(program.items.map((i) => (i.id === item.id ? { ...i, notes } : i)));
+  }
+
   function toggleAnnouncement(id: string) {
     setForm((f) => ({
       ...f,
@@ -160,45 +170,67 @@ export function SacramentProgram({ program, announcements, onChange }: Props) {
         <ol className="space-y-1.5">
           {program.items.map((item, idx) => {
             const Icon = KIND_ICON[item.kind];
+            const existingLines = (item.notes ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
+            const unusedSuggestions = item.kind === "business"
+              ? businessSuggestions.filter((s) => !existingLines.includes(s))
+              : [];
             return (
-              <li key={item.id} className="group flex items-start gap-2 rounded-lg bg-card px-3 py-2 border border-border">
-                <button
-                  className="mt-0.5 shrink-0"
-                  onClick={() => toggleDone(item.id)}
-                  title={item.done ? "Mark not done" : "Mark done"}
-                >
-                  {item.done
-                    ? <CheckCircle2 className="h-4 w-4 text-green-600" />
-                    : <Circle className="h-4 w-4 text-muted-foreground/40 hover:text-primary" />}
-                </button>
+              <li key={item.id} className="group rounded-lg bg-card px-3 py-2 border border-border">
+                <div className="flex items-start gap-2">
+                  <button
+                    className="mt-0.5 shrink-0"
+                    onClick={() => toggleDone(item.id)}
+                    title={item.done ? "Mark not done" : "Mark done"}
+                  >
+                    {item.done
+                      ? <CheckCircle2 className="h-4 w-4 text-green-600" />
+                      : <Circle className="h-4 w-4 text-muted-foreground/40 hover:text-primary" />}
+                  </button>
 
-                <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
 
-                <div className="flex-1 min-w-0 cursor-pointer" onClick={() => openEdit(item)}>
-                  <p className={cn("text-sm", item.done && "line-through text-muted-foreground")}>
-                    {item.label || PROGRAM_KIND_LABELS[item.kind]}
-                    {item.hymnNumber && <span className="text-muted-foreground font-normal"> · #{item.hymnNumber}</span>}
-                  </p>
-                  <ProgramItemDetail item={item} annById={annById} />
-                </div>
+                  <div className="flex-1 min-w-0 cursor-pointer" onClick={() => openEdit(item)}>
+                    <p className={cn("text-sm", item.done && "line-through text-muted-foreground")}>
+                      {item.label || PROGRAM_KIND_LABELS[item.kind]}
+                      {item.hymnNumber && <span className="text-muted-foreground font-normal"> · #{item.hymnNumber}</span>}
+                    </p>
+                    <ProgramItemDetail item={item} annById={annById} />
+                  </div>
 
-                <div className="flex shrink-0 items-center gap-0.5">
-                  <div className="flex flex-col opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button className="text-muted-foreground/50 hover:text-foreground disabled:opacity-20" onClick={() => move(idx, -1)} disabled={idx === 0} title="Move up">
-                      <ChevronUp className="h-3.5 w-3.5" />
-                    </button>
-                    <button className="text-muted-foreground/50 hover:text-foreground disabled:opacity-20" onClick={() => move(idx, 1)} disabled={idx === program.items.length - 1} title="Move down">
-                      <ChevronDown className="h-3.5 w-3.5" />
+                  <div className="flex shrink-0 items-center gap-0.5">
+                    <div className="flex flex-col opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button className="text-muted-foreground/50 hover:text-foreground disabled:opacity-20" onClick={() => move(idx, -1)} disabled={idx === 0} title="Move up">
+                        <ChevronUp className="h-3.5 w-3.5" />
+                      </button>
+                      <button className="text-muted-foreground/50 hover:text-foreground disabled:opacity-20" onClick={() => move(idx, 1)} disabled={idx === program.items.length - 1} title="Move down">
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                    <button
+                      className="text-muted-foreground/40 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                      onClick={() => remove(item.id)}
+                      title="Remove item"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   </div>
-                  <button
-                    className="text-muted-foreground/40 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
-                    onClick={() => remove(item.id)}
-                    title="Remove item"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
                 </div>
+
+                {unusedSuggestions.length > 0 && (
+                  <div className="mt-2 ml-6 flex flex-wrap items-center gap-1.5">
+                    <span className="text-[11px] text-muted-foreground">From callings:</span>
+                    {unusedSuggestions.map((s) => (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => addBusinessLine(item, s)}
+                        className="flex items-center gap-1 rounded-full border border-dashed border-primary/40 px-2 py-0.5 text-[11px] text-primary hover:bg-primary/10"
+                      >
+                        <Plus className="h-3 w-3" /> {s}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </li>
             );
           })}
@@ -323,6 +355,7 @@ const LABEL_PLACEHOLDER: Record<ProgramItemKind, string> = {
   hymn:           "Opening Hymn",
   prayer:         "Invocation",
   sacrament:      "Administration of the Sacrament",
+  testimony:      "Bearing of Testimonies",
   business:       "Ward Business",
   announcements:  "Announcements",
   speaker:        "First Speaker",
@@ -345,6 +378,20 @@ function ProgramItemDetail({
       return <p className="mt-0.5 text-xs text-muted-foreground">{titles.join(" · ")}</p>;
     }
     return <p className="mt-0.5 text-xs text-muted-foreground/70 italic">None attached</p>;
+  }
+
+  if (item.kind === "business") {
+    const lines = (item.notes ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
+    if (lines.length === 0) {
+      return <p className="mt-0.5 text-xs text-muted-foreground/70 italic">No business items</p>;
+    }
+    return (
+      <ul className="mt-0.5 space-y-0.5">
+        {lines.map((l, i) => (
+          <li key={i} className="text-xs text-muted-foreground">• {l}</li>
+        ))}
+      </ul>
+    );
   }
 
   if (item.person) {

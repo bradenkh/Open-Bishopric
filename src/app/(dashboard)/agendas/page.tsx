@@ -3,7 +3,7 @@
 import { useState } from "react";
 import {
   Plus, Filter, CalendarDays, Clock, MapPin, Pencil, Trash2,
-  CheckCircle2, Circle, ChevronDown, ChevronRight, User,
+  CheckCircle2, Circle, ChevronDown, ChevronRight, User, FileText, Settings,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,14 +17,17 @@ import {
 } from "@/components/ui/dialog";
 import { useAuth } from "@/contexts/AuthContext";
 import type {
-  Meeting, MeetingType, MeetingStatus, AgendaItem, Announcement, SacramentProgram,
+  Meeting, MeetingType, MeetingStatus, AgendaItem, Announcement, SacramentProgram, WardInfo,
 } from "@/types";
 import { MEETING_TYPE_LABELS, MEETING_STATUS_COLORS } from "@/types";
-import { MOCK_MEETINGS, MOCK_ANNOUNCEMENTS } from "@/lib/mock-data";
+import { MOCK_MEETINGS, MOCK_ANNOUNCEMENTS, MOCK_CALLINGS } from "@/lib/mock-data";
+import { DEFAULT_WARD_INFO, deriveWardBusiness } from "@/lib/ward";
+import { isAnnouncementActive } from "@/lib/announcements";
 import { formatDate } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import { AnnouncementsPanel } from "@/components/agendas/announcements-panel";
 import { SacramentProgram as SacramentProgramView } from "@/components/agendas/sacrament-program";
+import { BulletinDialog } from "@/components/agendas/bulletin";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -34,7 +37,7 @@ const STATUSES: MeetingStatus[] = ["upcoming", "completed", "cancelled"];
 const EMPTY_FORM = {
   title: "", type: "bishopric" as MeetingType, status: "upcoming" as MeetingStatus,
   date: "", time: "", location: "", notes: "",
-  presiding: "", conducting: "", chorister: "", organist: "",
+  presiding: "", conducting: "", chorister: "", organist: "", quote: "", quoteBy: "",
 };
 
 const DEFAULT_TITLE: Record<MeetingType, string> = {
@@ -52,6 +55,8 @@ function defaultProgram(header: Partial<SacramentProgram>): SacramentProgram {
     conducting: header.conducting,
     chorister: header.chorister,
     organist: header.organist,
+    quote: header.quote,
+    quoteBy: header.quoteBy,
     items: [
       mk("hymn", "Opening Hymn"),
       mk("prayer", "Invocation"),
@@ -100,6 +105,16 @@ export default function AgendasPage() {
   const [itemDialog, setItemDialog] = useState<{ meetingId: string; item: AgendaItem | null } | null>(null);
   const [itemForm,   setItemForm]   = useState({ title: "", presenter: "", durationMins: "", notes: "" });
 
+  // Bulletin + ward settings
+  const [ward, setWard]               = useState<WardInfo>(DEFAULT_WARD_INFO);
+  const [bulletinFor, setBulletinFor] = useState<Meeting | null>(null);
+  const [wardDialogOpen, setWardDialogOpen] = useState(false);
+  const [wardForm, setWardForm]       = useState<WardInfo>(DEFAULT_WARD_INFO);
+
+  // Sustaining lines derived from callings (for the Ward Business item).
+  const businessSuggestions = deriveWardBusiness(MOCK_CALLINGS).map((b) => b.line);
+  const activeAnnouncements = announcements.filter((a) => isAnnouncementActive(a));
+
   const inTab = meetings.filter((m) => m.type === activeTab);
   const filtered =
     filterStatus === "all" ? inTab : inTab.filter((m) => m.status === filterStatus);
@@ -136,6 +151,8 @@ export default function AgendasPage() {
       conducting: m.program?.conducting ?? "",
       chorister:  m.program?.chorister  ?? "",
       organist:   m.program?.organist   ?? "",
+      quote:      m.program?.quote      ?? "",
+      quoteBy:    m.program?.quoteBy    ?? "",
     });
     setDialogOpen(true);
   }
@@ -145,12 +162,14 @@ export default function AgendasPage() {
     setSaving(true);
     await new Promise((r) => setTimeout(r, 150));
     const now = new Date().toISOString();
-    const { presiding, conducting, chorister, organist, ...meetingFields } = form;
+    const { presiding, conducting, chorister, organist, quote, quoteBy, ...meetingFields } = form;
     const header = {
       presiding:  presiding  || undefined,
       conducting: conducting || undefined,
       chorister:  chorister  || undefined,
       organist:   organist   || undefined,
+      quote:      quote      || undefined,
+      quoteBy:    quoteBy    || undefined,
     };
     if (editing) {
       setMeetings((prev) => prev.map((m) => {
@@ -236,6 +255,25 @@ export default function AgendasPage() {
     const now = new Date().toISOString();
     setMeetings((prev) => prev.map((m) =>
       m.id === meetingId ? { ...m, program, updatedAt: now } : m));
+  }
+
+  // ── Ward settings ──────────────────────────────────────────────────────────
+
+  function openWardSettings() {
+    setWardForm(ward);
+    setWardDialogOpen(true);
+  }
+
+  function saveWardSettings() {
+    setWard(wardForm);
+    setWardDialogOpen(false);
+  }
+
+  function updateLeader(idx: number, patch: Partial<WardInfo["leadership"][number]>) {
+    setWardForm((w) => ({
+      ...w,
+      leadership: w.leadership.map((l, i) => (i === idx ? { ...l, ...patch } : l)),
+    }));
   }
 
   // ── Agenda-item CRUD ───────────────────────────────────────────────────────
@@ -362,14 +400,24 @@ export default function AgendasPage() {
         ))}
       </div>
 
-      {/* Announcements — managed within the Sacrament Meeting tab */}
+      {/* Announcements & ward settings — managed within the Sacrament Meeting tab */}
       {activeTab === "sacrament_meeting" && (
-        <AnnouncementsPanel
-          announcements={announcements}
-          onSave={saveAnnouncement}
-          onArchiveToggle={toggleArchiveAnnouncement}
-          onDelete={deleteAnnouncement}
-        />
+        <>
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-muted-foreground">
+              Bulletins use <span className="font-medium">{ward.wardName}</span> details.
+            </p>
+            <Button variant="ghost" size="sm" className="gap-1.5 h-7 text-xs" onClick={openWardSettings}>
+              <Settings className="h-3.5 w-3.5" /> Ward settings
+            </Button>
+          </div>
+          <AnnouncementsPanel
+            announcements={announcements}
+            onSave={saveAnnouncement}
+            onArchiveToggle={toggleArchiveAnnouncement}
+            onDelete={deleteAnnouncement}
+          />
+        </>
       )}
 
       {/* Meeting list */}
@@ -428,6 +476,17 @@ export default function AgendasPage() {
                   )}>
                     {m.status}
                   </span>
+                  {isSacrament && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 shrink-0"
+                      onClick={() => setBulletinFor(m)}
+                      title="View bulletin"
+                    >
+                      <FileText className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
                   <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => openEdit(m)}>
                     <Pencil className="h-3.5 w-3.5" />
                   </Button>
@@ -440,6 +499,7 @@ export default function AgendasPage() {
                       <SacramentProgramView
                         program={m.program ?? { items: [] }}
                         announcements={announcements}
+                        businessSuggestions={businessSuggestions}
                         onChange={(p) => updateProgram(m.id, p)}
                       />
                     ) : m.agenda.length === 0 ? (
@@ -589,6 +649,14 @@ export default function AgendasPage() {
                   <Label htmlFor="organist">Organist</Label>
                   <Input id="organist" value={form.organist} onChange={(e) => setForm((f) => ({ ...f, organist: e.target.value }))} placeholder="Name" />
                 </div>
+                <div className="col-span-2 space-y-1.5">
+                  <Label htmlFor="quote">Spiritual thought / quote (bulletin)</Label>
+                  <Textarea id="quote" value={form.quote} onChange={(e) => setForm((f) => ({ ...f, quote: e.target.value }))} placeholder="Optional quote printed on the bulletin" rows={2} />
+                </div>
+                <div className="col-span-2 space-y-1.5">
+                  <Label htmlFor="quoteBy">Attribution</Label>
+                  <Input id="quoteBy" value={form.quoteBy} onChange={(e) => setForm((f) => ({ ...f, quoteBy: e.target.value }))} placeholder="e.g. President Oaks" />
+                </div>
                 {!editing && (
                   <p className="col-span-2 text-xs text-muted-foreground">
                     A standard order of service will be added — edit it after creating.
@@ -646,6 +714,83 @@ export default function AgendasPage() {
             <Button onClick={handleSaveItem} disabled={!itemForm.title.trim()}>
               {itemDialog?.item ? "Save Changes" : "Add Item"}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Bulletin preview ── */}
+      {bulletinFor && (
+        <BulletinDialog
+          open={!!bulletinFor}
+          onOpenChange={(o) => !o && setBulletinFor(null)}
+          meeting={bulletinFor}
+          ward={ward}
+          announcements={activeAnnouncements}
+        />
+      )}
+
+      {/* ── Ward settings dialog ── */}
+      <Dialog open={wardDialogOpen} onOpenChange={setWardDialogOpen}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Ward Settings</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-xs text-muted-foreground">
+              These details appear on every sacrament meeting bulletin.
+            </p>
+            <div className="space-y-1.5">
+              <Label htmlFor="w-ward">Ward name</Label>
+              <Input id="w-ward" value={wardForm.wardName} onChange={(e) => setWardForm((w) => ({ ...w, wardName: e.target.value }))} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="w-stake">Stake</Label>
+                <Input id="w-stake" value={wardForm.stake} onChange={(e) => setWardForm((w) => ({ ...w, stake: e.target.value }))} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="w-church">Church name</Label>
+                <Input id="w-church" value={wardForm.churchName} onChange={(e) => setWardForm((w) => ({ ...w, churchName: e.target.value }))} />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="w-addr">Address</Label>
+              <Input id="w-addr" value={wardForm.address} onChange={(e) => setWardForm((w) => ({ ...w, address: e.target.value }))} />
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="col-span-2 space-y-1.5">
+                <Label htmlFor="w-mtitle">Meeting heading</Label>
+                <Input id="w-mtitle" value={wardForm.meetingTitle} onChange={(e) => setWardForm((w) => ({ ...w, meetingTitle: e.target.value }))} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="w-mtime">Time</Label>
+                <Input id="w-mtime" value={wardForm.meetingTime} onChange={(e) => setWardForm((w) => ({ ...w, meetingTime: e.target.value }))} placeholder="9 a.m." />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="w-second">Second hour</Label>
+              <Input id="w-second" value={wardForm.secondHour} onChange={(e) => setWardForm((w) => ({ ...w, secondHour: e.target.value }))} placeholder="Sunday School" />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Leadership</Label>
+              {wardForm.leadership.map((l, i) => (
+                <div key={i} className="grid grid-cols-3 gap-2">
+                  <Input value={l.name} onChange={(e) => updateLeader(i, { name: e.target.value })} placeholder="Name" />
+                  <Input value={l.role} onChange={(e) => updateLeader(i, { role: e.target.value })} placeholder="Role" />
+                  <Input value={l.phone ?? ""} onChange={(e) => updateLeader(i, { phone: e.target.value })} placeholder="Phone" />
+                </div>
+              ))}
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="w-note">Submission note</Label>
+              <Textarea id="w-note" value={wardForm.submissionNote} onChange={(e) => setWardForm((w) => ({ ...w, submissionNote: e.target.value }))} rows={3} />
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setWardDialogOpen(false)}>Cancel</Button>
+            <Button onClick={saveWardSettings}>Save Settings</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

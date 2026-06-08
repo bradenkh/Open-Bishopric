@@ -291,6 +291,8 @@ export const MOCK_MEETINGS: Meeting[] = [
       conducting: "Counselor Hughes",
       chorister:  "Sarah Mitchell",
       organist:   "Linda Brown",
+      quote:      "The Lord did not make it easy, but he did make it possible.",
+      quoteBy:    "President Oaks",
       items: [
         { id: "pi-01", kind: "hymn",           label: "Opening Hymn",   hymnNumber: "19",  topic: "We Thank Thee, O God, for a Prophet" },
         { id: "pi-02", kind: "prayer",         label: "Invocation",     person: "David Park" },

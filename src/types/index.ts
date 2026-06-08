@@ -189,6 +189,7 @@ export type ProgramItemKind =
   | "hymn"
   | "prayer"
   | "sacrament"
+  | "testimony"
   | "business"
   | "announcements"
   | "speaker"
@@ -199,6 +200,7 @@ export const PROGRAM_KIND_LABELS: Record<ProgramItemKind, string> = {
   hymn:           "Hymn",
   prayer:         "Prayer",
   sacrament:      "Sacrament",
+  testimony:      "Testimonies",
   business:       "Ward Business",
   announcements:  "Announcements",
   speaker:        "Speaker",
@@ -231,6 +233,10 @@ export interface SacramentProgram {
   conducting?: string;
   chorister?: string;
   organist?: string;
+  /** Spiritual thought / quote printed on the bulletin. */
+  quote?: string;
+  /** Attribution for the quote, e.g. "President Oaks". */
+  quoteBy?: string;
   items: ProgramItem[];
 }
 
@@ -286,6 +292,31 @@ export interface Announcement {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+}
+
+// ── Ward identity (bulletin letterhead) ──────────────────────────────────────
+
+export interface WardLeader {
+  name: string;
+  role: string;
+  phone?: string;
+}
+
+/** Standing ward details printed on every sacrament meeting bulletin. */
+export interface WardInfo {
+  wardName: string;
+  churchName: string;
+  stake: string;
+  address: string;
+  /** Heading for the meeting, e.g. "Schenectady Sacrament Meeting". */
+  meetingTitle: string;
+  /** Display time, e.g. "9 a.m.". */
+  meetingTime: string;
+  /** What happens in the second hour, e.g. "Sunday School". */
+  secondHour: string;
+  leadership: WardLeader[];
+  /** Free-text note about appointments / submitting announcements. */
+  submissionNote: string;
 }
 
 // ── Interviews ─────────────────────────────────────────────────────────────────
