@@ -212,6 +212,8 @@ export interface SacramentProgram {
   conducting?: string;
   chorister?: string;
   organist?: string;
+  /** What happens in the second hour, e.g. "Sunday School". Optional. */
+  secondHour?: string;
   /** Spiritual thought / quote printed on the bulletin. */
   quote?: string;
   /** Attribution for the quote, e.g. "President Oaks". */
@@ -292,8 +294,6 @@ export interface WardInfo {
   meetingTitle: string;
   /** Display time, e.g. "9 a.m.". */
   meetingTime: string;
-  /** What happens in the second hour, e.g. "Sunday School". */
-  secondHour: string;
   leadership: WardLeader[];
   /** Free-text note about appointments / submitting announcements. */
   submissionNote: string;

@@ -12,7 +12,6 @@ export const DEFAULT_WARD_INFO: WardInfo = {
   address: "52 Blue Barns Rd., Rexford, NY",
   meetingTitle: "Schenectady Sacrament Meeting",
   meetingTime: "9 a.m.",
-  secondHour: "Sunday School",
   leadership: [
     { name: "Jay Phillips",      role: "Bishop",        phone: "(518) 545-9256" },
     { name: "Blaine Bringhurst", role: "1st Counselor", phone: "(518) 698-1106" },

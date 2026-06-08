@@ -3,6 +3,7 @@
 import { Plus, Trash2, ChevronUp, ChevronDown, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import type { BulletinRow, SacramentProgram } from "@/types";
 import { anchorIndex, makeRow } from "@/lib/bulletin";
 import { cn } from "@/lib/utils";
@@ -21,12 +22,9 @@ export function BulletinEditor({ program, onChange }: Props) {
   const rows = program.rows;
   const anchor = anchorIndex(rows);
 
-  const header = [
-    ["Presiding", program.presiding],
-    ["Conducting", program.conducting],
-    ["Chorister", program.chorister],
-    ["Organist", program.organist],
-  ].filter(([, v]) => v) as [string, string][];
+  function setField<K extends keyof SacramentProgram>(key: K, value: string) {
+    onChange({ ...program, [key]: value || undefined });
+  }
 
   function setRows(next: BulletinRow[]) {
     onChange({ ...program, rows: next });
@@ -61,22 +59,45 @@ export function BulletinEditor({ program, onChange }: Props) {
     setRows(next);
   }
 
+  const field = (label: string, key: keyof SacramentProgram, placeholder = "") => (
+    <div className="space-y-1">
+      <label className="text-[11px] font-medium text-muted-foreground">{label}</label>
+      <Input
+        value={(program[key] as string | undefined) ?? ""}
+        onChange={(e) => setField(key, e.target.value)}
+        placeholder={placeholder}
+        className="h-8"
+      />
+    </div>
+  );
+
   return (
-    <div className="space-y-2">
-      {header.length > 0 && (
-        <div className="grid grid-cols-2 gap-x-4 gap-y-1 rounded-lg bg-card border border-border px-3 py-2">
-          {header.map(([k, v]) => (
-            <p key={k} className="text-xs">
-              <span className="text-muted-foreground">{k}:</span> <span className="font-medium">{v}</span>
-            </p>
-          ))}
-          {(program.quote || program.quoteBy) && (
-            <p className="col-span-2 text-xs italic text-muted-foreground">
-              “{program.quote}”{program.quoteBy ? ` — ${program.quoteBy}` : ""}
-            </p>
-          )}
+    <div className="space-y-3">
+      {/* Editable bulletin header */}
+      <div className="rounded-lg border border-border bg-card p-3 space-y-3">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          {field("Presiding", "presiding", "Name")}
+          {field("Conducting", "conducting", "Name")}
+          {field("Second hour", "secondHour", "e.g. Sunday School")}
+          {field("Chorister", "chorister", "Name")}
+          {field("Organist", "organist", "Name")}
         </div>
-      )}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_180px]">
+          <div className="space-y-1">
+            <label className="text-[11px] font-medium text-muted-foreground">Spiritual thought / quote</label>
+            <Textarea
+              value={program.quote ?? ""}
+              onChange={(e) => setField("quote", e.target.value)}
+              placeholder="Optional quote printed on the bulletin"
+              rows={2}
+            />
+          </div>
+          {field("Attribution", "quoteBy", "e.g. President Oaks")}
+        </div>
+        <p className="text-[11px] text-muted-foreground">
+          Presiding prints only on the ward business document. Conducting prints on the bulletin.
+        </p>
+      </div>
 
       <ul className="space-y-1">
         {rows.map((row, idx) => {

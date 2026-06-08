@@ -108,6 +108,12 @@ export function BulletinDialog({ open, onOpenChange, meeting, ward, announcement
               </div>
 
               <ul className="program">
+                {program.conducting && (
+                  <li>
+                    <span className="label">Conducting</span>
+                    <span className="value">{program.conducting}</span>
+                  </li>
+                )}
                 {program.rows.map((row) => {
                   if (!row.value) {
                     return <li key={row.id} className="full">{row.label}</li>;
@@ -126,7 +132,7 @@ export function BulletinDialog({ open, onOpenChange, meeting, ward, announcement
                   {program.chorister && <span>Chorister – {program.chorister}</span>}
                   {program.organist && <span>Organist – {program.organist}</span>}
                 </div>
-                {ward.secondHour && <div className="second">Second hour – {ward.secondHour}</div>}
+                {program.secondHour && <div className="second">Second hour – {program.secondHour}</div>}
                 <div className="contacts">
                   {ward.leadership.map((l, i) => (
                     <span key={i}>

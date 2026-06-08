@@ -39,12 +39,14 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   /** Meeting date (YYYY-MM-DD) the business is read in. */
   date: string;
+  /** Who is presiding — printed on the business document only. */
+  presiding?: string;
   /** Sustaining / release lines, derived from callings. */
   items: string[];
   ward: WardInfo;
 }
 
-export function BusinessDialog({ open, onOpenChange, date, items, ward }: Props) {
+export function BusinessDialog({ open, onOpenChange, date, presiding, items, ward }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const lines = items;
 
@@ -63,7 +65,10 @@ export function BusinessDialog({ open, onOpenChange, date, items, ward }: Props)
           <div className="biz-doc" ref={ref}>
             <style dangerouslySetInnerHTML={{ __html: DOC_CSS }} />
             <h1>Ward Business</h1>
-            <p className="sub">{ward.wardName} · {docDate(date)}</p>
+            <p className="sub">
+              {ward.wardName} · {docDate(date)}
+              {presiding ? ` · Presiding: ${presiding}` : ""}
+            </p>
 
             <h2>Proposed to be sustained</h2>
             {lines.length === 0 ? (

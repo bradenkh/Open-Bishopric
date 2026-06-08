@@ -39,7 +39,6 @@ const STATUSES: MeetingStatus[] = ["upcoming", "completed", "cancelled"];
 const EMPTY_FORM = {
   title: "", type: "bishopric" as MeetingType, status: "upcoming" as MeetingStatus,
   date: "", time: "", location: "", notes: "",
-  presiding: "", conducting: "", chorister: "", organist: "", quote: "", quoteBy: "",
 };
 
 const DEFAULT_TITLE: Record<MeetingType, string> = {
@@ -132,12 +131,6 @@ export default function AgendasPage() {
     setForm({
       title: m.title, type: m.type, status: m.status,
       date: m.date, time: m.time ?? "", location: m.location ?? "", notes: m.notes ?? "",
-      presiding:  m.program?.presiding  ?? "",
-      conducting: m.program?.conducting ?? "",
-      chorister:  m.program?.chorister  ?? "",
-      organist:   m.program?.organist   ?? "",
-      quote:      m.program?.quote      ?? "",
-      quoteBy:    m.program?.quoteBy    ?? "",
     });
     setDialogOpen(true);
   }
@@ -147,29 +140,16 @@ export default function AgendasPage() {
     setSaving(true);
     await new Promise((r) => setTimeout(r, 150));
     const now = new Date().toISOString();
-    const { presiding, conducting, chorister, organist, quote, quoteBy, ...meetingFields } = form;
-    const header = {
-      presiding:  presiding  || undefined,
-      conducting: conducting || undefined,
-      chorister:  chorister  || undefined,
-      organist:   organist   || undefined,
-      quote:      quote      || undefined,
-      quoteBy:    quoteBy    || undefined,
-    };
     if (editing) {
-      setMeetings((prev) => prev.map((m) => {
-        if (m.id !== editing.id) return m;
-        const program = form.type === "sacrament_meeting"
-          ? { ...(m.program ?? defaultBulletin(header)), ...header }
-          : m.program;
-        return { ...m, ...meetingFields, program, updatedAt: now };
-      }));
+      // Header/program is edited inline in the bulletin editor — leave it intact.
+      setMeetings((prev) => prev.map((m) =>
+        m.id === editing.id ? { ...m, ...form, updatedAt: now } : m));
     } else {
       const newMeeting: Meeting = {
         id: `mtg-${Date.now()}`,
-        ...meetingFields,
+        ...form,
         agenda: [],
-        program: form.type === "sacrament_meeting" ? defaultBulletin(header) : undefined,
+        program: form.type === "sacrament_meeting" ? defaultBulletin({}) : undefined,
         createdBy: user?.uid ?? "mock",
         createdAt: now,
         updatedAt: now,
@@ -651,38 +631,10 @@ export default function AgendasPage() {
               <Label htmlFor="location">Location</Label>
               <Input id="location" value={form.location} onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))} placeholder="e.g. Bishop's Office" />
             </div>
-            {form.type === "sacrament_meeting" && (
-              <div className="grid grid-cols-2 gap-3 rounded-lg border border-border bg-muted/30 p-3">
-                <div className="space-y-1.5">
-                  <Label htmlFor="presiding">Presiding</Label>
-                  <Input id="presiding" value={form.presiding} onChange={(e) => setForm((f) => ({ ...f, presiding: e.target.value }))} placeholder="Name" />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="conducting">Conducting</Label>
-                  <Input id="conducting" value={form.conducting} onChange={(e) => setForm((f) => ({ ...f, conducting: e.target.value }))} placeholder="Name" />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="chorister">Chorister</Label>
-                  <Input id="chorister" value={form.chorister} onChange={(e) => setForm((f) => ({ ...f, chorister: e.target.value }))} placeholder="Name" />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="organist">Organist</Label>
-                  <Input id="organist" value={form.organist} onChange={(e) => setForm((f) => ({ ...f, organist: e.target.value }))} placeholder="Name" />
-                </div>
-                <div className="col-span-2 space-y-1.5">
-                  <Label htmlFor="quote">Spiritual thought / quote (bulletin)</Label>
-                  <Textarea id="quote" value={form.quote} onChange={(e) => setForm((f) => ({ ...f, quote: e.target.value }))} placeholder="Optional quote printed on the bulletin" rows={2} />
-                </div>
-                <div className="col-span-2 space-y-1.5">
-                  <Label htmlFor="quoteBy">Attribution</Label>
-                  <Input id="quoteBy" value={form.quoteBy} onChange={(e) => setForm((f) => ({ ...f, quoteBy: e.target.value }))} placeholder="e.g. President Oaks" />
-                </div>
-                {!editing && (
-                  <p className="col-span-2 text-xs text-muted-foreground">
-                    A standard order of service will be added — edit it after creating.
-                  </p>
-                )}
-              </div>
+            {form.type === "sacrament_meeting" && !editing && (
+              <p className="text-xs text-muted-foreground">
+                A standard order of service will be added — edit the program, presiding, conducting, chorister, organist and second hour on the bulletin after creating.
+              </p>
             )}
             <div className="space-y-1.5">
               <Label htmlFor="notes">Notes</Label>
@@ -755,6 +707,7 @@ export default function AgendasPage() {
           open={!!businessFor}
           onOpenChange={(o) => !o && setBusinessFor(null)}
           date={businessFor.date}
+          presiding={businessFor.program?.presiding}
           items={wardBusiness}
           ward={ward}
         />
@@ -798,11 +751,6 @@ export default function AgendasPage() {
                 <Input id="w-mtime" value={wardForm.meetingTime} onChange={(e) => setWardForm((w) => ({ ...w, meetingTime: e.target.value }))} placeholder="9 a.m." />
               </div>
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="w-second">Second hour</Label>
-              <Input id="w-second" value={wardForm.secondHour} onChange={(e) => setWardForm((w) => ({ ...w, secondHour: e.target.value }))} placeholder="Sunday School" />
-            </div>
-
             <div className="space-y-2">
               <Label>Leadership</Label>
               {wardForm.leadership.map((l, i) => (

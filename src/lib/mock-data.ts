@@ -291,6 +291,7 @@ export const MOCK_MEETINGS: Meeting[] = [
       conducting: "Counselor Hughes",
       chorister:  "Sarah Mitchell",
       organist:   "Linda Brown",
+      secondHour: "Sunday School",
       quote:      "The Lord did not make it easy, but he did make it possible.",
       quoteBy:    "President Oaks",
       rows: [
