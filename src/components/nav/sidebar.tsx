@@ -5,8 +5,8 @@ import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
   MessageSquare,
-  Users,
-  CheckSquare,
+  ClipboardList,
+  CalendarClock,
   Church,
   LogOut,
   ChevronRight,
@@ -20,8 +20,8 @@ import { BishopricIcon } from "@/components/icons/bishopric-icon";
 const navItems = [
   { href: "/home", label: "Dashboard", icon: LayoutDashboard },
   { href: "/chat", label: "AI Assistant", icon: MessageSquare },
-  { href: "/members", label: "Members", icon: Users },
-  { href: "/tasks", label: "Tasks", icon: CheckSquare },
+  { href: "/agendas", label: "Agendas", icon: ClipboardList },
+  { href: "/interviews", label: "Interviews", icon: CalendarClock },
   { href: "/callings", label: "Callings", icon: Church },
 ];
 

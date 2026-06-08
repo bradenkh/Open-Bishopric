@@ -167,6 +167,192 @@ export interface Calling {
   updatedAt: string;
 }
 
+// ── Meetings & agendas ─────────────────────────────────────────────────────────
+
+export type MeetingType = "bishopric" | "sacrament_meeting" | "ward_council";
+
+export type MeetingStatus = "upcoming" | "completed" | "cancelled";
+
+/** A single line item on a meeting agenda. */
+export interface AgendaItem {
+  id: string;
+  title: string;
+  /** Who is presenting / responsible for the item. */
+  presenter?: string;
+  /** Estimated minutes for the item. */
+  durationMins?: number;
+  notes?: string;
+  /** Checked off during/after the meeting. */
+  done?: boolean;
+}
+
+// ── Sacrament meeting program (bulletin JSON) ────────────────────────────────
+
+/**
+ * One row of the bulletin's order-of-service table. Intentionally generic so
+ * a meeting can be anything (4 talks, an all-music program, etc.) and so an
+ * AI agent can emit arbitrary rows.
+ *
+ *   - `value` empty  → the row prints full-width and centered (e.g. the
+ *                       sacrament anchor, "Bearing of Testimonies").
+ *   - `value` set    → two columns: `label` on the left, `value` on the right
+ *                       (e.g. "Opening Hymn" → "#139, 'In Fasting We Approach Thee'").
+ */
+export interface BulletinRow {
+  id: string;
+  label: string;
+  value?: string;
+  /** The Administration of the Sacrament anchor — fixed, cannot be deleted. */
+  anchor?: boolean;
+}
+
+/**
+ * The bulletin data for a single sacrament meeting (everything except
+ * announcements). This is the JSON persisted in the DB and the shape the
+ * future AI agent produces — see `parseBulletin` in `lib/bulletin.ts`.
+ */
+export interface SacramentProgram {
+  presiding?: string;
+  conducting?: string;
+  chorister?: string;
+  organist?: string;
+  /** What happens in the second hour, e.g. "Sunday School". Optional. */
+  secondHour?: string;
+  /** Spiritual thought / quote printed on the bulletin. */
+  quote?: string;
+  /** Attribution for the quote, e.g. "President Oaks". */
+  quoteBy?: string;
+  rows: BulletinRow[];
+}
+
+export interface Meeting {
+  id: string;
+  title: string;
+  type: MeetingType;
+  /** ISO date string (YYYY-MM-DD). */
+  date: string;
+  /** 24-hour time string (HH:MM). */
+  time?: string;
+  location?: string;
+  status: MeetingStatus;
+  /** Free-form agenda — used by bishopric & ward council meetings. */
+  agenda: AgendaItem[];
+  /** Structured order of service — used by sacrament meetings. */
+  program?: SacramentProgram;
+  notes?: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const MEETING_TYPE_LABELS: Record<MeetingType, string> = {
+  bishopric:         "Bishopric",
+  sacrament_meeting: "Sacrament Meeting",
+  ward_council:      "Ward Council",
+};
+
+export const MEETING_STATUS_COLORS: Record<MeetingStatus, string> = {
+  upcoming:  "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
+  completed: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+  cancelled: "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200",
+};
+
+// ── Announcements ────────────────────────────────────────────────────────────
+
+/**
+ * A ward announcement, stored as its own DB row. It is automatically included
+ * on the bulletin until its event `date` has passed; announcements with no
+ * date are standing and stay until archived.
+ */
+export interface Announcement {
+  id: string;
+  title: string;
+  description?: string;
+  /** Event date (YYYY-MM-DD). The announcement auto-drops once this is past. */
+  date?: string;
+  /** Event time (HH:MM). */
+  time?: string;
+  location?: string;
+  /** Manually retired regardless of date. */
+  archived?: boolean;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ── Ward identity (bulletin letterhead) ──────────────────────────────────────
+
+export interface WardLeader {
+  name: string;
+  role: string;
+  phone?: string;
+}
+
+/** Standing ward details printed on every sacrament meeting bulletin. */
+export interface WardInfo {
+  wardName: string;
+  churchName: string;
+  stake: string;
+  address: string;
+  /** Heading for the meeting, e.g. "Schenectady Sacrament Meeting". */
+  meetingTitle: string;
+  /** Display time, e.g. "9 a.m.". */
+  meetingTime: string;
+  leadership: WardLeader[];
+  /** Free-text note about appointments / submitting announcements. */
+  submissionNote: string;
+}
+
+// ── Interviews ─────────────────────────────────────────────────────────────────
+
+export type InterviewType =
+  | "temple_recommend"
+  | "temple_recommend_youth"
+  | "calling"
+  | "ministering"
+  | "tithing_settlement"
+  | "youth"
+  | "worthiness"
+  | "other";
+
+export type InterviewStatus = "needs_scheduling" | "scheduled" | "completed" | "cancelled";
+
+export interface Interview {
+  id: string;
+  memberName: string;
+  memberId?: string;
+  type: InterviewType;
+  status: InterviewStatus;
+  /** Bishopric member conducting the interview. */
+  interviewer?: string;
+  /** ISO date string (YYYY-MM-DD) — present once scheduled. */
+  scheduledDate?: string;
+  /** 24-hour time string (HH:MM) — present once scheduled. */
+  scheduledTime?: string;
+  notes?: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const INTERVIEW_TYPE_LABELS: Record<InterviewType, string> = {
+  temple_recommend:       "Temple Recommend",
+  temple_recommend_youth: "Youth Temple Recommend",
+  calling:                "Calling",
+  ministering:            "Ministering",
+  tithing_settlement:     "Tithing Settlement",
+  youth:                  "Youth Interview",
+  worthiness:             "Worthiness",
+  other:                  "Other",
+};
+
+export const INTERVIEW_STATUS_COLORS: Record<InterviewStatus, string> = {
+  needs_scheduling: "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200",
+  scheduled:        "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
+  completed:        "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+  cancelled:        "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200",
+};
+
 // ── Calling roster (full org chart) ───────────────────────────────────────────
 
 /**
