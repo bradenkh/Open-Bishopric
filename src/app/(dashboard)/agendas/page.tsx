@@ -16,11 +16,15 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { useAuth } from "@/contexts/AuthContext";
-import type { Meeting, MeetingType, MeetingStatus, AgendaItem } from "@/types";
+import type {
+  Meeting, MeetingType, MeetingStatus, AgendaItem, Announcement, SacramentProgram,
+} from "@/types";
 import { MEETING_TYPE_LABELS, MEETING_STATUS_COLORS } from "@/types";
-import { MOCK_MEETINGS } from "@/lib/mock-data";
+import { MOCK_MEETINGS, MOCK_ANNOUNCEMENTS } from "@/lib/mock-data";
 import { formatDate } from "@/lib/utils";
 import { cn } from "@/lib/utils";
+import { AnnouncementsPanel } from "@/components/agendas/announcements-panel";
+import { SacramentProgram as SacramentProgramView } from "@/components/agendas/sacrament-program";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -30,6 +34,7 @@ const STATUSES: MeetingStatus[] = ["upcoming", "completed", "cancelled"];
 const EMPTY_FORM = {
   title: "", type: "bishopric" as MeetingType, status: "upcoming" as MeetingStatus,
   date: "", time: "", location: "", notes: "",
+  presiding: "", conducting: "", chorister: "", organist: "",
 };
 
 const DEFAULT_TITLE: Record<MeetingType, string> = {
@@ -37,6 +42,31 @@ const DEFAULT_TITLE: Record<MeetingType, string> = {
   sacrament_meeting: "Sacrament Meeting",
   ward_council:      "Ward Council",
 };
+
+/** A blank but ordered sacrament program to seed new sacrament meetings. */
+function defaultProgram(header: Partial<SacramentProgram>): SacramentProgram {
+  const mk = (kind: SacramentProgram["items"][number]["kind"], label: string) =>
+    ({ id: `pi-${Math.random().toString(36).slice(2, 8)}`, kind, label });
+  return {
+    presiding: header.presiding,
+    conducting: header.conducting,
+    chorister: header.chorister,
+    organist: header.organist,
+    items: [
+      mk("hymn", "Opening Hymn"),
+      mk("prayer", "Invocation"),
+      mk("business", "Ward Business"),
+      mk("announcements", "Announcements"),
+      mk("hymn", "Sacrament Hymn"),
+      mk("sacrament", "Administration of the Sacrament"),
+      mk("speaker", "First Speaker"),
+      mk("hymn", "Intermediate Hymn"),
+      mk("speaker", "Concluding Speaker"),
+      mk("hymn", "Closing Hymn"),
+      mk("prayer", "Benediction"),
+    ],
+  };
+}
 
 function formatTime(time?: string) {
   if (!time) return "";
@@ -55,6 +85,7 @@ function totalMinutes(agenda: AgendaItem[]) {
 export default function AgendasPage() {
   const { user } = useAuth();
   const [meetings,   setMeetings]   = useState<Meeting[]>([...MOCK_MEETINGS]);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([...MOCK_ANNOUNCEMENTS]);
   const [activeTab,  setActiveTab]  = useState<MeetingType>("bishopric");
   const [filterStatus, setFilterStatus] = useState<MeetingStatus | "all">("upcoming");
   const [expanded,   setExpanded]   = useState<Set<string>>(new Set([MOCK_MEETINGS[0]?.id]));
@@ -101,6 +132,10 @@ export default function AgendasPage() {
     setForm({
       title: m.title, type: m.type, status: m.status,
       date: m.date, time: m.time ?? "", location: m.location ?? "", notes: m.notes ?? "",
+      presiding:  m.program?.presiding  ?? "",
+      conducting: m.program?.conducting ?? "",
+      chorister:  m.program?.chorister  ?? "",
+      organist:   m.program?.organist   ?? "",
     });
     setDialogOpen(true);
   }
@@ -110,13 +145,27 @@ export default function AgendasPage() {
     setSaving(true);
     await new Promise((r) => setTimeout(r, 150));
     const now = new Date().toISOString();
+    const { presiding, conducting, chorister, organist, ...meetingFields } = form;
+    const header = {
+      presiding:  presiding  || undefined,
+      conducting: conducting || undefined,
+      chorister:  chorister  || undefined,
+      organist:   organist   || undefined,
+    };
     if (editing) {
-      setMeetings((prev) => prev.map((m) => m.id === editing.id ? { ...m, ...form, updatedAt: now } : m));
+      setMeetings((prev) => prev.map((m) => {
+        if (m.id !== editing.id) return m;
+        const program = form.type === "sacrament_meeting"
+          ? { ...(m.program ?? defaultProgram(header)), ...header }
+          : m.program;
+        return { ...m, ...meetingFields, program, updatedAt: now };
+      }));
     } else {
       const newMeeting: Meeting = {
         id: `mtg-${Date.now()}`,
-        ...form,
+        ...meetingFields,
         agenda: [],
+        program: form.type === "sacrament_meeting" ? defaultProgram(header) : undefined,
         createdBy: user?.uid ?? "mock",
         createdAt: now,
         updatedAt: now,
@@ -131,6 +180,62 @@ export default function AgendasPage() {
 
   function deleteMeeting(id: string) {
     setMeetings((prev) => prev.filter((m) => m.id !== id));
+  }
+
+  // ── Announcements ──────────────────────────────────────────────────────────
+
+  function saveAnnouncement(
+    draft: { title: string; details: string; startDate: string; expiresOn: string },
+    editingId: string | null,
+  ) {
+    const now = new Date().toISOString();
+    if (editingId) {
+      setAnnouncements((prev) => prev.map((a) => a.id === editingId ? {
+        ...a,
+        title: draft.title.trim(),
+        details: draft.details.trim() || undefined,
+        startDate: draft.startDate || undefined,
+        expiresOn: draft.expiresOn || undefined,
+        updatedAt: now,
+      } : a));
+    } else {
+      setAnnouncements((prev) => [...prev, {
+        id: `ann-${Date.now()}`,
+        title: draft.title.trim(),
+        details: draft.details.trim() || undefined,
+        startDate: draft.startDate || undefined,
+        expiresOn: draft.expiresOn || undefined,
+        createdBy: user?.uid ?? "mock",
+        createdAt: now,
+        updatedAt: now,
+      }]);
+    }
+  }
+
+  function toggleArchiveAnnouncement(id: string) {
+    const now = new Date().toISOString();
+    setAnnouncements((prev) => prev.map((a) =>
+      a.id === id ? { ...a, archived: !a.archived, updatedAt: now } : a));
+  }
+
+  function deleteAnnouncement(id: string) {
+    setAnnouncements((prev) => prev.filter((a) => a.id !== id));
+    // Detach from any meeting program that referenced it.
+    setMeetings((prev) => prev.map((m) => m.program ? {
+      ...m,
+      program: {
+        ...m.program,
+        items: m.program.items.map((it) => it.announcementIds
+          ? { ...it, announcementIds: it.announcementIds.filter((x) => x !== id) }
+          : it),
+      },
+    } : m));
+  }
+
+  function updateProgram(meetingId: string, program: SacramentProgram) {
+    const now = new Date().toISOString();
+    setMeetings((prev) => prev.map((m) =>
+      m.id === meetingId ? { ...m, program, updatedAt: now } : m));
   }
 
   // ── Agenda-item CRUD ───────────────────────────────────────────────────────
@@ -257,6 +362,16 @@ export default function AgendasPage() {
         ))}
       </div>
 
+      {/* Announcements — managed within the Sacrament Meeting tab */}
+      {activeTab === "sacrament_meeting" && (
+        <AnnouncementsPanel
+          announcements={announcements}
+          onSave={saveAnnouncement}
+          onArchiveToggle={toggleArchiveAnnouncement}
+          onDelete={deleteAnnouncement}
+        />
+      )}
+
       {/* Meeting list */}
       {sorted.length === 0 ? (
         <div className="flex flex-col items-center gap-3 py-16 text-center">
@@ -270,7 +385,9 @@ export default function AgendasPage() {
         <ul className="space-y-3">
           {sorted.map((m) => {
             const isOpen = expanded.has(m.id);
+            const isSacrament = m.type === "sacrament_meeting";
             const mins = totalMinutes(m.agenda);
+            const itemCount = isSacrament ? (m.program?.items.length ?? 0) : m.agenda.length;
             return (
               <li key={m.id} className="rounded-xl border border-border bg-card overflow-hidden">
                 {/* Meeting header */}
@@ -300,7 +417,7 @@ export default function AgendasPage() {
                         </span>
                       )}
                       <span className="text-xs text-muted-foreground">
-                        {m.agenda.length} item{m.agenda.length === 1 ? "" : "s"}{mins > 0 ? ` · ${mins} min` : ""}
+                        {itemCount} item{itemCount === 1 ? "" : "s"}{!isSacrament && mins > 0 ? ` · ${mins} min` : ""}
                       </span>
                     </div>
                   </div>
@@ -316,10 +433,16 @@ export default function AgendasPage() {
                   </Button>
                 </div>
 
-                {/* Agenda items */}
+                {/* Body */}
                 {isOpen && (
                   <div className="border-t border-border bg-muted/30 px-4 py-3 space-y-2">
-                    {m.agenda.length === 0 ? (
+                    {isSacrament ? (
+                      <SacramentProgramView
+                        program={m.program ?? { items: [] }}
+                        announcements={announcements}
+                        onChange={(p) => updateProgram(m.id, p)}
+                      />
+                    ) : m.agenda.length === 0 ? (
                       <p className="text-xs text-muted-foreground py-2">No agenda items yet.</p>
                     ) : (
                       <ol className="space-y-1.5">
@@ -372,9 +495,11 @@ export default function AgendasPage() {
                     )}
 
                     <div className="flex items-center gap-2 pt-1">
-                      <Button variant="outline" size="sm" className="gap-1.5 h-7 text-xs" onClick={() => openNewItem(m.id)}>
-                        <Plus className="h-3 w-3" /> Add item
-                      </Button>
+                      {!isSacrament && (
+                        <Button variant="outline" size="sm" className="gap-1.5 h-7 text-xs" onClick={() => openNewItem(m.id)}>
+                          <Plus className="h-3 w-3" /> Add item
+                        </Button>
+                      )}
                       <Button
                         variant="ghost"
                         size="sm"
@@ -446,6 +571,31 @@ export default function AgendasPage() {
               <Label htmlFor="location">Location</Label>
               <Input id="location" value={form.location} onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))} placeholder="e.g. Bishop's Office" />
             </div>
+            {form.type === "sacrament_meeting" && (
+              <div className="grid grid-cols-2 gap-3 rounded-lg border border-border bg-muted/30 p-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="presiding">Presiding</Label>
+                  <Input id="presiding" value={form.presiding} onChange={(e) => setForm((f) => ({ ...f, presiding: e.target.value }))} placeholder="Name" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="conducting">Conducting</Label>
+                  <Input id="conducting" value={form.conducting} onChange={(e) => setForm((f) => ({ ...f, conducting: e.target.value }))} placeholder="Name" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="chorister">Chorister</Label>
+                  <Input id="chorister" value={form.chorister} onChange={(e) => setForm((f) => ({ ...f, chorister: e.target.value }))} placeholder="Name" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="organist">Organist</Label>
+                  <Input id="organist" value={form.organist} onChange={(e) => setForm((f) => ({ ...f, organist: e.target.value }))} placeholder="Name" />
+                </div>
+                {!editing && (
+                  <p className="col-span-2 text-xs text-muted-foreground">
+                    A standard order of service will be added — edit it after creating.
+                  </p>
+                )}
+              </div>
+            )}
             <div className="space-y-1.5">
               <Label htmlFor="notes">Notes</Label>
               <Textarea id="notes" value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} placeholder="Optional notes" rows={2} />

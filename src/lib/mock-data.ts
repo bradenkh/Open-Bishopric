@@ -2,7 +2,7 @@
  * Static mock data used in place of Firebase while the backend is stripped out.
  * All IDs are deterministic strings so they survive HMR refreshes.
  */
-import type { BishopricMember, Calling, Task, Member, Meeting, Interview } from "@/types";
+import type { BishopricMember, Calling, Task, Member, Meeting, Interview, Announcement } from "@/types";
 
 // ── Bishopric roster ──────────────────────────────────────────────────────────
 
@@ -285,16 +285,26 @@ export const MOCK_MEETINGS: Meeting[] = [
     time: "09:00",
     location: "Chapel",
     status: "upcoming",
-    agenda: [
-      { id: "ai-10", title: "Presiding & conducting", presenter: "Bishop Anderson", notes: "Conducting: Counselor Hughes" },
-      { id: "ai-11", title: "Ward business — sustain Thomas Hughes as Ward Mission Leader", presenter: "Counselor Hughes", durationMins: 3 },
-      { id: "ai-12", title: "Opening hymn & invocation", presenter: "Congregation", durationMins: 5 },
-      { id: "ai-13", title: "Sacrament hymn & sacrament", presenter: "Aaronic Priesthood", durationMins: 15 },
-      { id: "ai-14", title: "Youth speaker — Emma Wilson", presenter: "Emma Wilson", durationMins: 8 },
-      { id: "ai-15", title: "Intermediate hymn", presenter: "Congregation", durationMins: 4 },
-      { id: "ai-16", title: "Concluding speaker — Bro. Davis", presenter: "Michael Davis", durationMins: 12 },
-      { id: "ai-17", title: "Closing hymn & benediction", presenter: "Congregation", durationMins: 5 },
-    ],
+    agenda: [],
+    program: {
+      presiding:  "Bishop Anderson",
+      conducting: "Counselor Hughes",
+      chorister:  "Sarah Mitchell",
+      organist:   "Linda Brown",
+      items: [
+        { id: "pi-01", kind: "hymn",           label: "Opening Hymn",   hymnNumber: "19",  topic: "We Thank Thee, O God, for a Prophet" },
+        { id: "pi-02", kind: "prayer",         label: "Invocation",     person: "David Park" },
+        { id: "pi-03", kind: "business",       label: "Ward Business",  notes: "Sustain Thomas Hughes as Ward Mission Leader" },
+        { id: "pi-04", kind: "announcements",  label: "Announcements",  announcementIds: ["ann01", "ann02", "ann04"] },
+        { id: "pi-05", kind: "hymn",           label: "Sacrament Hymn", hymnNumber: "169", topic: "As Now We Take the Sacrament" },
+        { id: "pi-06", kind: "sacrament",      label: "Administration of the Sacrament" },
+        { id: "pi-07", kind: "speaker",        label: "Youth Speaker",  person: "Emma Wilson", topic: "Following the Savior" },
+        { id: "pi-08", kind: "musical_number", label: "Musical Number", person: "Primary Children", topic: "I Am a Child of God" },
+        { id: "pi-09", kind: "speaker",        label: "Concluding Speaker", person: "Michael Davis", topic: "The Joy of Missionary Work" },
+        { id: "pi-10", kind: "hymn",           label: "Closing Hymn",   hymnNumber: "152", topic: "God Be with You Till We Meet Again" },
+        { id: "pi-11", kind: "prayer",         label: "Benediction",    person: "Rebecca Torres" },
+      ],
+    },
     notes: "",
     createdBy: "mock-bishop-001",
     createdAt: "2026-06-02T00:00:00Z",
@@ -317,6 +327,62 @@ export const MOCK_MEETINGS: Meeting[] = [
     createdBy: "mock-bishop-001",
     createdAt: "2026-05-31T00:00:00Z",
     updatedAt: "2026-06-07T00:00:00Z",
+  },
+];
+
+// ── Announcements ───────────────────────────────────────────────────────────
+// Reusable running list read at the pulpit. Active = not archived and not past
+// its expiry (today is 2026-06-08 per the mock clock).
+
+export const MOCK_ANNOUNCEMENTS: Announcement[] = [
+  {
+    id: "ann01",
+    title: "Ward Temple Day",
+    details: "Saturday, June 21 — sessions at 9 AM and 11 AM. Sign up in the foyer.",
+    startDate: "2026-06-01",
+    expiresOn: "2026-06-21",
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-05-28T00:00:00Z",
+    updatedAt: "2026-05-28T00:00:00Z",
+  },
+  {
+    id: "ann02",
+    title: "Linger Longer",
+    details: "Potluck in the cultural hall right after today's meeting block. Bring a side or dessert.",
+    startDate: "2026-06-08",
+    expiresOn: "2026-06-14",
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-06-02T00:00:00Z",
+    updatedAt: "2026-06-02T00:00:00Z",
+  },
+  {
+    id: "ann03",
+    title: "Youth Standards Night",
+    details: "Wednesday, June 25 at 7 PM in the Young Women room. All youth ages 12-18.",
+    startDate: "2026-06-08",
+    expiresOn: "2026-06-25",
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-06-05T00:00:00Z",
+    updatedAt: "2026-06-05T00:00:00Z",
+  },
+  {
+    id: "ann04",
+    title: "Ministering Interviews",
+    details: "Companionships, please report to your assigned leader by the end of the month.",
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-05-01T00:00:00Z",
+    updatedAt: "2026-05-01T00:00:00Z",
+  },
+  {
+    id: "ann05",
+    title: "Spring Service Project",
+    details: "Cleanup at the community park — completed May 17. Thank you to all who came!",
+    startDate: "2026-05-01",
+    expiresOn: "2026-05-17",
+    archived: true,
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-04-25T00:00:00Z",
+    updatedAt: "2026-05-18T00:00:00Z",
   },
 ];
 

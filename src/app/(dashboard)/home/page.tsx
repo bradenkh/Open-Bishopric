@@ -108,19 +108,24 @@ export default function DashboardPage() {
               <div className="px-6 py-8 text-center text-muted-foreground text-sm">No upcoming meetings</div>
             ) : (
               <ul className="divide-y divide-border">
-                {upcomingMeetings.map((meeting) => (
+                {upcomingMeetings.map((meeting) => {
+                  const itemCount = meeting.type === "sacrament_meeting"
+                    ? (meeting.program?.items.length ?? 0)
+                    : meeting.agenda.length;
+                  return (
                   <li key={meeting.id} className="flex items-start gap-3 px-6 py-3">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{meeting.title}</p>
                       <p className="text-xs text-muted-foreground truncate">
-                        {formatDate(meeting.date)} · {meeting.agenda.length} item{meeting.agenda.length === 1 ? "" : "s"}
+                        {formatDate(meeting.date)} · {itemCount} item{itemCount === 1 ? "" : "s"}
                       </p>
                     </div>
                     <Badge variant="outline" className="text-xs shrink-0">
                       {MEETING_TYPE_LABELS[meeting.type]}
                     </Badge>
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             )}
           </CardContent>

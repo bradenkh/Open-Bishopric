@@ -182,6 +182,58 @@ export interface AgendaItem {
   done?: boolean;
 }
 
+// ── Sacrament meeting program ────────────────────────────────────────────────
+
+/** The kind of a single step in a sacrament meeting program. */
+export type ProgramItemKind =
+  | "hymn"
+  | "prayer"
+  | "sacrament"
+  | "business"
+  | "announcements"
+  | "speaker"
+  | "musical_number"
+  | "other";
+
+export const PROGRAM_KIND_LABELS: Record<ProgramItemKind, string> = {
+  hymn:           "Hymn",
+  prayer:         "Prayer",
+  sacrament:      "Sacrament",
+  business:       "Ward Business",
+  announcements:  "Announcements",
+  speaker:        "Speaker",
+  musical_number: "Musical Number",
+  other:          "Other",
+};
+
+/** A single ordered step in a sacrament meeting program. */
+export interface ProgramItem {
+  id: string;
+  kind: ProgramItemKind;
+  /** Position/role label, e.g. "Opening Hymn", "Invocation", "Youth Speaker". */
+  label?: string;
+  /** Person responsible: speaker, prayer giver, performer. */
+  person?: string;
+  /** Hymn number (hymn items). */
+  hymnNumber?: string;
+  /** Secondary text: hymn title, speaker topic, musical-number title. */
+  topic?: string;
+  notes?: string;
+  /** For announcement items: the running announcements pulled into this meeting. */
+  announcementIds?: string[];
+  /** Checked off during the meeting. */
+  done?: boolean;
+}
+
+/** The structured order of service for a sacrament meeting. */
+export interface SacramentProgram {
+  presiding?: string;
+  conducting?: string;
+  chorister?: string;
+  organist?: string;
+  items: ProgramItem[];
+}
+
 export interface Meeting {
   id: string;
   title: string;
@@ -192,7 +244,10 @@ export interface Meeting {
   time?: string;
   location?: string;
   status: MeetingStatus;
+  /** Free-form agenda — used by bishopric & ward council meetings. */
   agenda: AgendaItem[];
+  /** Structured order of service — used by sacrament meetings. */
+  program?: SacramentProgram;
   notes?: string;
   createdBy: string;
   createdAt: string;
@@ -210,6 +265,28 @@ export const MEETING_STATUS_COLORS: Record<MeetingStatus, string> = {
   completed: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
   cancelled: "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200",
 };
+
+// ── Announcements ────────────────────────────────────────────────────────────
+
+/**
+ * A reusable ward announcement. Lives in a running list and is read at the
+ * pulpit during sacrament meeting. Recurring announcements stay on the list
+ * week to week until archived or expired.
+ */
+export interface Announcement {
+  id: string;
+  title: string;
+  details?: string;
+  /** Optional date the announcement first becomes relevant (YYYY-MM-DD). */
+  startDate?: string;
+  /** Optional date after which it drops off the active list (YYYY-MM-DD). */
+  expiresOn?: string;
+  /** Manually retired regardless of expiry. */
+  archived?: boolean;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
 
 // ── Interviews ─────────────────────────────────────────────────────────────────
 
