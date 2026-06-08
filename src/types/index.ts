@@ -72,23 +72,20 @@ export interface Task {
 // ── Calling lifecycle ────────────────────────────────────────────────────────
 
 /**
- * One pipeline shared by two kinds of cards:
+ * The ordered pipeline every calling moves through.
  *
- *   "calling" (fill):  vacant → inform → accepted → sustaining → sustained
- *                        → set_apart → lcr_updated → recorded
- *   "release":         inform → sustaining → recorded
+ *   needs_release → vacant → extending → accepted
+ *     → sustaining → sustained → set_apart → lcr_updated → recorded
  *
- * The "inform" stage holds both: extending a calling to the new person and
- * informing the outgoing holder of their release. A release and the fill it
- * creates are linked by id but advance independently.
+ * Candidates are suggested during needs_release / vacant; once one is chosen a
+ * counselor is assigned to extend. A decline resets the position to vacant.
  */
-export type CallingKind = "calling" | "release";
-
 export type CallingStage =
+  | "needs_release" // Current holder needs to be released (creates the vacancy)
   | "vacant"      // Position open — suggest candidates, then extend
-  | "inform"      // Contacting: extend the calling, or inform of a release
+  | "extending"   // Bishopric member reaching out to extend
   | "accepted"    // Person accepted the calling
-  | "sustaining"  // To be sustained / release to be announced
+  | "sustaining"  // Scheduled for sustaining vote
   | "sustained"   // Sustained in sacrament meeting or class
   | "set_apart"   // Set apart by priesthood leader
   | "lcr_updated" // Updated in Leader & Clerk Resources
@@ -96,10 +93,11 @@ export type CallingStage =
 
 export type SustainedVenue = "sacrament_meeting" | "class";
 
-/** Ordered pipeline — drives columns and progress math. */
+/** Ordered list used for pipeline display and progress math. */
 export const CALLING_PIPELINE: CallingStage[] = [
+  "needs_release",
   "vacant",
-  "inform",
+  "extending",
   "accepted",
   "sustaining",
   "sustained",
@@ -109,8 +107,9 @@ export const CALLING_PIPELINE: CallingStage[] = [
 ];
 
 export const CALLING_STAGES: { stage: CallingStage; label: string }[] = [
+  { stage: "needs_release", label: "Needs Release" },
   { stage: "vacant",      label: "Vacant" },
-  { stage: "inform",      label: "Inform" },
+  { stage: "extending",   label: "Extending" },
   { stage: "accepted",    label: "Accepted" },
   { stage: "sustaining",  label: "To Be Sustained" },
   { stage: "sustained",   label: "Sustained" },
@@ -121,10 +120,6 @@ export const CALLING_STAGES: { stage: CallingStage; label: string }[] = [
 
 export interface Calling {
   id: string;
-  /** Which lifecycle this card follows. Defaults to "calling" when absent. */
-  kind?: CallingKind;
-  /** Links a release card to its paired fill card (and vice-versa). */
-  linkedId?: string;
   /** Absent for vacant callings. */
   memberId?: string;
   /** Absent for vacant callings. */
@@ -134,8 +129,8 @@ export interface Calling {
   stage: CallingStage;
   notes?: string;
 
-  // ── Release / fill linkage
-  /** Names suggested to replace the current holder (fill card, vacant stage). */
+  // ── Release (needs_release stage)
+  /** Names suggested to replace the current holder. */
   suggestedReplacements?: string[];
   /** The suggested replacement chosen to fill the position once released. */
   replacementName?: string;
