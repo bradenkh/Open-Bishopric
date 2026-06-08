@@ -4,7 +4,7 @@ import { useState } from "react";
 import {
   Plus, CalendarClock, Clock, User, GripVertical, CalendarPlus,
   CheckCircle2, AlertTriangle, Crown, Pencil, RotateCcw,
-  CalendarDays, CalendarOff, Trash2,
+  CalendarDays, CalendarOff, Trash2, Check,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -78,7 +78,8 @@ const TODAY = new Date().toISOString().slice(0, 10);
  * it happened or send it back to be rescheduled.
  */
 function deriveStage(i: Interview): InterviewStage {
-  if (i.stage === "scheduled" && i.scheduledDate && i.scheduledDate < TODAY) {
+  if ((i.stage === "scheduled" || i.stage === "pending_confirmation")
+      && i.scheduledDate && i.scheduledDate < TODAY) {
     return "date_passed";
   }
   return i.stage;
@@ -87,32 +88,36 @@ function deriveStage(i: Interview): InterviewStage {
 /** Linear step for the progress dots (the two schedule columns share step 0). */
 const STEPS: { key: string; label: string }[] = [
   { key: "schedule",    label: "Schedule" },
+  { key: "pending",     label: "Confirming" },
   { key: "scheduled",   label: "Scheduled" },
   { key: "date_passed", label: "Date Passed" },
   { key: "completed",   label: "Completed" },
 ];
 function stepIndex(stage: InterviewStage): number {
   if (stage === "schedule_any" || stage === "schedule_bishop") return 0;
-  if (stage === "scheduled")   return 1;
-  if (stage === "date_passed") return 2;
-  return 3;
+  if (stage === "pending_confirmation") return 1;
+  if (stage === "scheduled")   return 2;
+  if (stage === "date_passed") return 3;
+  return 4;
 }
 
 const NEXT_ACTION: Record<InterviewStage, string> = {
-  schedule_any:    "Set a time with any member",
-  schedule_bishop: "Set a time with the bishop",
-  scheduled:       "Awaiting the interview",
-  date_passed:     "Did it happen? Confirm or reschedule",
-  completed:       "Held",
+  schedule_any:         "Set a time with any member",
+  schedule_bishop:      "Set a time with the bishop",
+  pending_confirmation: "Awaiting both confirmations",
+  scheduled:            "Awaiting the interview",
+  date_passed:          "Did it happen? Confirm or reschedule",
+  completed:            "Held",
 };
 
 // Per-stage column header styling
 const STAGE_COLUMN_COLORS: Record<InterviewStage, { header: string; ring: string; drop: string }> = {
-  schedule_any:    { header: "bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-800",     ring: "ring-amber-400",   drop: "bg-amber-50/60 dark:bg-amber-950/20" },
-  schedule_bishop: { header: "bg-orange-50 border-orange-200 dark:bg-orange-950/30 dark:border-orange-800", ring: "ring-orange-400",  drop: "bg-orange-50/60 dark:bg-orange-950/20" },
-  scheduled:       { header: "bg-blue-50 border-blue-200 dark:bg-blue-950/30 dark:border-blue-800",         ring: "ring-blue-400",    drop: "bg-blue-50/60 dark:bg-blue-950/20" },
-  date_passed:     { header: "bg-purple-50 border-purple-200 dark:bg-purple-950/30 dark:border-purple-800", ring: "ring-purple-400",  drop: "bg-purple-50/60 dark:bg-purple-950/20" },
-  completed:       { header: "bg-green-50 border-green-200 dark:bg-green-950/30 dark:border-green-800",      ring: "ring-green-400",   drop: "bg-green-50/60 dark:bg-green-950/20" },
+  schedule_any:         { header: "bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-800",     ring: "ring-amber-400",   drop: "bg-amber-50/60 dark:bg-amber-950/20" },
+  schedule_bishop:      { header: "bg-orange-50 border-orange-200 dark:bg-orange-950/30 dark:border-orange-800", ring: "ring-orange-400",  drop: "bg-orange-50/60 dark:bg-orange-950/20" },
+  pending_confirmation: { header: "bg-sky-50 border-sky-200 dark:bg-sky-950/30 dark:border-sky-800",             ring: "ring-sky-400",     drop: "bg-sky-50/60 dark:bg-sky-950/20" },
+  scheduled:            { header: "bg-blue-50 border-blue-200 dark:bg-blue-950/30 dark:border-blue-800",         ring: "ring-blue-400",    drop: "bg-blue-50/60 dark:bg-blue-950/20" },
+  date_passed:          { header: "bg-purple-50 border-purple-200 dark:bg-purple-950/30 dark:border-purple-800", ring: "ring-purple-400",  drop: "bg-purple-50/60 dark:bg-purple-950/20" },
+  completed:            { header: "bg-green-50 border-green-200 dark:bg-green-950/30 dark:border-green-800",      ring: "ring-green-400",   drop: "bg-green-50/60 dark:bg-green-950/20" },
 };
 
 // ── Duration picker ─────────────────────────────────────────────────────────────
@@ -287,6 +292,57 @@ function SlotPicker({
 
 // ── Interview Card ────────────────────────────────────────────────────────────
 
+function ConfirmPill({ label, ok }: { label: string; ok?: boolean }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium max-w-full",
+        ok
+          ? "bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300"
+          : "bg-muted text-muted-foreground"
+      )}
+      title={ok ? `${label} confirmed` : `${label} — awaiting confirmation`}
+    >
+      {ok ? <Check className="h-2.5 w-2.5 shrink-0" /> : <span className="h-1.5 w-1.5 rounded-full bg-amber-400 shrink-0" />}
+      <span className="truncate">{label}</span>
+    </span>
+  );
+}
+
+function ConfirmToggle({
+  title, subtitle, checked, onChange,
+}: { title: string; subtitle?: string; checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!checked)}
+      className={cn(
+        "w-full flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors",
+        checked
+          ? "border-green-300 bg-green-50 dark:border-green-800 dark:bg-green-950/40"
+          : "border-border hover:bg-accent"
+      )}
+    >
+      <span className={cn(
+        "flex h-5 w-5 items-center justify-center rounded-full border-2 shrink-0 transition-colors",
+        checked ? "border-green-500 bg-green-500 text-white" : "border-muted-foreground/40"
+      )}>
+        {checked && <Check className="h-3 w-3" />}
+      </span>
+      <span className="min-w-0">
+        <span className="block text-sm font-medium">{title}</span>
+        {subtitle && <span className="block text-xs text-muted-foreground truncate">{subtitle}</span>}
+      </span>
+      <span className={cn(
+        "ml-auto text-xs font-medium shrink-0",
+        checked ? "text-green-600 dark:text-green-400" : "text-muted-foreground"
+      )}>
+        {checked ? "Confirmed" : "Pending"}
+      </span>
+    </button>
+  );
+}
+
 interface InterviewCardProps {
   interview: Interview;
   onClick: () => void;
@@ -332,7 +388,7 @@ function InterviewCard({ interview: i, onClick, onDragStart, onDragEnd, isDraggi
       </div>
 
       {/* Schedule info (once a date exists) */}
-      {i.scheduledDate && (i.stage === "scheduled" || i.stage === "completed") && (
+      {i.scheduledDate && (i.stage === "scheduled" || i.stage === "pending_confirmation" || i.stage === "completed") && (
         <div className="mt-2 pl-5 flex flex-wrap gap-x-3 gap-y-0.5">
           <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
             <CalendarClock className="h-3 w-3" /> {formatDate(i.scheduledDate)}
@@ -347,6 +403,14 @@ function InterviewCard({ interview: i, onClick, onDragStart, onDragEnd, isDraggi
               <User className="h-3 w-3 shrink-0" /> {i.interviewer}
             </span>
           )}
+        </div>
+      )}
+
+      {/* Confirmation status (pending_confirmation) */}
+      {derived === "pending_confirmation" && (
+        <div className="mt-2 pl-5 flex flex-wrap gap-1.5">
+          <ConfirmPill label="Attendee" ok={i.attendeeConfirmed} />
+          <ConfirmPill label="Interviewer" ok={i.interviewerConfirmed} />
         </div>
       )}
 
@@ -640,6 +704,9 @@ function StageAdvancePanel({
     time: interview.scheduledTime,
     interviewer: interview.interviewer,
   });
+  // Confirmation state (pending_confirmation stage)
+  const [attendeeOk,    setAttendeeOk]    = useState(interview.attendeeConfirmed ?? false);
+  const [interviewerOk, setInterviewerOk] = useState(interview.interviewerConfirmed ?? false);
 
   // ── Needs scheduling ──────────────────────────────────────────────────────
   if (derived === "schedule_any" || derived === "schedule_bishop") {
@@ -672,9 +739,10 @@ function StageAdvancePanel({
         />
 
         {pick.date && pick.time && (
-          <div className="rounded-lg border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/60 p-3 text-xs text-blue-800 dark:text-blue-200">
+          <div className="rounded-lg border border-sky-200 bg-sky-50 dark:border-sky-800 dark:bg-sky-950/60 p-3 text-xs text-sky-800 dark:text-sky-200">
             Booking <strong>{formatDate(pick.date)}</strong> at <strong>{formatTime(pick.time)}</strong>
             {pick.interviewer ? <> with <strong>{pick.interviewer}</strong></> : null} ({duration} min).
+            It will wait for confirmation from both sides before it&apos;s locked in.
           </div>
         )}
 
@@ -683,14 +751,73 @@ function StageAdvancePanel({
           <Button
             disabled={!pick.date || !pick.time || !pick.interviewer}
             onClick={() => onSave({
-              stage:         "scheduled",
-              interviewer:   pick.interviewer,
-              scheduledDate: pick.date,
-              scheduledTime: pick.time,
-              durationMins:  duration,
+              stage:                "pending_confirmation",
+              interviewer:          pick.interviewer,
+              scheduledDate:        pick.date,
+              scheduledTime:        pick.time,
+              durationMins:         duration,
+              attendeeConfirmed:    false,
+              interviewerConfirmed: false,
             })}
           >
-            {pick.date && pick.time ? "Schedule" : "Pick a slot"}
+            {pick.date && pick.time ? "Book Slot" : "Pick a slot"}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Pending confirmation ──────────────────────────────────────────────────
+  if (derived === "pending_confirmation") {
+    const bothConfirmed = attendeeOk && interviewerOk;
+    return (
+      <div className="border-t pt-4 space-y-3">
+        <p className="text-sm font-semibold">Pending Confirmation</p>
+        <p className="text-sm text-muted-foreground">
+          Booked
+          {interview.scheduledDate ? ` for ${formatDate(interview.scheduledDate)}` : ""}
+          {interview.scheduledTime ? ` at ${formatTime(interview.scheduledTime)}` : ""}
+          {interview.interviewer ? ` with ${interview.interviewer}` : ""}. It moves to{" "}
+          <strong>Scheduled</strong> once both sides confirm.
+        </p>
+        <div className="space-y-2">
+          <ConfirmToggle title="Attendee confirmed" subtitle={name} checked={attendeeOk} onChange={setAttendeeOk} />
+          <ConfirmToggle
+            title="Interviewer confirmed"
+            subtitle={interview.interviewer ?? "Bishopric member"}
+            checked={interviewerOk}
+            onChange={setInterviewerOk}
+          />
+        </div>
+        <div className="flex flex-col gap-2 pt-1">
+          {bothConfirmed ? (
+            <Button onClick={() => onSave({ stage: "scheduled", attendeeConfirmed: true, interviewerConfirmed: true })}>
+              <CheckCircle2 className="h-4 w-4" /> Both confirmed — move to Scheduled
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              onClick={() => onSave({
+                stage:                "pending_confirmation",
+                attendeeConfirmed:    attendeeOk,
+                interviewerConfirmed: interviewerOk,
+              })}
+            >
+              Save confirmations
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            className="text-muted-foreground"
+            onClick={() => onSave({
+              stage:                backToScheduleStage,
+              scheduledDate:        undefined,
+              scheduledTime:        undefined,
+              attendeeConfirmed:    false,
+              interviewerConfirmed: false,
+            })}
+          >
+            <RotateCcw className="h-3.5 w-3.5" /> Cancel &amp; send back to scheduling
           </Button>
         </div>
       </div>
@@ -828,6 +955,7 @@ export default function InterviewsPage() {
   const needsScheduling = interviews.filter(
     (i) => i.stage === "schedule_any" || i.stage === "schedule_bishop"
   ).length;
+  const pending   = interviews.filter((i) => deriveStage(i) === "pending_confirmation").length;
   const upcoming  = interviews.filter((i) => deriveStage(i) === "scheduled").length;
   const toReview  = interviews.filter((i) => deriveStage(i) === "date_passed").length;
 
@@ -847,9 +975,12 @@ export default function InterviewsPage() {
   /** Drag-and-drop between columns, applying the side effects each move implies. */
   function handleMove(id: string, toStage: InterviewStage) {
     if (toStage === "schedule_any") {
-      patch(id, { stage: "schedule_any", requiresBishop: false, scheduledDate: undefined, scheduledTime: undefined });
+      patch(id, { stage: "schedule_any", requiresBishop: false, scheduledDate: undefined, scheduledTime: undefined, attendeeConfirmed: undefined, interviewerConfirmed: undefined });
     } else if (toStage === "schedule_bishop") {
-      patch(id, { stage: "schedule_bishop", requiresBishop: true, scheduledDate: undefined, scheduledTime: undefined });
+      patch(id, { stage: "schedule_bishop", requiresBishop: true, scheduledDate: undefined, scheduledTime: undefined, attendeeConfirmed: undefined, interviewerConfirmed: undefined });
+    } else if (toStage === "scheduled") {
+      // Dragging straight to Scheduled treats both sides as confirmed.
+      patch(id, { stage: "scheduled", attendeeConfirmed: true, interviewerConfirmed: true });
     } else {
       patch(id, { stage: toStage });
     }
@@ -883,12 +1014,29 @@ export default function InterviewsPage() {
     await new Promise((r) => setTimeout(r, 150));
     const now = new Date().toISOString();
 
-    // A date implies "scheduled"; otherwise it sits in the chosen schedule column.
-    const baseStage: InterviewStage = form.scheduledDate
-      ? "scheduled"
-      : form.requiresBishop ? "schedule_bishop" : "schedule_any";
-    const stage: InterviewStage =
-      editing?.stage === "completed" && !form.scheduledDate ? "completed" : baseStage;
+    // Booking a date sends the interview to pending_confirmation; editing other
+    // details of an already-booked interview keeps its stage and confirmations.
+    const scheduling = !!form.scheduledDate;
+    const dtChanged = !editing
+      || form.scheduledDate !== (editing.scheduledDate ?? "")
+      || form.scheduledTime !== (editing.scheduledTime ?? "");
+
+    let stage: InterviewStage;
+    let attendeeConfirmed: boolean | undefined;
+    let interviewerConfirmed: boolean | undefined;
+    if (!scheduling) {
+      stage = editing?.stage === "completed"
+        ? "completed"
+        : form.requiresBishop ? "schedule_bishop" : "schedule_any";
+    } else if (dtChanged) {
+      stage = "pending_confirmation";
+      attendeeConfirmed = false;
+      interviewerConfirmed = false;
+    } else {
+      stage = editing!.stage;
+      attendeeConfirmed = editing!.attendeeConfirmed;
+      interviewerConfirmed = editing!.interviewerConfirmed;
+    }
 
     const fields = {
       memberName:     form.memberName.trim(),
@@ -898,6 +1046,8 @@ export default function InterviewsPage() {
       interviewer:    form.interviewer || undefined,
       scheduledDate:  form.scheduledDate || undefined,
       scheduledTime:  form.scheduledTime || undefined,
+      attendeeConfirmed,
+      interviewerConfirmed,
       notes:          form.notes.trim() || undefined,
       stage,
     };
@@ -972,6 +1122,9 @@ export default function InterviewsPage() {
           <h1 className="text-2xl font-bold tracking-tight">Interviews</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             {needsScheduling} to schedule
+            {pending > 0 && (
+              <span className="text-sky-600 dark:text-sky-400"> · {pending} confirming</span>
+            )}
             <span> · {upcoming} upcoming</span>
             {toReview > 0 && (
               <span className="text-purple-600 dark:text-purple-400"> · {toReview} to review</span>
@@ -1060,6 +1213,12 @@ export default function InterviewsPage() {
                     {selected.requiresBishop ? "Bishop (required)" : "Any bishopric member"}
                   </p>
                   {selected.interviewer  && <p><span className="font-medium text-foreground">Interviewer:</span> {selected.interviewer}</p>}
+                  {deriveStage(selected) === "pending_confirmation" && (
+                    <p>
+                      <span className="font-medium text-foreground">Confirmations:</span>{" "}
+                      Attendee {selected.attendeeConfirmed ? "✓" : "—"} · Interviewer {selected.interviewerConfirmed ? "✓" : "—"}
+                    </p>
+                  )}
                   {selected.scheduledDate && <p><span className="font-medium text-foreground">Date:</span> {formatDate(selected.scheduledDate)}</p>}
                   {selected.scheduledTime && <p><span className="font-medium text-foreground">Time:</span> {formatTime(selected.scheduledTime)}</p>}
                   {selected.notes        && <p><span className="font-medium text-foreground">Notes:</span> {selected.notes}</p>}

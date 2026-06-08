@@ -318,36 +318,41 @@ export type InterviewType =
 /**
  * The pipeline an interview moves through.
  *
- *   schedule_any | schedule_bishop → scheduled → date_passed → completed
+ *   schedule_any | schedule_bishop → pending_confirmation → scheduled
+ *     → date_passed → completed
  *
  * An interview starts in one of the two "schedule" columns — chosen when it's
  * created — depending on whether anyone in the bishopric can conduct it or it
- * must be the bishop. Once a date is set it moves to `scheduled`; after that
- * date passes it drops into `date_passed` so the bishopric can confirm it
- * happened or send it back to be rescheduled.
+ * must be the bishop. Once a slot is booked it sits in `pending_confirmation`
+ * until both the attendee and the bishopric member have confirmed, then it
+ * becomes `scheduled`. After the date passes it drops into `date_passed` so the
+ * bishopric can confirm it happened or send it back to be rescheduled.
  */
 export type InterviewStage =
-  | "schedule_any"     // Needs scheduling — any bishopric member may conduct
-  | "schedule_bishop"  // Needs scheduling — must be with the bishop
-  | "scheduled"        // Date, time & interviewer set; still upcoming
-  | "date_passed"      // Scheduled date has passed — confirm it happened or reschedule
-  | "completed";       // Interview held
+  | "schedule_any"         // Needs scheduling — any bishopric member may conduct
+  | "schedule_bishop"      // Needs scheduling — must be with the bishop
+  | "pending_confirmation" // Slot booked — awaiting confirmation from both sides
+  | "scheduled"            // Confirmed by both; still upcoming
+  | "date_passed"          // Scheduled date has passed — confirm it happened or reschedule
+  | "completed";           // Interview held
 
 /** Ordered list used for the kanban board and progress math. */
 export const INTERVIEW_PIPELINE: InterviewStage[] = [
   "schedule_any",
   "schedule_bishop",
+  "pending_confirmation",
   "scheduled",
   "date_passed",
   "completed",
 ];
 
 export const INTERVIEW_STAGES: { stage: InterviewStage; label: string }[] = [
-  { stage: "schedule_any",    label: "Schedule" },
-  { stage: "schedule_bishop", label: "Schedule w/ Bishop" },
-  { stage: "scheduled",       label: "Scheduled" },
-  { stage: "date_passed",     label: "Date Passed" },
-  { stage: "completed",       label: "Completed" },
+  { stage: "schedule_any",         label: "Schedule" },
+  { stage: "schedule_bishop",      label: "Schedule w/ Bishop" },
+  { stage: "pending_confirmation", label: "Pending Confirmation" },
+  { stage: "scheduled",            label: "Scheduled" },
+  { stage: "date_passed",          label: "Date Passed" },
+  { stage: "completed",            label: "Completed" },
 ];
 
 export interface Interview {
@@ -364,6 +369,10 @@ export interface Interview {
   requiresBishop?: boolean;
   /** Bishopric member conducting the interview. */
   interviewer?: string;
+  /** Confirmation from the member being interviewed (pending_confirmation stage). */
+  attendeeConfirmed?: boolean;
+  /** Confirmation from the bishopric member conducting it (pending_confirmation stage). */
+  interviewerConfirmed?: boolean;
   /** ISO date string (YYYY-MM-DD) — present once scheduled. */
   scheduledDate?: string;
   /** 24-hour time string (HH:MM) — present once scheduled. */
@@ -388,11 +397,12 @@ export const INTERVIEW_TYPE_LABELS: Record<InterviewType, string> = {
 };
 
 export const INTERVIEW_STAGE_COLORS: Record<InterviewStage, string> = {
-  schedule_any:    "bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200",
-  schedule_bishop: "bg-orange-100 text-orange-800 dark:bg-orange-900/60 dark:text-orange-200",
-  scheduled:       "bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-200",
-  date_passed:     "bg-purple-100 text-purple-800 dark:bg-purple-900/60 dark:text-purple-200",
-  completed:       "bg-green-100 text-green-800 dark:bg-green-900/60 dark:text-green-200",
+  schedule_any:         "bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200",
+  schedule_bishop:      "bg-orange-100 text-orange-800 dark:bg-orange-900/60 dark:text-orange-200",
+  pending_confirmation: "bg-sky-100 text-sky-800 dark:bg-sky-900/60 dark:text-sky-200",
+  scheduled:            "bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-200",
+  date_passed:          "bg-purple-100 text-purple-800 dark:bg-purple-900/60 dark:text-purple-200",
+  completed:            "bg-green-100 text-green-800 dark:bg-green-900/60 dark:text-green-200",
 };
 
 /** Default appointment length per interview type, in minutes. */

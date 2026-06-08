@@ -20,7 +20,7 @@ export default function DashboardPage() {
   const stats = useMemo(() => {
     const upcomingMeetings   = MOCK_MEETINGS.filter((m) => m.status === "upcoming").length;
     const needsScheduling    = MOCK_INTERVIEWS.filter((i) => i.stage === "schedule_any" || i.stage === "schedule_bishop").length;
-    const upcomingInterviews = MOCK_INTERVIEWS.filter((i) => i.stage === "scheduled").length;
+    const upcomingInterviews = MOCK_INTERVIEWS.filter((i) => i.stage === "scheduled" || i.stage === "pending_confirmation").length;
     const callingsInProgress = MOCK_CALLINGS.filter((c) => c.stage !== "recorded" && c.stage !== "vacant").length;
     const vacantCallings     = MOCK_CALLINGS.filter((c) => c.stage === "vacant").length;
     return { upcomingMeetings, needsScheduling, upcomingInterviews, callingsInProgress, vacantCallings };
@@ -32,10 +32,10 @@ export default function DashboardPage() {
     .slice(0, 4);
 
   const upcomingInterviews = MOCK_INTERVIEWS
-    .filter((i) => i.stage === "schedule_any" || i.stage === "schedule_bishop" || i.stage === "scheduled")
+    .filter((i) => i.stage === "schedule_any" || i.stage === "schedule_bishop" || i.stage === "pending_confirmation" || i.stage === "scheduled")
     .sort((a, b) => {
       // Unscheduled interviews surface first, then upcoming ones by date.
-      const rank = (s: string) => (s === "scheduled" ? 1 : 0);
+      const rank = (s: string) => (s === "schedule_any" || s === "schedule_bishop" ? 0 : 1);
       if (rank(a.stage) !== rank(b.stage)) return rank(a.stage) - rank(b.stage);
       return new Date(`${a.scheduledDate ?? "9999"}T${a.scheduledTime ?? "00:00"}`).getTime()
            - new Date(`${b.scheduledDate ?? "9999"}T${b.scheduledTime ?? "00:00"}`).getTime();
