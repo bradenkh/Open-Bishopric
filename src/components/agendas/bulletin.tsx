@@ -7,6 +7,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import type { Announcement, Meeting, ProgramItem, WardInfo } from "@/types";
+import { printNode } from "@/lib/print";
 
 // Self-contained styles travel with the bulletin markup so the exact same DOM
 // renders identically in the on-screen preview and the print iframe.
@@ -21,9 +22,6 @@ const BULLETIN_CSS = `
 .bulletin ul.program li{border-bottom:1px solid #bcbcbc;padding:9px 2px;display:flex;justify-content:space-between;gap:14px}
 .bulletin ul.program li.full{justify-content:center;text-align:center}
 .bulletin ul.program .value{text-align:right;max-width:60%}
-.bulletin .business{width:100%}
-.bulletin .business .bh{text-align:center;font-weight:700}
-.bulletin .business ul{margin:5px 0 0;padding-left:20px;text-align:left}
 .bulletin .footer{margin-top:16px;text-align:center;font-size:9pt}
 .bulletin .footer .roles{display:flex;justify-content:center;gap:40px;margin-bottom:8px}
 .bulletin .footer .second{margin-bottom:14px}
@@ -82,32 +80,7 @@ export function BulletinDialog({ open, onOpenChange, meeting, ward, announcement
   const program = meeting.program ?? { items: [] };
 
   function print() {
-    const node = ref.current;
-    if (!node) return;
-    const iframe = document.createElement("iframe");
-    iframe.style.position = "fixed";
-    iframe.style.right = "0";
-    iframe.style.bottom = "0";
-    iframe.style.width = "0";
-    iframe.style.height = "0";
-    iframe.style.border = "0";
-    document.body.appendChild(iframe);
-    const doc = iframe.contentWindow?.document;
-    if (!doc) { document.body.removeChild(iframe); return; }
-    doc.open();
-    doc.write(
-      `<!DOCTYPE html><html><head><title>${ward.wardName} Bulletin</title>` +
-      `<style>@page{size:letter;margin:0.5in}body{margin:0}</style>` +
-      `</head><body>${node.outerHTML}</body></html>`,
-    );
-    doc.close();
-    const win = iframe.contentWindow;
-    if (!win) { document.body.removeChild(iframe); return; }
-    win.focus();
-    setTimeout(() => {
-      win.print();
-      setTimeout(() => document.body.removeChild(iframe), 500);
-    }, 300);
+    if (ref.current) printNode(ref.current, `${ward.wardName} Bulletin`);
   }
 
   return (
@@ -134,22 +107,10 @@ export function BulletinDialog({ open, onOpenChange, meeting, ward, announcement
 
               <ul className="program">
                 {program.items.map((item) => {
-                  if (item.kind === "announcements") return null;
+                  // Announcements have their own column; ward business is a
+                  // separate document and never prints on the bulletin.
+                  if (item.kind === "announcements" || item.kind === "business") return null;
                   const label = item.label || item.kind;
-                  if (item.kind === "business") {
-                    const lines = (item.notes ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
-                    if (lines.length === 0) return null;
-                    return (
-                      <li key={item.id} className="full" style={{ display: "block" }}>
-                        <div className="business">
-                          <div className="bh">{label}</div>
-                          <ul>
-                            {lines.map((l, i) => <li key={i}>{l}</li>)}
-                          </ul>
-                        </div>
-                      </li>
-                    );
-                  }
                   const value = programValue(item);
                   if (!value) {
                     return <li key={item.id} className="full">{label}</li>;

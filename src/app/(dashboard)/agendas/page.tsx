@@ -3,7 +3,7 @@
 import { useState } from "react";
 import {
   Plus, Filter, CalendarDays, Clock, MapPin, Pencil, Trash2,
-  CheckCircle2, Circle, ChevronDown, ChevronRight, User, FileText, Settings,
+  CheckCircle2, Circle, ChevronDown, ChevronRight, User, FileText, Settings, Gavel,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,6 +28,7 @@ import { cn } from "@/lib/utils";
 import { AnnouncementsPanel } from "@/components/agendas/announcements-panel";
 import { SacramentProgram as SacramentProgramView } from "@/components/agendas/sacrament-program";
 import { BulletinDialog } from "@/components/agendas/bulletin";
+import { BusinessDialog } from "@/components/agendas/business-doc";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -108,6 +109,7 @@ export default function AgendasPage() {
   // Bulletin + ward settings
   const [ward, setWard]               = useState<WardInfo>(DEFAULT_WARD_INFO);
   const [bulletinFor, setBulletinFor] = useState<Meeting | null>(null);
+  const [businessFor, setBusinessFor] = useState<Meeting | null>(null);
   const [wardDialogOpen, setWardDialogOpen] = useState(false);
   const [wardForm, setWardForm]       = useState<WardInfo>(DEFAULT_WARD_INFO);
 
@@ -400,24 +402,16 @@ export default function AgendasPage() {
         ))}
       </div>
 
-      {/* Announcements & ward settings — managed within the Sacrament Meeting tab */}
+      {/* Ward settings — Sacrament Meeting tab */}
       {activeTab === "sacrament_meeting" && (
-        <>
-          <div className="flex items-center justify-between">
-            <p className="text-xs text-muted-foreground">
-              Bulletins use <span className="font-medium">{ward.wardName}</span> details.
-            </p>
-            <Button variant="ghost" size="sm" className="gap-1.5 h-7 text-xs" onClick={openWardSettings}>
-              <Settings className="h-3.5 w-3.5" /> Ward settings
-            </Button>
-          </div>
-          <AnnouncementsPanel
-            announcements={announcements}
-            onSave={saveAnnouncement}
-            onArchiveToggle={toggleArchiveAnnouncement}
-            onDelete={deleteAnnouncement}
-          />
-        </>
+        <div className="flex items-center justify-between">
+          <p className="text-xs text-muted-foreground">
+            Bulletins use <span className="font-medium">{ward.wardName}</span> details.
+          </p>
+          <Button variant="ghost" size="sm" className="gap-1.5 h-7 text-xs" onClick={openWardSettings}>
+            <Settings className="h-3.5 w-3.5" /> Ward settings
+          </Button>
+        </div>
       )}
 
       {/* Meeting list */}
@@ -477,15 +471,26 @@ export default function AgendasPage() {
                     {m.status}
                   </span>
                   {isSacrament && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 shrink-0"
-                      onClick={() => setBulletinFor(m)}
-                      title="View bulletin"
-                    >
-                      <FileText className="h-3.5 w-3.5" />
-                    </Button>
+                    <>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 shrink-0"
+                        onClick={() => setBusinessFor(m)}
+                        title="Ward business document"
+                      >
+                        <Gavel className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 shrink-0"
+                        onClick={() => setBulletinFor(m)}
+                        title="View bulletin"
+                      >
+                        <FileText className="h-3.5 w-3.5" />
+                      </Button>
+                    </>
                   )}
                   <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => openEdit(m)}>
                     <Pencil className="h-3.5 w-3.5" />
@@ -575,6 +580,16 @@ export default function AgendasPage() {
             );
           })}
         </ul>
+      )}
+
+      {/* Announcements pane — sits beneath the bulletin/meeting list */}
+      {activeTab === "sacrament_meeting" && (
+        <AnnouncementsPanel
+          announcements={announcements}
+          onSave={saveAnnouncement}
+          onArchiveToggle={toggleArchiveAnnouncement}
+          onDelete={deleteAnnouncement}
+        />
       )}
 
       {/* ── Meeting dialog ── */}
@@ -726,6 +741,16 @@ export default function AgendasPage() {
           meeting={bulletinFor}
           ward={ward}
           announcements={activeAnnouncements}
+        />
+      )}
+
+      {/* ── Ward business document ── */}
+      {businessFor && (
+        <BusinessDialog
+          open={!!businessFor}
+          onOpenChange={(o) => !o && setBusinessFor(null)}
+          meeting={businessFor}
+          ward={ward}
         />
       )}
 
