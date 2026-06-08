@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { BishopricIcon } from "@/components/icons/bishopric-icon";
+import Image from "next/image";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -33,9 +33,14 @@ export default function LandingPage() {
       {/* Main content */}
       <div className="flex flex-1 flex-col items-center justify-center gap-8 text-center w-full max-w-sm">
         {/* Logo */}
-        <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-primary/10 shadow-sm">
-          <BishopricIcon className="h-10 w-10 text-primary" />
-        </div>
+        <Image
+          src="/logo.png"
+          alt="Open Bishopric"
+          width={80}
+          height={80}
+          priority
+          className="h-20 w-20 rounded-3xl shadow-sm"
+        />
 
         {/* Title + tagline */}
         <div className="space-y-2">
