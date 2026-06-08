@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
 import { MOCK_CALLINGS, MOCK_MEETINGS, MOCK_INTERVIEWS } from "@/lib/mock-data";
-import { INTERVIEW_STATUS_COLORS, INTERVIEW_TYPE_LABELS, MEETING_TYPE_LABELS } from "@/types";
+import { INTERVIEW_STAGE_COLORS, INTERVIEW_STAGES, INTERVIEW_TYPE_LABELS, MEETING_TYPE_LABELS } from "@/types";
 import { formatDate } from "@/lib/utils";
 
 export default function DashboardPage() {
@@ -19,8 +19,8 @@ export default function DashboardPage() {
   // Compute stats from mock data (memo so they don't recalculate on every render)
   const stats = useMemo(() => {
     const upcomingMeetings   = MOCK_MEETINGS.filter((m) => m.status === "upcoming").length;
-    const needsScheduling    = MOCK_INTERVIEWS.filter((i) => i.status === "needs_scheduling").length;
-    const upcomingInterviews = MOCK_INTERVIEWS.filter((i) => i.status === "scheduled").length;
+    const needsScheduling    = MOCK_INTERVIEWS.filter((i) => i.stage === "schedule_any" || i.stage === "schedule_bishop").length;
+    const upcomingInterviews = MOCK_INTERVIEWS.filter((i) => i.stage === "scheduled").length;
     const callingsInProgress = MOCK_CALLINGS.filter((c) => c.stage !== "recorded" && c.stage !== "vacant").length;
     const vacantCallings     = MOCK_CALLINGS.filter((c) => c.stage === "vacant").length;
     return { upcomingMeetings, needsScheduling, upcomingInterviews, callingsInProgress, vacantCallings };
@@ -32,14 +32,18 @@ export default function DashboardPage() {
     .slice(0, 4);
 
   const upcomingInterviews = MOCK_INTERVIEWS
-    .filter((i) => i.status === "needs_scheduling" || i.status === "scheduled")
+    .filter((i) => i.stage === "schedule_any" || i.stage === "schedule_bishop" || i.stage === "scheduled")
     .sort((a, b) => {
-      const rank = (s: string) => (s === "needs_scheduling" ? 0 : 1);
-      if (rank(a.status) !== rank(b.status)) return rank(a.status) - rank(b.status);
+      // Unscheduled interviews surface first, then upcoming ones by date.
+      const rank = (s: string) => (s === "scheduled" ? 1 : 0);
+      if (rank(a.stage) !== rank(b.stage)) return rank(a.stage) - rank(b.stage);
       return new Date(`${a.scheduledDate ?? "9999"}T${a.scheduledTime ?? "00:00"}`).getTime()
            - new Date(`${b.scheduledDate ?? "9999"}T${b.scheduledTime ?? "00:00"}`).getTime();
     })
     .slice(0, 5);
+
+  const interviewStageLabel = (s: string) =>
+    INTERVIEW_STAGES.find((x) => x.stage === s)?.label ?? s.replace("_", " ");
 
   const statCards = [
     { label: "Upcoming Meetings",   value: stats.upcomingMeetings,   icon: ClipboardList,  href: "/agendas",    color: "text-blue-600",   badge: undefined },
@@ -152,8 +156,8 @@ export default function DashboardPage() {
                         {interview.scheduledDate ? ` · ${formatDate(interview.scheduledDate)}` : ""}
                       </p>
                     </div>
-                    <span className={`text-xs px-2 py-0.5 rounded-full shrink-0 capitalize ${INTERVIEW_STATUS_COLORS[interview.status]}`}>
-                      {interview.status.replace("_", " ")}
+                    <span className={`text-xs px-2 py-0.5 rounded-full shrink-0 ${INTERVIEW_STAGE_COLORS[interview.stage]}`}>
+                      {interviewStageLabel(interview.stage)}
                     </span>
                   </li>
                 ))}

@@ -315,14 +315,53 @@ export type InterviewType =
   | "worthiness"
   | "other";
 
-export type InterviewStatus = "needs_scheduling" | "scheduled" | "completed" | "cancelled";
+/**
+ * The pipeline an interview moves through.
+ *
+ *   schedule_any | schedule_bishop → scheduled → date_passed → completed
+ *
+ * An interview starts in one of the two "schedule" columns — chosen when it's
+ * created — depending on whether anyone in the bishopric can conduct it or it
+ * must be the bishop. Once a date is set it moves to `scheduled`; after that
+ * date passes it drops into `date_passed` so the bishopric can confirm it
+ * happened or send it back to be rescheduled.
+ */
+export type InterviewStage =
+  | "schedule_any"     // Needs scheduling — any bishopric member may conduct
+  | "schedule_bishop"  // Needs scheduling — must be with the bishop
+  | "scheduled"        // Date, time & interviewer set; still upcoming
+  | "date_passed"      // Scheduled date has passed — confirm it happened or reschedule
+  | "completed";       // Interview held
+
+/** Ordered list used for the kanban board and progress math. */
+export const INTERVIEW_PIPELINE: InterviewStage[] = [
+  "schedule_any",
+  "schedule_bishop",
+  "scheduled",
+  "date_passed",
+  "completed",
+];
+
+export const INTERVIEW_STAGES: { stage: InterviewStage; label: string }[] = [
+  { stage: "schedule_any",    label: "Schedule" },
+  { stage: "schedule_bishop", label: "Schedule w/ Bishop" },
+  { stage: "scheduled",       label: "Scheduled" },
+  { stage: "date_passed",     label: "Date Passed" },
+  { stage: "completed",       label: "Completed" },
+];
 
 export interface Interview {
   id: string;
   memberName: string;
   memberId?: string;
   type: InterviewType;
-  status: InterviewStatus;
+  stage: InterviewStage;
+  /**
+   * True when this interview must be conducted by the bishop. Chosen when the
+   * interview is created (which "schedule" column it starts in) and preserved
+   * so a cancelled / rescheduled interview returns to the right column.
+   */
+  requiresBishop?: boolean;
   /** Bishopric member conducting the interview. */
   interviewer?: string;
   /** ISO date string (YYYY-MM-DD) — present once scheduled. */
@@ -346,11 +385,12 @@ export const INTERVIEW_TYPE_LABELS: Record<InterviewType, string> = {
   other:                  "Other",
 };
 
-export const INTERVIEW_STATUS_COLORS: Record<InterviewStatus, string> = {
-  needs_scheduling: "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200",
-  scheduled:        "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
-  completed:        "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
-  cancelled:        "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200",
+export const INTERVIEW_STAGE_COLORS: Record<InterviewStage, string> = {
+  schedule_any:    "bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200",
+  schedule_bishop: "bg-orange-100 text-orange-800 dark:bg-orange-900/60 dark:text-orange-200",
+  scheduled:       "bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-200",
+  date_passed:     "bg-purple-100 text-purple-800 dark:bg-purple-900/60 dark:text-purple-200",
+  completed:       "bg-green-100 text-green-800 dark:bg-green-900/60 dark:text-green-200",
 };
 
 // ── Calling roster (full org chart) ───────────────────────────────────────────
