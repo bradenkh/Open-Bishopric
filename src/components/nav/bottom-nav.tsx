@@ -2,14 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, MessageSquare, Users, CheckSquare, Church } from "lucide-react";
+import { LayoutDashboard, MessageSquare, ClipboardList, CalendarClock, Church } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
   { href: "/home", label: "Home", icon: LayoutDashboard },
   { href: "/chat", label: "Chat", icon: MessageSquare },
-  { href: "/members", label: "Members", icon: Users },
-  { href: "/tasks", label: "Tasks", icon: CheckSquare },
+  { href: "/agendas", label: "Agendas", icon: ClipboardList },
+  { href: "/interviews", label: "Interviews", icon: CalendarClock },
   { href: "/callings", label: "Callings", icon: Church },
 ];
 

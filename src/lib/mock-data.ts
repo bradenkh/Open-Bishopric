@@ -2,7 +2,7 @@
  * Static mock data used in place of Firebase while the backend is stripped out.
  * All IDs are deterministic strings so they survive HMR refreshes.
  */
-import type { BishopricMember, Calling, Task, Member } from "@/types";
+import type { BishopricMember, Calling, Task, Member, Meeting, Interview } from "@/types";
 
 // ── Bishopric roster ──────────────────────────────────────────────────────────
 
@@ -231,6 +231,179 @@ export const MOCK_CALLINGS: Calling[] = [
     createdBy: "mock-bishop-001",
     createdAt: "2026-02-05T00:00:00Z",
     updatedAt: "2026-02-24T00:00:00Z",
+  },
+];
+
+// ── Meetings & agendas ──────────────────────────────────────────────────────────
+// "Today" in this mock world is 2026-06-08.
+
+export const MOCK_MEETINGS: Meeting[] = [
+  {
+    id: "mtg01",
+    title: "Bishopric Meeting",
+    type: "bishopric",
+    date: "2026-06-14",
+    time: "07:00",
+    location: "Bishop's Office",
+    status: "upcoming",
+    agenda: [
+      { id: "ai-01", title: "Opening prayer", presenter: "Counselor Davis", durationMins: 2 },
+      { id: "ai-02", title: "Review callings in progress", presenter: "Bishop Anderson", durationMins: 15 },
+      { id: "ai-03", title: "Sacrament meeting business items", presenter: "Bro. Peterson", durationMins: 5, notes: "Thomas Hughes — Ward Mission Leader" },
+      { id: "ai-04", title: "Temple recommend interviews this week", presenter: "Counselor Hughes", durationMins: 10 },
+      { id: "ai-05", title: "Welfare needs", presenter: "Bishop Anderson", durationMins: 10 },
+    ],
+    notes: "",
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-06-01T00:00:00Z",
+    updatedAt: "2026-06-01T00:00:00Z",
+  },
+  {
+    id: "mtg02",
+    title: "Ward Council",
+    type: "ward_council",
+    date: "2026-06-14",
+    time: "08:00",
+    location: "Relief Society Room",
+    status: "upcoming",
+    agenda: [
+      { id: "ai-06", title: "Opening prayer & spiritual thought", presenter: "Counselor Hughes", durationMins: 5 },
+      { id: "ai-07", title: "Ministering report", presenter: "Relief Society President", durationMins: 10 },
+      { id: "ai-08", title: "Upcoming ward activity", presenter: "Activities Committee", durationMins: 15 },
+      { id: "ai-09", title: "Primary summer activity budget", presenter: "Primary Presidency", durationMins: 10, notes: "Needs bishopric sign-off before June 10" },
+    ],
+    notes: "",
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-06-01T00:00:00Z",
+    updatedAt: "2026-06-01T00:00:00Z",
+  },
+  {
+    id: "mtg03",
+    title: "Youth Committee Meeting",
+    type: "youth_committee",
+    date: "2026-06-21",
+    time: "18:00",
+    location: "Young Men Room",
+    status: "upcoming",
+    agenda: [
+      { id: "ai-10", title: "Youth conference planning", presenter: "Young Men President", durationMins: 20 },
+      { id: "ai-11", title: "Upcoming youth temple trip", presenter: "Young Women President", durationMins: 15 },
+    ],
+    notes: "",
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-06-02T00:00:00Z",
+    updatedAt: "2026-06-02T00:00:00Z",
+  },
+  {
+    id: "mtg04",
+    title: "Bishopric Meeting",
+    type: "bishopric",
+    date: "2026-06-07",
+    time: "07:00",
+    location: "Bishop's Office",
+    status: "completed",
+    agenda: [
+      { id: "ai-12", title: "Opening prayer", presenter: "Bishop Anderson", durationMins: 2, done: true },
+      { id: "ai-13", title: "Approve Emily Chen — Elders Quorum Secretary", presenter: "Bishop Anderson", durationMins: 10, done: true },
+      { id: "ai-14", title: "Plan tithing settlement schedule", presenter: "Mark Williams", durationMins: 15, done: false, notes: "Carry over to next week" },
+    ],
+    notes: "Tithing settlement scheduling carried to next meeting.",
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-05-31T00:00:00Z",
+    updatedAt: "2026-06-07T00:00:00Z",
+  },
+];
+
+// ── Interviews ────────────────────────────────────────────────────────────────
+
+export const MOCK_INTERVIEWS: Interview[] = [
+  {
+    id: "int01",
+    memberName: "David Park",
+    memberId: "m05",
+    type: "temple_recommend",
+    status: "scheduled",
+    interviewer: "Bishop Anderson",
+    scheduledDate: "2026-06-08",
+    scheduledTime: "12:30",
+    notes: "Scheduled after sacrament meeting.",
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-05-22T00:00:00Z",
+    updatedAt: "2026-05-22T00:00:00Z",
+  },
+  {
+    id: "int02",
+    memberName: "Emma Wilson",
+    type: "temple_recommend_youth",
+    status: "scheduled",
+    interviewer: "Counselor Hughes",
+    scheduledDate: "2026-06-08",
+    scheduledTime: "12:45",
+    notes: "First limited-use recommend.",
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-05-24T00:00:00Z",
+    updatedAt: "2026-05-24T00:00:00Z",
+  },
+  {
+    id: "int03",
+    memberName: "Emily Chen",
+    memberId: "m10",
+    type: "calling",
+    status: "needs_scheduling",
+    notes: "Approved as Elders Quorum Secretary — needs to be extended.",
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-05-19T00:00:00Z",
+    updatedAt: "2026-05-19T00:00:00Z",
+  },
+  {
+    id: "int04",
+    memberName: "Robert Johnson",
+    memberId: "m09",
+    type: "temple_recommend",
+    status: "needs_scheduling",
+    notes: "Recommend expires end of June.",
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-06-01T00:00:00Z",
+    updatedAt: "2026-06-01T00:00:00Z",
+  },
+  {
+    id: "int05",
+    memberName: "Michael Davis",
+    memberId: "m11",
+    type: "ministering",
+    status: "needs_scheduling",
+    notes: "Quarterly ministering interview.",
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-06-03T00:00:00Z",
+    updatedAt: "2026-06-03T00:00:00Z",
+  },
+  {
+    id: "int06",
+    memberName: "Sarah Mitchell",
+    memberId: "m02",
+    type: "calling",
+    status: "scheduled",
+    interviewer: "Counselor Davis",
+    scheduledDate: "2026-06-15",
+    scheduledTime: "19:00",
+    notes: "Sunday School Teacher.",
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-05-18T00:00:00Z",
+    updatedAt: "2026-05-18T00:00:00Z",
+  },
+  {
+    id: "int07",
+    memberName: "Jennifer Kim",
+    memberId: "m08",
+    type: "temple_recommend",
+    status: "completed",
+    interviewer: "Bishop Anderson",
+    scheduledDate: "2026-05-25",
+    scheduledTime: "10:00",
+    notes: "Renewed for two years.",
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-05-10T00:00:00Z",
+    updatedAt: "2026-05-25T00:00:00Z",
   },
 ];
 

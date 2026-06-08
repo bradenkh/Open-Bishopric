@@ -2,37 +2,50 @@
 
 import { useMemo } from "react";
 import {
-  CheckSquare, Users, Church, Calendar, ArrowRight, MessageSquare,
+  ClipboardList, CalendarClock, Church, Calendar, ArrowRight, MessageSquare,
 } from "lucide-react";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
-import { MOCK_CALLINGS, MOCK_TASKS, MOCK_MEMBERS } from "@/lib/mock-data";
-import { TASK_STATUS_COLORS } from "@/types";
+import { MOCK_CALLINGS, MOCK_MEETINGS, MOCK_INTERVIEWS } from "@/lib/mock-data";
+import { INTERVIEW_STATUS_COLORS, INTERVIEW_TYPE_LABELS, MEETING_TYPE_LABELS } from "@/types";
+import { formatDate } from "@/lib/utils";
 
 export default function DashboardPage() {
   const { appUser } = useAuth();
 
   // Compute stats from mock data (memo so they don't recalculate on every render)
   const stats = useMemo(() => {
-    const activeTasks        = MOCK_TASKS.filter((t) => ["active", "in_progress", "waiting"].includes(t.status)).length;
-    const interviews         = MOCK_TASKS.filter((t) => t.type === "interview" && t.status !== "completed").length;
+    const upcomingMeetings   = MOCK_MEETINGS.filter((m) => m.status === "upcoming").length;
+    const needsScheduling    = MOCK_INTERVIEWS.filter((i) => i.status === "needs_scheduling").length;
+    const upcomingInterviews = MOCK_INTERVIEWS.filter((i) => i.status === "scheduled").length;
     const callingsInProgress = MOCK_CALLINGS.filter((c) => c.stage !== "recorded" && c.stage !== "vacant").length;
     const vacantCallings     = MOCK_CALLINGS.filter((c) => c.stage === "vacant").length;
-    const members            = MOCK_MEMBERS.length;
-    return { activeTasks, interviews, callingsInProgress, vacantCallings, members };
+    return { upcomingMeetings, needsScheduling, upcomingInterviews, callingsInProgress, vacantCallings };
   }, []);
 
-  const recentTasks    = MOCK_TASKS.filter((t) => t.status !== "completed").slice(0, 5);
-  const recentCallings = MOCK_CALLINGS.filter((c) => c.stage !== "recorded").slice(0, 3);
+  const upcomingMeetings = MOCK_MEETINGS
+    .filter((m) => m.status === "upcoming")
+    .sort((a, b) => new Date(`${a.date}T${a.time ?? "00:00"}`).getTime() - new Date(`${b.date}T${b.time ?? "00:00"}`).getTime())
+    .slice(0, 4);
+
+  const upcomingInterviews = MOCK_INTERVIEWS
+    .filter((i) => i.status === "needs_scheduling" || i.status === "scheduled")
+    .sort((a, b) => {
+      const rank = (s: string) => (s === "needs_scheduling" ? 0 : 1);
+      if (rank(a.status) !== rank(b.status)) return rank(a.status) - rank(b.status);
+      return new Date(`${a.scheduledDate ?? "9999"}T${a.scheduledTime ?? "00:00"}`).getTime()
+           - new Date(`${b.scheduledDate ?? "9999"}T${b.scheduledTime ?? "00:00"}`).getTime();
+    })
+    .slice(0, 5);
 
   const statCards = [
-    { label: "Active Tasks",        value: stats.activeTasks,        icon: CheckSquare, href: "/tasks",                color: "text-blue-600",   badge: undefined               },
-    { label: "Members",             value: stats.members,            icon: Users,       href: "/members",              color: "text-green-600",  badge: undefined               },
-    { label: "Callings In Progress",value: stats.callingsInProgress, icon: Church,      href: "/callings",             color: "text-purple-600", badge: stats.vacantCallings > 0 ? `${stats.vacantCallings} vacant` : undefined },
-    { label: "Pending Interviews",  value: stats.interviews,         icon: Calendar,    href: "/tasks?type=interview", color: "text-orange-600", badge: undefined               },
+    { label: "Upcoming Meetings",   value: stats.upcomingMeetings,   icon: ClipboardList,  href: "/agendas",    color: "text-blue-600",   badge: undefined },
+    { label: "Interviews to Set",   value: stats.needsScheduling,    icon: CalendarClock,  href: "/interviews", color: "text-amber-600",  badge: stats.upcomingInterviews > 0 ? `${stats.upcomingInterviews} scheduled` : undefined },
+    { label: "Callings In Progress",value: stats.callingsInProgress, icon: Church,         href: "/callings",   color: "text-purple-600", badge: stats.vacantCallings > 0 ? `${stats.vacantCallings} vacant` : undefined },
+    { label: "Scheduled Interviews",value: stats.upcomingInterviews, icon: Calendar,       href: "/interviews", color: "text-green-600",  badge: undefined },
   ];
 
   return (
@@ -75,9 +88,9 @@ export default function DashboardPage() {
           </Link>
         </Button>
         <Button variant="outline" asChild className="flex-1 sm:flex-none gap-2">
-          <Link href="/tasks">
-            <CheckSquare className="h-4 w-4" />
-            View All Tasks
+          <Link href="/agendas">
+            <ClipboardList className="h-4 w-4" />
+            View Agendas
           </Link>
         </Button>
       </div>
@@ -85,25 +98,27 @@ export default function DashboardPage() {
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-3">
-            <CardTitle className="text-base">Recent Tasks</CardTitle>
-            <Link href="/tasks" className="text-xs text-primary flex items-center gap-1 hover:underline">
+            <CardTitle className="text-base">Upcoming Meetings</CardTitle>
+            <Link href="/agendas" className="text-xs text-primary flex items-center gap-1 hover:underline">
               View all <ArrowRight className="h-3 w-3" />
             </Link>
           </CardHeader>
           <CardContent className="p-0">
-            {recentTasks.length === 0 ? (
-              <div className="px-6 py-8 text-center text-muted-foreground text-sm">No active tasks</div>
+            {upcomingMeetings.length === 0 ? (
+              <div className="px-6 py-8 text-center text-muted-foreground text-sm">No upcoming meetings</div>
             ) : (
               <ul className="divide-y divide-border">
-                {recentTasks.map((task) => (
-                  <li key={task.id} className="flex items-start gap-3 px-6 py-3">
+                {upcomingMeetings.map((meeting) => (
+                  <li key={meeting.id} className="flex items-start gap-3 px-6 py-3">
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{task.title}</p>
-                      {task.memberName && <p className="text-xs text-muted-foreground truncate">{task.memberName}</p>}
+                      <p className="text-sm font-medium truncate">{meeting.title}</p>
+                      <p className="text-xs text-muted-foreground truncate">
+                        {formatDate(meeting.date)} · {meeting.agenda.length} item{meeting.agenda.length === 1 ? "" : "s"}
+                      </p>
                     </div>
-                    <span className={`text-xs px-2 py-0.5 rounded-full shrink-0 ${TASK_STATUS_COLORS[task.status]}`}>
-                      {task.status.replace("_", " ")}
-                    </span>
+                    <Badge variant="outline" className="text-xs shrink-0">
+                      {MEETING_TYPE_LABELS[meeting.type]}
+                    </Badge>
                   </li>
                 ))}
               </ul>
@@ -113,30 +128,28 @@ export default function DashboardPage() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-3">
-            <CardTitle className="text-base">Callings In Progress</CardTitle>
-            <Link href="/callings" className="text-xs text-primary flex items-center gap-1 hover:underline">
+            <CardTitle className="text-base">Interviews</CardTitle>
+            <Link href="/interviews" className="text-xs text-primary flex items-center gap-1 hover:underline">
               View all <ArrowRight className="h-3 w-3" />
             </Link>
           </CardHeader>
           <CardContent className="p-0">
-            {recentCallings.length === 0 ? (
-              <div className="px-6 py-8 text-center text-muted-foreground text-sm">No callings in progress</div>
+            {upcomingInterviews.length === 0 ? (
+              <div className="px-6 py-8 text-center text-muted-foreground text-sm">No interviews</div>
             ) : (
               <ul className="divide-y divide-border">
-                {recentCallings.map((calling) => (
-                  <li key={calling.id} className="flex items-start gap-3 px-6 py-3">
+                {upcomingInterviews.map((interview) => (
+                  <li key={interview.id} className="flex items-start gap-3 px-6 py-3">
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">
-                        {calling.memberName || <span className="text-muted-foreground italic">Vacant Position</span>}
+                      <p className="text-sm font-medium truncate">{interview.memberName}</p>
+                      <p className="text-xs text-muted-foreground truncate">
+                        {INTERVIEW_TYPE_LABELS[interview.type]}
+                        {interview.scheduledDate ? ` · ${formatDate(interview.scheduledDate)}` : ""}
                       </p>
-                      <p className="text-xs text-muted-foreground truncate">{calling.position}</p>
                     </div>
-                    <Badge
-                      variant="outline"
-                      className={`text-xs shrink-0 capitalize ${calling.stage === "vacant" ? "border-red-300 text-red-700 dark:text-red-400" : ""}`}
-                    >
-                      {calling.stage.replace("_", " ")}
-                    </Badge>
+                    <span className={`text-xs px-2 py-0.5 rounded-full shrink-0 capitalize ${INTERVIEW_STATUS_COLORS[interview.status]}`}>
+                      {interview.status.replace("_", " ")}
+                    </span>
                   </li>
                 ))}
               </ul>

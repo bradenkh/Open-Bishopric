@@ -163,6 +163,106 @@ export interface Calling {
   updatedAt: string;
 }
 
+// ── Meetings & agendas ─────────────────────────────────────────────────────────
+
+export type MeetingType = "bishopric" | "ward_council" | "youth_committee" | "presidency" | "other";
+
+export type MeetingStatus = "upcoming" | "completed" | "cancelled";
+
+/** A single line item on a meeting agenda. */
+export interface AgendaItem {
+  id: string;
+  title: string;
+  /** Who is presenting / responsible for the item. */
+  presenter?: string;
+  /** Estimated minutes for the item. */
+  durationMins?: number;
+  notes?: string;
+  /** Checked off during/after the meeting. */
+  done?: boolean;
+}
+
+export interface Meeting {
+  id: string;
+  title: string;
+  type: MeetingType;
+  /** ISO date string (YYYY-MM-DD). */
+  date: string;
+  /** 24-hour time string (HH:MM). */
+  time?: string;
+  location?: string;
+  status: MeetingStatus;
+  agenda: AgendaItem[];
+  notes?: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const MEETING_TYPE_LABELS: Record<MeetingType, string> = {
+  bishopric:       "Bishopric",
+  ward_council:    "Ward Council",
+  youth_committee: "Youth Committee",
+  presidency:      "Presidency",
+  other:           "Other",
+};
+
+export const MEETING_STATUS_COLORS: Record<MeetingStatus, string> = {
+  upcoming:  "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
+  completed: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+  cancelled: "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200",
+};
+
+// ── Interviews ─────────────────────────────────────────────────────────────────
+
+export type InterviewType =
+  | "temple_recommend"
+  | "temple_recommend_youth"
+  | "calling"
+  | "ministering"
+  | "tithing_settlement"
+  | "youth"
+  | "worthiness"
+  | "other";
+
+export type InterviewStatus = "needs_scheduling" | "scheduled" | "completed" | "cancelled";
+
+export interface Interview {
+  id: string;
+  memberName: string;
+  memberId?: string;
+  type: InterviewType;
+  status: InterviewStatus;
+  /** Bishopric member conducting the interview. */
+  interviewer?: string;
+  /** ISO date string (YYYY-MM-DD) — present once scheduled. */
+  scheduledDate?: string;
+  /** 24-hour time string (HH:MM) — present once scheduled. */
+  scheduledTime?: string;
+  notes?: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const INTERVIEW_TYPE_LABELS: Record<InterviewType, string> = {
+  temple_recommend:       "Temple Recommend",
+  temple_recommend_youth: "Youth Temple Recommend",
+  calling:                "Calling",
+  ministering:            "Ministering",
+  tithing_settlement:     "Tithing Settlement",
+  youth:                  "Youth Interview",
+  worthiness:             "Worthiness",
+  other:                  "Other",
+};
+
+export const INTERVIEW_STATUS_COLORS: Record<InterviewStatus, string> = {
+  needs_scheduling: "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200",
+  scheduled:        "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
+  completed:        "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+  cancelled:        "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200",
+};
+
 // ── Misc constants ───────────────────────────────────────────────────────────
 
 export const TASK_TYPE_LABELS: Record<TaskType, string> = {
