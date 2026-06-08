@@ -2,7 +2,7 @@
  * Static mock data used in place of Firebase while the backend is stripped out.
  * All IDs are deterministic strings so they survive HMR refreshes.
  */
-import type { BishopricMember, Calling, Task, Member } from "@/types";
+import type { BishopricMember, Calling, Task, Member, RosterEntry, RosterGroup } from "@/types";
 
 // ── Bishopric roster ──────────────────────────────────────────────────────────
 
@@ -37,6 +37,35 @@ export const MOCK_MEMBERS: Member[] = [
 // businessItemAdded — this deliberately triggers the business-items banner.
 
 export const MOCK_CALLINGS: Calling[] = [
+  // ── Needs release (current holder being moved out) ──────────────────────────
+  {
+    id: "c00a",
+    memberId: "m04",
+    memberName: "Andrew Olson",
+    position: "Elders Quorum Secretary",
+    organization: "Elders Quorum",
+    stage: "needs_release",
+    suggestedReplacements: ["David Park", "Thomas Hughes"],
+    notes: "Moving out of the ward this summer.",
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-06-01T00:00:00Z",
+    updatedAt: "2026-06-01T00:00:00Z",
+  },
+  {
+    id: "c00b",
+    memberId: "m08",
+    memberName: "Richard Gagne",
+    position: "Sunday School Teacher",
+    organization: "Sunday School",
+    stage: "needs_release",
+    suggestedReplacements: ["Michael Davis", "James Anderson"],
+    replacementName: "Michael Davis",
+    notes: "Has served faithfully for 3 years — ready for a change.",
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-05-28T00:00:00Z",
+    updatedAt: "2026-05-28T00:00:00Z",
+  },
+
   // ── Vacant positions ──────────────────────────────────────────────────────
   {
     id: "c01",
@@ -58,33 +87,19 @@ export const MOCK_CALLINGS: Calling[] = [
     updatedAt: "2026-05-20T00:00:00Z",
   },
 
-  // ── Discussing ────────────────────────────────────────────────────────────
+  // ── Vacant with suggested candidates ──────────────────────────────────────
   {
     id: "c03",
-    memberId: "m02",
-    memberName: "Sarah Mitchell",
+    memberId: "",
+    memberName: "",
     position: "Sunday School Teacher",
     organization: "Sunday School",
-    stage: "discussing",
-    notes: "Has teaching experience, available Sundays",
+    stage: "vacant",
+    suggestedReplacements: ["Sarah Mitchell", "Anna Martinez"],
+    notes: "Sarah has teaching experience, available Sundays",
     createdBy: "mock-bishop-001",
     createdAt: "2026-05-18T00:00:00Z",
     updatedAt: "2026-05-18T00:00:00Z",
-  },
-
-  // ── Approved ──────────────────────────────────────────────────────────────
-  {
-    id: "c04",
-    memberId: "m10",
-    memberName: "Emily Chen",
-    position: "Elders Quorum Secretary",
-    organization: "Elders Quorum",
-    stage: "approved",
-    approvedBy: "Bishop Anderson",
-    approvedAt: "2026-05-19T10:00:00Z",
-    createdBy: "mock-bishop-001",
-    createdAt: "2026-05-15T00:00:00Z",
-    updatedAt: "2026-05-19T10:00:00Z",
   },
 
   // ── Extending ─────────────────────────────────────────────────────────────
@@ -95,8 +110,6 @@ export const MOCK_CALLINGS: Calling[] = [
     position: "Relief Society Secretary",
     organization: "Relief Society",
     stage: "extending",
-    approvedBy: "Bishop Anderson",
-    approvedAt: "2026-05-20T09:00:00Z",
     extendedBy: "Counselor Hughes",
     extendedAt: "2026-05-21T14:00:00Z",
     createdBy: "mock-bishop-001",
@@ -112,8 +125,6 @@ export const MOCK_CALLINGS: Calling[] = [
     position: "Young Men Advisor",
     organization: "Young Men",
     stage: "accepted",
-    approvedBy: "Bishop Anderson",
-    approvedAt: "2026-05-12T00:00:00Z",
     extendedBy: "Bishop Anderson",
     extendedAt: "2026-05-14T00:00:00Z",
     createdBy: "mock-bishop-001",
@@ -129,8 +140,6 @@ export const MOCK_CALLINGS: Calling[] = [
     position: "Ward Mission Leader",
     organization: "Ward Mission",
     stage: "sustaining",
-    approvedBy: "Bishop Anderson",
-    approvedAt: "2026-05-05T00:00:00Z",
     extendedBy: "Bishop Anderson",
     extendedAt: "2026-05-08T00:00:00Z",
     sustainedIn: "sacrament_meeting",
@@ -149,8 +158,6 @@ export const MOCK_CALLINGS: Calling[] = [
     position: "Young Women Advisor",
     organization: "Young Women",
     stage: "sustained",
-    approvedBy: "Bishop Anderson",
-    approvedAt: "2026-04-20T00:00:00Z",
     extendedBy: "Counselor Davis",
     extendedAt: "2026-04-22T00:00:00Z",
     sustainedIn: "class",
@@ -169,8 +176,6 @@ export const MOCK_CALLINGS: Calling[] = [
     position: "Ward Clerk",
     organization: "Ward Clerk",
     stage: "set_apart",
-    approvedBy: "Stake President",
-    approvedAt: "2026-04-10T00:00:00Z",
     extendedBy: "Bishop Anderson",
     extendedAt: "2026-04-13T00:00:00Z",
     sustainedIn: "sacrament_meeting",
@@ -191,8 +196,6 @@ export const MOCK_CALLINGS: Calling[] = [
     position: "Relief Society Teacher",
     organization: "Relief Society",
     stage: "lcr_updated",
-    approvedBy: "Bishop Anderson",
-    approvedAt: "2026-03-25T00:00:00Z",
     extendedBy: "Counselor Hughes",
     extendedAt: "2026-03-27T00:00:00Z",
     sustainedIn: "class",
@@ -216,8 +219,6 @@ export const MOCK_CALLINGS: Calling[] = [
     position: "Elders Quorum President",
     organization: "Elders Quorum",
     stage: "recorded",
-    approvedBy: "Stake President",
-    approvedAt: "2026-02-10T00:00:00Z",
     extendedBy: "Bishop Anderson",
     extendedAt: "2026-02-13T00:00:00Z",
     sustainedIn: "sacrament_meeting",
@@ -231,6 +232,599 @@ export const MOCK_CALLINGS: Calling[] = [
     createdBy: "mock-bishop-001",
     createdAt: "2026-02-05T00:00:00Z",
     updatedAt: "2026-02-24T00:00:00Z",
+  },
+];
+
+// ── Full ward roster (Chart view) ───────────────────────────────────────────────
+// Transcribed from the LCR "Organizations and Callings" report for the chart /
+// org-wide roster view. Filled vs. vacant is derived from `member`.
+
+function filled(
+  position: string,
+  member: string,
+  sustained?: string,
+  setApart = false,
+  custom = false,
+): RosterEntry {
+  return { position, member, sustained, setApart, custom };
+}
+
+function vacant(position: string, custom = false): RosterEntry {
+  return { position, custom };
+}
+
+export const MOCK_ROSTER: RosterGroup[] = [
+  // ── Bishopric ───────────────────────────────────────────────────────────────
+  {
+    org: "Bishopric",
+    entries: [
+      filled("Bishop", "Phillips, Jay Allan", "2 Mar 2025", true),
+      filled("Bishopric First Counselor", "Bringhurst, Blaine", "2 Mar 2025", true),
+      filled("Bishopric Second Counselor", "Davenport, Scott", "21 Feb 2026", true),
+      filled("Ward Executive Secretary", "Hansen, Braden", "18 Jan 2026", true),
+      vacant("Ward Assistant Executive Secretary"),
+      vacant("Ward Assistant Executive Secretary"),
+      filled("Ward Clerk", "Tricozzi, Jeremy", "12 Apr 2026", true),
+      vacant("Ward Assistant Clerk"),
+      filled("Ward Assistant Clerk--Membership", "Dalrymple, Scott", "3 May 2026", true),
+      filled("Ward Assistant Clerk--Finance", "Selin, Eric", "16 Oct 2022", true),
+    ],
+  },
+
+  // ── Elders Quorum ─────────────────────────────────────────────────────────────
+  {
+    org: "Elders Quorum",
+    subOrg: "Elders Quorum Presidency",
+    entries: [
+      filled("Elders Quorum President", "Wilding, James", "12 Apr 2026", true),
+      filled("Elders Quorum First Counselor", "Brooksby, Glen", "12 Apr 2026", true),
+      filled("Elders Quorum Second Counselor", "Pack, Jed Douglas", "12 Apr 2026", true),
+      filled("Elders Quorum Secretary", "Olson, Andrew", "13 Apr 2025", true),
+      vacant("Elders Quorum Assistant Secretary"),
+    ],
+  },
+  {
+    org: "Elders Quorum",
+    subOrg: "Teachers",
+    entries: [
+      filled("Elders Quorum Teacher", "Nielsen, John Merle", "5 Oct 2025", true),
+      filled("Assistant EQ Instructor", "Brown, Michael Anthony", "13 Feb 2022", false, true),
+      vacant("Assistant EQ Instructor", true),
+      filled("EQ Instructor", "Carter, James", "23 Jun 2024", true, true),
+    ],
+  },
+  {
+    org: "Elders Quorum",
+    subOrg: "Ministering",
+    entries: [
+      filled("Elders Quorum Ministering Secretary", "Brooksby, Glen", "3 May 2026", true),
+    ],
+  },
+  {
+    org: "Elders Quorum",
+    subOrg: "Activities",
+    entries: [
+      vacant("Elders Quorum Activity Coordinator"),
+      vacant("Elders Quorum Assistant Activity Coordinator"),
+      filled("Elders Quorum Activity Committee Member", "Bishop, Wayne Emanuel Daniel", "14 Aug 2022"),
+      filled("Elders Quorum Activity Committee Member", "Chang, Mark", "14 Aug 2022", true),
+      filled("Elders Quorum Activity Committee Member", "Hoffman, Charles", "14 Aug 2022", true),
+      filled("Elders Quorum Activity Committee Member", "Miller, Daniel William Jr.", "11 Aug 2024", true),
+      filled("Elders Quorum Activity Committee Member", "Pearce, Brian", "27 Jul 2025", true),
+    ],
+  },
+  {
+    org: "Elders Quorum",
+    subOrg: "Service",
+    entries: [
+      filled("Elders Quorum Service Coordinator", "Selin, Kevin", "13 Apr 2025", true),
+      filled("Elders Quorum Assistant Service Coordinator", "Edmonds, Alberto", "9 Nov 2025"),
+      vacant("Elders Quorum Service Committee Member"),
+      filled("Elders Quorum Self-reliance Specialist", "Watson, Greg", "2 Apr 2023", true, true),
+      filled("Ward Missionary", "Chang, Mark", "4 Feb 2024", true, true),
+    ],
+  },
+
+  // ── Relief Society ──────────────────────────────────────────────────────────────
+  {
+    org: "Relief Society",
+    subOrg: "Relief Society Presidency",
+    entries: [
+      filled("Relief Society President", "Durfee, Annette", "11 Jan 2026", true),
+      filled("Relief Society First Counselor", "Fugal, Tabatha", "11 Jan 2026", true),
+      filled("Relief Society Second Counselor", "Hustedt, Tyra", "11 Jan 2026", true),
+      filled("Relief Society Secretary", "McKinlay, Morgan", "8 Feb 2026"),
+      filled("Relief Society Assistant Secretary", "Caine, Laverne", "29 Mar 2026", true),
+    ],
+  },
+  {
+    org: "Relief Society",
+    subOrg: "Teachers",
+    entries: [
+      filled("Relief Society Teacher", "Jung, Sariah", "13 Apr 2025", true),
+      vacant("Relief Society Teacher"),
+    ],
+  },
+  {
+    org: "Relief Society",
+    subOrg: "Ministering",
+    entries: [
+      vacant("Relief Society Ministering Secretary"),
+      vacant("Letters", true),
+    ],
+  },
+  {
+    org: "Relief Society",
+    subOrg: "Activities",
+    entries: [
+      filled("Relief Society Activity Coordinator", "Relyea, Jean", "29 Mar 2026", true),
+      filled("Relief Society Assistant Activity Coordinator", "Stevenson, Denise", "1 Jun 2025", true),
+      filled("Relief Society Activity Committee Member", "Baran, Basantie", "12 Apr 2026", true),
+      filled("Relief Society Activity Committee Member", "Salada, Tanya Marie", "27 Mar 2022", true),
+      filled("Relief Society Activity Committee Member", "Watson, Doreen", "1 Nov 2020"),
+      vacant("Relief Society Activity Committee Member"),
+      vacant("Relief Society Activity Committee Member"),
+    ],
+  },
+  {
+    org: "Relief Society",
+    subOrg: "Music",
+    entries: [
+      vacant("Relief Society Music Leader"),
+      filled("Relief Society Pianist", "Chan, Emily", "27 Jul 2008", true),
+    ],
+  },
+  {
+    org: "Relief Society",
+    subOrg: "Service",
+    entries: [
+      filled("Relief Society Service Coordinator", "Chan, Stella", "10 Sep 2023", true),
+      vacant("Relief Society Assistant Service Coordinator"),
+      filled("Relief Society Service Committee Member", "Egan, Virginia", "12 Jun 2022", true),
+      filled("Relief Society Service Committee Member", "Idahagbon, Omosede", "12 Apr 2026"),
+      filled("Relief Society Service Committee Member", "Pearce, Diane Michelle", "16 Jun 2024"),
+      filled("Relief Society Service Committee Member", "Wilson, Marilee", "29 Nov 2020", true),
+      filled("Relief Society Greeter", "Jackson, Sharon", "3 Mar 2024", false, true),
+    ],
+  },
+
+  // ── Aaronic Priesthood Quorums ──────────────────────────────────────────────────
+  {
+    org: "Aaronic Priesthood Quorums",
+    subOrg: "Presidency of the Aaronic Priesthood",
+    entries: [
+      filled("Bishop", "Phillips, Jay Allan", "2 Mar 2025", true),
+      filled("Bishopric First Counselor", "Bringhurst, Blaine", "2 Mar 2025", true),
+      filled("Bishopric Second Counselor", "Davenport, Scott", "21 Feb 2026", true),
+    ],
+  },
+  {
+    org: "Aaronic Priesthood Quorums",
+    subOrg: "Priests Quorum Presidency",
+    entries: [
+      filled("Priests Quorum President", "Phillips, Jay Allan", "2 Mar 2025", true),
+      filled("Priests Quorum First Assistant", "Madsen, Will", "22 Jun 2025", true),
+      filled("Priests Quorum Second Assistant", "Bringhurst, Bryson Richard", "22 Jun 2025", true),
+      filled("Priests Quorum Secretary", "Phillips, Wesley Jay", "22 Jun 2025", true),
+    ],
+  },
+  {
+    org: "Aaronic Priesthood Quorums",
+    subOrg: "Priests Quorum Adult Leaders",
+    entries: [
+      filled("Priests Quorum Adviser", "Preece, James", "1 Mar 2026"),
+      vacant("Priests Quorum Specialist"),
+    ],
+  },
+  {
+    org: "Aaronic Priesthood Quorums",
+    subOrg: "Teachers Quorum Presidency",
+    entries: [
+      filled("Teachers Quorum President", "Crosby, Byron", "8 Feb 2026", true),
+      filled("Teachers Quorum First Counselor", "Pack, Kenton James", "8 Feb 2026", true),
+      vacant("Teachers Quorum Second Counselor"),
+      filled("Teachers Quorum Secretary", "Fugal, Liam", "23 Mar 2025", true),
+    ],
+  },
+  {
+    org: "Aaronic Priesthood Quorums",
+    subOrg: "Teachers Quorum Adult Leaders",
+    entries: [
+      filled("Teachers Quorum Adviser", "Metzger, Ronald", "10 May 2026", true),
+      vacant("Teachers Quorum Specialist"),
+    ],
+  },
+  {
+    org: "Aaronic Priesthood Quorums",
+    subOrg: "Deacons Quorum Presidency",
+    entries: [
+      filled("Deacons Quorum President", "Preece, Jacob", "8 Feb 2026", true),
+      filled("Deacons Quorum First Counselor", "Madsen, Jack Henry", "29 Mar 2026", true),
+      vacant("Deacons Quorum Second Counselor"),
+      vacant("Deacons Quorum Secretary"),
+    ],
+  },
+  {
+    org: "Aaronic Priesthood Quorums",
+    subOrg: "Deacons Quorum Adult Leaders",
+    entries: [
+      filled("Deacons Quorum Adviser", "Selin, Kevin", "27 Jul 2025", true),
+      vacant("Deacons Quorum Specialist"),
+    ],
+  },
+  {
+    org: "Aaronic Priesthood Quorums",
+    subOrg: "Additional Aaronic Priesthood Quorums Callings",
+    entries: [
+      vacant("Aaronic Priesthood Quorums Specialist - Camp Director"),
+      vacant("Aaronic Priesthood Quorums Specialist - Assistant Camp Director"),
+      vacant("Young Men Stake Youth Committee Member"),
+      vacant("Young Men Specialist - Sports"),
+      vacant("Young Men Specialist - Sports Assistant"),
+      filled("Aaronic Priesthood Quorums Specialist", "Markham, Steve", "8 Dec 2019"),
+    ],
+  },
+
+  // ── Young Women ─────────────────────────────────────────────────────────────────
+  {
+    org: "Young Women",
+    subOrg: "Young Women Presidency",
+    entries: [
+      filled("Young Women President", "Madsen, Jessy", "16 Nov 2025", true),
+      filled("Young Women First Counselor", "Preece, Kirsten", "16 Nov 2025", true),
+      filled("Young Women Second Counselor", "Olson, Lauren", "16 Nov 2025", true),
+      filled("Young Women Secretary", "Chan, Sarah", "26 Apr 2026", true),
+    ],
+  },
+  {
+    org: "Young Women",
+    subOrg: "Gatherers of Light Class Presidency",
+    entries: [
+      vacant("Gatherers of Light Class President"),
+      vacant("Gatherers of Light Class First Counselor"),
+      vacant("Gatherers of Light Class Second Counselor"),
+      vacant("Gatherers of Light Class Secretary"),
+    ],
+  },
+  {
+    org: "Young Women",
+    subOrg: "Gatherers of Light Class Adult Leaders",
+    entries: [
+      vacant("Gatherers of Light Class Adviser"),
+      vacant("Gatherers of Light Specialist"),
+    ],
+  },
+  {
+    org: "Young Women",
+    subOrg: "Messengers of Hope Class Presidency",
+    entries: [
+      vacant("Messengers of Hope Class President"),
+      vacant("Messengers of Hope Class First Counselor"),
+      vacant("Messengers of Hope Class Second Counselor"),
+      vacant("Messengers of Hope Class Secretary"),
+    ],
+  },
+  {
+    org: "Young Women",
+    subOrg: "Messengers of Hope Class Adult Leaders",
+    entries: [
+      vacant("Messengers of Hope Class Adviser"),
+      vacant("Messengers of Hope Specialist"),
+    ],
+  },
+  {
+    org: "Young Women",
+    subOrg: "Builders of Faith Class Presidency",
+    entries: [
+      vacant("Builders of Faith Class President"),
+      vacant("Builders of Faith Class First Counselor"),
+      vacant("Builders of Faith Class Second Counselor"),
+      vacant("Builders of Faith Class Secretary"),
+    ],
+  },
+  {
+    org: "Young Women",
+    subOrg: "Builders of Faith Class Adult Leaders",
+    entries: [
+      vacant("Builders of Faith Class Adviser"),
+      vacant("Builders of Faith Specialist"),
+    ],
+  },
+  {
+    org: "Young Women",
+    subOrg: "Additional Young Women Callings",
+    entries: [
+      vacant("Young Women Class Adviser"),
+      vacant("Young Women Class Adviser"),
+      vacant("Young Women Specialist"),
+      vacant("Young Women Specialist"),
+      vacant("Young Women Specialist"),
+      vacant("Young Women Specialist - Activities"),
+      vacant("Young Women Specialist - Camp Director"),
+      vacant("Young Women Specialist - Assistant Camp Director"),
+      vacant("Young Women Stake Youth Committee"),
+      vacant("Young Women Specialist - Sports"),
+      vacant("Young Women Specialist - Sports Assistant"),
+    ],
+  },
+
+  // ── Sunday School ─────────────────────────────────────────────────────────────────
+  {
+    org: "Sunday School",
+    subOrg: "Sunday School Presidency",
+    entries: [
+      filled("Sunday School President", "Nielsen, John Merle", "19 Oct 2025", true),
+      filled("Sunday School First Counselor", "Brown, Zion", "30 Nov 2025", true),
+      filled("Sunday School Second Counselor", "Phillips, Bill", "4 Jan 2026", true),
+      vacant("Sunday School Secretary"),
+    ],
+  },
+  {
+    org: "Sunday School",
+    subOrg: "Gospel Doctrine",
+    entries: [
+      filled("Sunday School Teacher", "Gagne, Richard", "8 Oct 2023", true),
+      filled("Class President", "DiGiovannantonio, Tony", "28 Jul 2024", false, true),
+    ],
+  },
+  {
+    org: "Sunday School",
+    subOrg: "Course 16, Course 17",
+    entries: [
+      filled("Sunday School Teacher", "Amar, Dharyl", "7 Sep 2025"),
+      filled("Sunday School Teacher", "Chan, Benjamin Yue-Ming", "26 Apr 2026", true),
+      filled("Sunday School Teacher", "Ravi", "26 Apr 2026", true),
+    ],
+  },
+  {
+    org: "Sunday School",
+    subOrg: "Course 13, Course 14, Course 15",
+    entries: [
+      filled("Sunday School Teacher", "Metzger, Lisa", "30 Nov 2025", true),
+      filled("Sunday School Teacher", "Selin, Diane", "11 Jan 2026", true),
+      vacant("Sunday School Teacher"),
+    ],
+  },
+  {
+    org: "Sunday School",
+    subOrg: "Course 11, Course 12",
+    entries: [
+      filled("Sunday School Teacher", "Dalrymple, Dawn", "15 Dec 2024", true),
+      filled("Sunday School Teacher", "Selin, Amy", "30 Nov 2025"),
+      vacant("Sunday School Teacher"),
+    ],
+  },
+  {
+    org: "Sunday School",
+    subOrg: "Unassigned Teachers",
+    entries: [
+      vacant("Sunday School Teacher"),
+      filled("Temple Preparation Teacher", "Obos, Christopher", "28 Dec 2025", false, true),
+    ],
+  },
+  {
+    org: "Sunday School",
+    subOrg: "Resource Center",
+    entries: [
+      vacant("Resource Center Specialist"),
+    ],
+  },
+
+  // ── Primary ─────────────────────────────────────────────────────────────────────
+  {
+    org: "Primary",
+    subOrg: "Primary Presidency",
+    entries: [
+      filled("Primary President", "Phillips, Laura", "23 Nov 2025", true),
+      filled("Primary First Counselor", "Dinkel, Jennifer", "23 Nov 2025", true),
+      filled("Primary Second Counselor", "Wilding, Arla", "23 Nov 2025", true),
+      filled("Primary Secretary", "Woodruff, Renee Lynn", "23 Nov 2025"),
+    ],
+  },
+  {
+    org: "Primary",
+    subOrg: "Music",
+    entries: [
+      filled("Primary Pianist", "Wilding, Thomas", "26 Apr 2026"),
+      vacant("Primary Music Leader"),
+    ],
+  },
+  {
+    org: "Primary",
+    subOrg: "Valiant 7, Valiant 8, Valiant 9, Valiant 10",
+    entries: [
+      filled("Primary Teacher", "Reynolds, Chris", "20 Apr 2025"),
+      vacant("Primary Teacher"),
+    ],
+  },
+  {
+    org: "Primary",
+    subOrg: "CTR 5, CTR 6",
+    entries: [
+      filled("Primary Teacher", "Brooksby, Michelle", "10 May 2026"),
+      filled("Primary Teacher", "Marco, Bergen", "23 Mar 2025"),
+      filled("Primary Teacher", "Robertshaw, Kris", "23 Mar 2025"),
+    ],
+  },
+  {
+    org: "Primary",
+    subOrg: "Sunbeam, CTR 4",
+    entries: [
+      filled("Primary Teacher", "Purcell, Iretta Ruth", "20 Apr 2025"),
+      filled("Primary Teacher", "Tricozzi, Liz", "10 May 2026", true),
+    ],
+  },
+  {
+    org: "Primary",
+    subOrg: "Nursery",
+    entries: [
+      vacant("Nursery Leader"),
+      filled("Nursery worker", "Hoffman, Edith", "10 Aug 2025", false, true),
+      filled("Nursery worker", "Amar, Mikki", "17 Aug 2025", false, true),
+    ],
+  },
+  {
+    org: "Primary",
+    subOrg: "Unassigned Teachers",
+    entries: [
+      filled("Primary Teacher", "Davenport, Britany", "22 Feb 2026", true),
+      filled("Primary Teacher", "Delaney, Rosa", "12 Oct 2025"),
+      filled("Primary Teacher", "Hustedt, Caleb", "1 Jun 2025", true),
+      filled("Primary Teacher", "Markham, Janet", "4 Jan 2026", true),
+    ],
+  },
+  {
+    org: "Primary",
+    subOrg: "Primary Activities - Boys",
+    entries: [
+      filled("Valiant Activities Leader", "Purcell, Scott Thomas", "20 Apr 2025"),
+    ],
+  },
+  {
+    org: "Primary",
+    subOrg: "Primary Activities - Girls",
+    entries: [
+      vacant("Valiant Activities Leader"),
+      vacant("Valiant Activities Leader"),
+      vacant("Primary Assistant Activities Leader", true),
+    ],
+  },
+
+  // ── Ward Missionaries ─────────────────────────────────────────────────────────────
+  {
+    org: "Ward Missionaries",
+    entries: [
+      filled("Ward Mission Leader", "Pack, Jed Douglas", "8 Oct 2023", true),
+      vacant("Assistant Ward Mission Leader"),
+      filled("Ward Missionary", "Singh, Amargeet Jowahir", "10 Nov 2024"),
+      filled("Ward Missionary", "Subick, Rishee", "22 Mar 2026"),
+      filled("Ward Missionary", "Tyler, Lance Trent Nassir Jah'Rell", "8 Jun 2025", true),
+      filled("Ward Missionary", "Woodruff, Adam", "29 Mar 2026"),
+      vacant("Ward Missionary"),
+    ],
+  },
+
+  // ── Temple and Family History ─────────────────────────────────────────────────────
+  {
+    org: "Temple and Family History",
+    entries: [
+      filled("Ward Temple and Family History Leader", "Smith, Brian", "26 Apr 2026"),
+      filled("Ward Temple and Family History Consultant", "Chan, Dorothy Zina", "21 Jan 2024", true),
+      filled("Ward Temple and Family History Consultant", "Hayes, Daveena", "29 Mar 2026", true),
+      filled("Ward Temple and Family History Consultant", "Obos, Christopher", "20 Dec 2020"),
+      filled("Ward Temple and Family History Consultant", "Obos, Lee Anna", "20 Feb 2022"),
+      filled("Ward Temple and Family History Consultant", "Pack, Amelia Kathryn", "5 May 2024", true),
+      filled("Ward Temple and Family History Consultant", "Thompson, Barbara", "13 Apr 2025"),
+      vacant("Indexing Worker"),
+    ],
+  },
+
+  // ── Young Single Adult ────────────────────────────────────────────────────────────
+  {
+    org: "Young Single Adult",
+    entries: [
+      vacant("Relief Society Adviser to Young Single Adult Sisters"),
+      vacant("Young Single Adult Adviser"),
+      vacant("Young Single Adult Adviser"),
+      vacant("Young Single Adult Leader"),
+      filled("Young Single Adult Committee Chair", "Hoffman, Sam", "20 Aug 2023"),
+      vacant("Young Single Adult Committee Member"),
+      vacant("Young Single Adult Assistant", true),
+      vacant("Young Single Adult Representative", true),
+    ],
+  },
+
+  // ── Other Callings ────────────────────────────────────────────────────────────────
+  {
+    org: "Other Callings",
+    subOrg: "Church Magazines",
+    entries: [
+      vacant("Magazine Representative"),
+    ],
+  },
+  {
+    org: "Other Callings",
+    subOrg: "Facilities",
+    entries: [
+      vacant("Building Representative"),
+      vacant("Scheduler--Building 1"),
+      vacant("Scheduler--Building 2"),
+      vacant("Scheduler--Building 3"),
+      vacant("Scheduler--Building 4"),
+      vacant("Scheduler--Building 5"),
+    ],
+  },
+  {
+    org: "Other Callings",
+    subOrg: "For the Strength of Youth",
+    entries: [
+      vacant("FSY Conferences Representative"),
+    ],
+  },
+  {
+    org: "Other Callings",
+    subOrg: "History",
+    entries: [
+      vacant("History Specialist"),
+      filled("Youth Ward Historian", "Markham, Adele Rose", "14 Apr 2024", false, true),
+      filled("Youth Ward Historian", "Pack, Kenton James", "14 Apr 2024", false, true),
+      vacant("Youth Ward Historian", true),
+    ],
+  },
+  {
+    org: "Other Callings",
+    subOrg: "Music",
+    entries: [
+      vacant("Priesthood Pianist or Organist"),
+      vacant("Priesthood Music Director"),
+      vacant("Choir Accompanist"),
+      vacant("Music Adviser"),
+      filled("Choir Director", "Lehman, John S", "1 Jun 2025", true),
+      filled("Accompanist", "Chan, David", "13 Jan 2019", true),
+      filled("Accompanist", "Chan, Heather Yee-Mei", "6 Aug 2023"),
+      filled("Accompanist", "Lehman, John S", "11 Sep 2022", true),
+      filled("Accompanist", "Pack, Leslie", "16 Jul 2023"),
+      filled("Music Leader", "Lehman, John S", "8 Oct 2023", true),
+      filled("Music Coordinator", "Lehman, John S", "19 Nov 2023", true),
+    ],
+  },
+  {
+    org: "Other Callings",
+    subOrg: "Technology",
+    entries: [
+      vacant("Email Communication Specialist"),
+      filled("Technology Specialist", "Wilding, Thomas", "20 Apr 2025"),
+      vacant("Ward/Branch Interpreter"),
+    ],
+  },
+  {
+    org: "Other Callings",
+    subOrg: "Welfare and Self-Reliance",
+    entries: [
+      vacant("Disability Activity Leader"),
+      vacant("Disability Specialist"),
+      filled("Welfare and Self-Reliance Specialist", "Fugal, Jan", "10 May 2026", true),
+      vacant("Self-Reliance Group Facilitator"),
+    ],
+  },
+  {
+    org: "Other Callings",
+    subOrg: "Additional Callings",
+    entries: [
+      vacant("Bulletin Editor", true),
+      vacant("Family Spotlight Coordinator", true),
+      vacant("Missionary Meal Coordinator", true),
+      vacant("Ordinance Worker", true),
+      filled("Sacrament Meeting Assistant", "Chang, Mark", "13 Feb 2022", false, true),
+      vacant("Sacrament Usher", true),
+      vacant("Ward Activity Committee Leader", true),
+      filled("Ward Activity Committee Member", "Zoilo, Shishiqua", "18 Sep 2022", false, true),
+      filled("Ward Activity Committee Member", "Marchesani, Darlyne", "30 Oct 2022", false, true),
+      vacant("Ward Safety Chairman", true),
+      vacant("Ward Single Adult Assistant", true),
+      vacant("Ward Single Adult Representative", true),
+      vacant("Ward Social Media Coordinator", true),
+    ],
   },
 ];
 

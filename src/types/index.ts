@@ -74,15 +74,15 @@ export interface Task {
 /**
  * The ordered pipeline every calling moves through.
  *
- *   vacant → discussing → approved → extending → accepted
+ *   needs_release → vacant → extending → accepted
  *     → sustaining → sustained → set_apart → lcr_updated → recorded
  *
- * "declined" is not a stage; a decline resets to vacant/discussing.
+ * Candidates are suggested during needs_release / vacant; once one is chosen a
+ * counselor is assigned to extend. A decline resets the position to vacant.
  */
 export type CallingStage =
-  | "vacant"      // Position open, no candidate yet
-  | "discussing"  // Bishopric discussing / selecting a candidate
-  | "approved"    // Candidate approved by bishopric
+  | "needs_release" // Current holder needs to be released (creates the vacancy)
+  | "vacant"      // Position open — suggest candidates, then extend
   | "extending"   // Bishopric member reaching out to extend
   | "accepted"    // Person accepted the calling
   | "sustaining"  // Scheduled for sustaining vote
@@ -95,9 +95,8 @@ export type SustainedVenue = "sacrament_meeting" | "class";
 
 /** Ordered list used for pipeline display and progress math. */
 export const CALLING_PIPELINE: CallingStage[] = [
+  "needs_release",
   "vacant",
-  "discussing",
-  "approved",
   "extending",
   "accepted",
   "sustaining",
@@ -108,9 +107,8 @@ export const CALLING_PIPELINE: CallingStage[] = [
 ];
 
 export const CALLING_STAGES: { stage: CallingStage; label: string }[] = [
+  { stage: "needs_release", label: "Needs Release" },
   { stage: "vacant",      label: "Vacant" },
-  { stage: "discussing",  label: "Discussing" },
-  { stage: "approved",    label: "Approved" },
   { stage: "extending",   label: "Extending" },
   { stage: "accepted",    label: "Accepted" },
   { stage: "sustaining",  label: "To Be Sustained" },
@@ -131,9 +129,15 @@ export interface Calling {
   stage: CallingStage;
   notes?: string;
 
-  // ── Approval
-  approvedBy?: string;
-  approvedAt?: string;
+  // ── Release (needs_release stage)
+  /** Names suggested to replace the current holder. */
+  suggestedReplacements?: string[];
+  /** The suggested replacement chosen to fill the position once released. */
+  replacementName?: string;
+  /** The person who held the calling before this one (set when released). */
+  releasedName?: string;
+  /** Bishopric member assigned to inform the outgoing holder of their release. */
+  releasedBy?: string;
 
   // ── Extension
   extendedBy?: string;
@@ -161,6 +165,33 @@ export interface Calling {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+}
+
+// ── Calling roster (full org chart) ───────────────────────────────────────────
+
+/**
+ * A single position in the ward's standing roster (as shown in LCR's
+ * "Organizations and Callings" report). Used by the Chart view to give the
+ * bishopric an at-a-glance picture of who holds what and where the holes are.
+ */
+export interface RosterEntry {
+  position: string;
+  /** Omitted = vacant. Stored "Last, First" exactly as LCR displays it. */
+  member?: string;
+  /** Sustained date string, shown verbatim (e.g. "2 Mar 2025"). */
+  sustained?: string;
+  /** True when set apart (the ✓ column in LCR). */
+  setApart?: boolean;
+  /** True for ward-defined custom callings (marked * in LCR). */
+  custom?: boolean;
+}
+
+export interface RosterGroup {
+  /** Top-level organization, e.g. "Elders Quorum". */
+  org: string;
+  /** Optional sub-section within the organization, e.g. "Presidency". */
+  subOrg?: string;
+  entries: RosterEntry[];
 }
 
 // ── Misc constants ───────────────────────────────────────────────────────────

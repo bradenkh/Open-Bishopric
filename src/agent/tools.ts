@@ -105,7 +105,7 @@ export const getCallings = tool({
   description: "Get callings in progress, optionally filtered by stage.",
   inputSchema: z.object({
     stage: z
-      .enum(["identified", "approved", "extended", "responded", "sustained", "set_apart", "recorded", "all"])
+      .enum(["needs_release", "vacant", "extending", "accepted", "sustaining", "sustained", "set_apart", "lcr_updated", "recorded", "all"])
       .optional()
       .default("all"),
     limitCount: z.number().optional().default(20),
