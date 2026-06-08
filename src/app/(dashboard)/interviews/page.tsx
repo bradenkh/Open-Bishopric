@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   Plus, CalendarClock, Clock, User, GripVertical, CalendarPlus,
   CheckCircle2, AlertTriangle, Crown, Pencil, RotateCcw,
+  CalendarDays, CalendarOff, Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,12 +18,21 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { useAuth } from "@/contexts/AuthContext";
-import type { Interview, InterviewType, InterviewStage } from "@/types";
+import type {
+  Interview, InterviewType, InterviewStage,
+  AvailabilityBlock, AvailabilityException, BishopricMember,
+} from "@/types";
 import {
   INTERVIEW_TYPE_LABELS, INTERVIEW_STAGES, INTERVIEW_PIPELINE, INTERVIEW_STAGE_COLORS,
+  INTERVIEW_DURATION_MINS, WEEKDAY_LABELS,
 } from "@/types";
-import { MOCK_INTERVIEWS, MOCK_BISHOPRIC_MEMBERS } from "@/lib/mock-data";
+import {
+  MOCK_INTERVIEWS, MOCK_BISHOPRIC_MEMBERS, MOCK_AVAILABILITY, MOCK_AVAILABILITY_EXCEPTIONS,
+} from "@/lib/mock-data";
 import { formatDate, cn } from "@/lib/utils";
+import {
+  generateSlots, groupSlotsByDate, durationForType, parseDate, type Slot,
+} from "@/lib/availability";
 
 // ── Bishopric helpers ─────────────────────────────────────────────────────────
 
@@ -49,6 +59,11 @@ function formatTime(time?: string) {
   const period = h >= 12 ? "PM" : "AM";
   const hour = h % 12 === 0 ? 12 : h % 12;
   return `${hour}:${String(m).padStart(2, "0")} ${period}`;
+}
+
+/** "Tuesday · Jun 16" for a slot-group date header. */
+function dayHeading(dateStr: string): string {
+  return `${WEEKDAY_LABELS[parseDate(dateStr).getDay()]} · ${formatDate(dateStr)}`;
 }
 
 function stageLabel(stage: InterviewStage): string {
@@ -99,6 +114,176 @@ const STAGE_COLUMN_COLORS: Record<InterviewStage, { header: string; ring: string
   date_passed:     { header: "bg-purple-50 border-purple-200 dark:bg-purple-950/30 dark:border-purple-800", ring: "ring-purple-400",  drop: "bg-purple-50/60 dark:bg-purple-950/20" },
   completed:       { header: "bg-green-50 border-green-200 dark:bg-green-950/30 dark:border-green-800",      ring: "ring-green-400",   drop: "bg-green-50/60 dark:bg-green-950/20" },
 };
+
+// ── Duration picker ─────────────────────────────────────────────────────────────
+
+function DurationPicker({ value, onChange }: { value: number; onChange: (n: number) => void }) {
+  const presets = [10, 15, 20, 30, 45, 60];
+  const opts = presets.includes(value) ? presets : [...presets, value].sort((a, b) => a - b);
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {opts.map((n) => (
+        <button
+          key={n}
+          type="button"
+          onClick={() => onChange(n)}
+          className={cn(
+            "rounded-full px-3 py-1 text-xs font-medium border transition-colors",
+            value === n
+              ? "bg-primary text-primary-foreground border-primary"
+              : "bg-muted text-muted-foreground border-transparent hover:bg-accent"
+          )}
+        >
+          {n} min
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ── Slot picker ─────────────────────────────────────────────────────────────────
+
+interface SlotPickerProps {
+  availability: AvailabilityBlock[];
+  exceptions: AvailabilityException[];
+  interviews: Interview[];
+  durationMins: number;
+  /** When set, only this member's slots are offered (e.g. bishop-required). */
+  restrictToMember?: string;
+  /** Selectable interviewers for the manual fallback. */
+  allowedMembers: BishopricMember[];
+  value: { date?: string; time?: string; interviewer?: string };
+  onChange: (v: { date: string; time: string; interviewer: string }) => void;
+  ignoreInterviewId?: string;
+}
+
+function SlotPicker({
+  availability, exceptions, interviews, durationMins,
+  restrictToMember, allowedMembers, value, onChange, ignoreInterviewId,
+}: SlotPickerProps) {
+  const [showManual, setShowManual] = useState(false);
+  const [mDate, setMDate] = useState(value.date ?? "");
+  const [mTime, setMTime] = useState(value.time ?? "");
+  const [mInterviewer, setMInterviewer] = useState(restrictToMember ?? value.interviewer ?? "");
+
+  const slots = generateSlots({
+    memberName: restrictToMember,
+    durationMins,
+    blocks: availability,
+    exceptions,
+    interviews,
+    ignoreInterviewId,
+  });
+  const grouped = groupSlotsByDate(slots);
+  const showMember = !restrictToMember;
+
+  const isSelected = (s: Slot) =>
+    value.date === s.date && value.time === s.time && value.interviewer === s.memberName;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <Label className="text-xs text-muted-foreground">
+          {slots.length > 0
+            ? `${slots.length} open ${durationMins}-min slot${slots.length !== 1 ? "s" : ""} in the next 4 weeks`
+            : "Open slots"}
+        </Label>
+      </div>
+
+      {grouped.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border p-4 text-center text-xs text-muted-foreground">
+          No open slots in the next 4 weeks. Add availability on the Availability tab, or enter a time manually below.
+        </div>
+      ) : (
+        <div className="max-h-64 overflow-y-auto space-y-3 rounded-lg border border-border p-2">
+          {grouped.map(({ date, slots }) => (
+            <div key={date}>
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground px-1 pb-1">
+                {dayHeading(date)}
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {slots.map((s) => (
+                  <button
+                    key={`${s.date}-${s.time}-${s.memberId}`}
+                    type="button"
+                    onClick={() => onChange({ date: s.date, time: s.time, interviewer: s.memberName })}
+                    className={cn(
+                      "rounded-md border px-2 py-1 text-xs font-medium transition-colors text-left",
+                      isSelected(s)
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-card text-foreground border-border hover:bg-accent"
+                    )}
+                  >
+                    <span>{formatTime(s.time)}</span>
+                    {showMember && (
+                      <span className={cn(
+                        "block text-[10px]",
+                        isSelected(s) ? "text-primary-foreground/80" : "text-muted-foreground"
+                      )}>
+                        {s.memberName}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Manual fallback */}
+      <div>
+        <button
+          type="button"
+          onClick={() => setShowManual((v) => !v)}
+          className="text-xs text-primary hover:underline"
+        >
+          {showManual ? "Hide manual entry" : "Enter a time manually"}
+        </button>
+        {showManual && (
+          <div className="mt-2 space-y-3 rounded-lg border border-dashed border-border p-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="mDate">Date</Label>
+                <Input id="mDate" type="date" value={mDate} onChange={(e) => setMDate(e.target.value)} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="mTime">Time</Label>
+                <Input id="mTime" type="time" value={mTime} onChange={(e) => setMTime(e.target.value)} />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Interviewer</Label>
+              {restrictToMember ? (
+                <div className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
+                  <Crown className="h-4 w-4 text-orange-500" /> {restrictToMember}
+                </div>
+              ) : (
+                <Select value={mInterviewer || ""} onValueChange={setMInterviewer}>
+                  <SelectTrigger><SelectValue placeholder="Select interviewer" /></SelectTrigger>
+                  <SelectContent>
+                    {allowedMembers.map((m) => (
+                      <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={!mDate || !mTime || !(restrictToMember ?? mInterviewer)}
+              onClick={() => onChange({ date: mDate, time: mTime, interviewer: restrictToMember ?? mInterviewer })}
+            >
+              Use this time
+            </Button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 // ── Interview Card ────────────────────────────────────────────────────────────
 
@@ -313,84 +498,199 @@ function KanbanView({ interviews, onSelect, onMove }: KanbanViewProps) {
   );
 }
 
+// ── Availability View ───────────────────────────────────────────────────────────
+
+interface AvailabilityViewProps {
+  availability: AvailabilityBlock[];
+  exceptions: AvailabilityException[];
+  onAddBlock: (m: BishopricMember) => void;
+  onDeleteBlock: (id: string) => void;
+  onAddException: (m: BishopricMember) => void;
+  onDeleteException: (id: string) => void;
+}
+
+function AvailabilityView({
+  availability, exceptions, onAddBlock, onDeleteBlock, onAddException, onDeleteException,
+}: AvailabilityViewProps) {
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-muted-foreground">
+        Set the weekly hours each member is free for interviews. The scheduler slices these into
+        bookable slots. Add time off to block a day or week (e.g. out of town).
+      </p>
+      {INTERVIEWERS.map((m) => {
+        const blocks = availability
+          .filter((b) => b.memberId === m.id)
+          .sort((a, b) => (a.weekday - b.weekday) || a.startTime.localeCompare(b.startTime));
+        const ex = exceptions
+          .filter((e) => e.memberId === m.id)
+          .sort((a, b) => a.startDate.localeCompare(b.startDate));
+
+        return (
+          <div key={m.id} className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="flex items-center gap-3 px-4 py-3 bg-muted/40 border-b border-border">
+              <div className="h-8 w-8 rounded-full flex items-center justify-center text-xs font-semibold bg-primary/10 text-primary">
+                {getInitials(m.name)}
+              </div>
+              <div className="min-w-0">
+                <p className="font-semibold text-sm truncate">{m.name}</p>
+                <p className="text-xs text-muted-foreground capitalize">{m.role}</p>
+              </div>
+            </div>
+
+            <div className="p-4 grid gap-4 sm:grid-cols-2">
+              {/* Weekly availability */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                    <CalendarDays className="h-3.5 w-3.5" /> Weekly availability
+                  </p>
+                  <Button variant="ghost" size="sm" className="h-7 px-2 gap-1 text-xs" onClick={() => onAddBlock(m)}>
+                    <Plus className="h-3.5 w-3.5" /> Add
+                  </Button>
+                </div>
+                {blocks.length === 0 ? (
+                  <p className="text-xs text-muted-foreground italic">No recurring availability yet.</p>
+                ) : (
+                  <ul className="space-y-1">
+                    {blocks.map((b) => (
+                      <li key={b.id} className="group flex items-center justify-between gap-2 rounded-md border border-border px-2.5 py-1.5 text-sm">
+                        <span>
+                          <span className="font-medium">{WEEKDAY_LABELS[b.weekday]}</span>
+                          <span className="text-muted-foreground"> · {formatTime(b.startTime)}–{formatTime(b.endTime)}</span>
+                        </span>
+                        <button
+                          onClick={() => onDeleteBlock(b.id)}
+                          className="shrink-0 text-muted-foreground/50 hover:text-red-600 transition-colors"
+                          aria-label="Remove availability"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              {/* Time off */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                    <CalendarOff className="h-3.5 w-3.5" /> Time off
+                  </p>
+                  <Button variant="ghost" size="sm" className="h-7 px-2 gap-1 text-xs" onClick={() => onAddException(m)}>
+                    <Plus className="h-3.5 w-3.5" /> Add
+                  </Button>
+                </div>
+                {ex.length === 0 ? (
+                  <p className="text-xs text-muted-foreground italic">No time off scheduled.</p>
+                ) : (
+                  <ul className="space-y-1">
+                    {ex.map((e) => (
+                      <li key={e.id} className="group flex items-center justify-between gap-2 rounded-md border border-border px-2.5 py-1.5 text-sm">
+                        <span className="min-w-0">
+                          <span className="font-medium">
+                            {formatDate(e.startDate)}{e.endDate !== e.startDate ? ` – ${formatDate(e.endDate)}` : ""}
+                          </span>
+                          {e.reason && <span className="text-muted-foreground truncate"> · {e.reason}</span>}
+                        </span>
+                        <button
+                          onClick={() => onDeleteException(e.id)}
+                          className="shrink-0 text-muted-foreground/50 hover:text-red-600 transition-colors"
+                          aria-label="Remove time off"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── Stage Advance Panel ───────────────────────────────────────────────────────
 
 interface AdvancePanelProps {
   interview: Interview;
+  availability: AvailabilityBlock[];
+  exceptions: AvailabilityException[];
+  interviews: Interview[];
   onSave: (updates: Partial<Interview> & { stage: InterviewStage }) => void;
   onClose: () => void;
   onEdit: () => void;
 }
 
-function StageAdvancePanel({ interview, onSave, onClose, onEdit }: AdvancePanelProps) {
+function StageAdvancePanel({
+  interview, availability, exceptions, interviews, onSave, onClose, onEdit,
+}: AdvancePanelProps) {
   const derived = deriveStage(interview);
   const name    = interview.memberName;
   const backToScheduleStage: InterviewStage = interview.requiresBishop ? "schedule_bishop" : "schedule_any";
 
   // Scheduling form state
-  const [interviewer,   setInterviewer]   = useState(
-    interview.interviewer ?? (interview.requiresBishop ? BISHOP?.name ?? "" : "")
-  );
-  const [scheduledDate, setScheduledDate] = useState(interview.scheduledDate ?? "");
-  const [scheduledTime, setScheduledTime] = useState(interview.scheduledTime ?? "");
+  const [duration, setDuration] = useState(interview.durationMins ?? durationForType(interview.type));
+  const [pick, setPick] = useState<{ date?: string; time?: string; interviewer?: string }>({
+    date: interview.scheduledDate,
+    time: interview.scheduledTime,
+    interviewer: interview.interviewer,
+  });
 
   // ── Needs scheduling ──────────────────────────────────────────────────────
   if (derived === "schedule_any" || derived === "schedule_bishop") {
     const mustBeBishop = derived === "schedule_bishop";
     return (
-      <div className="border-t pt-4 space-y-3">
-        <p className="text-sm font-semibold">Schedule Interview</p>
-        <p className="text-sm text-muted-foreground">
-          Set a time for <strong>{name}</strong>&apos;s {INTERVIEW_TYPE_LABELS[interview.type].toLowerCase()} interview
-          {mustBeBishop ? " with the bishop" : ""}.
-        </p>
+      <div className="border-t pt-4 space-y-4">
+        <div>
+          <p className="text-sm font-semibold">Schedule Interview</p>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            Pick an open slot for <strong>{name}</strong>&apos;s {INTERVIEW_TYPE_LABELS[interview.type].toLowerCase()} interview
+            {mustBeBishop ? " with the bishop" : ""}.
+          </p>
+        </div>
 
         <div className="space-y-1.5">
-          <Label>Interviewer</Label>
-          {mustBeBishop ? (
-            <div className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
-              <Crown className="h-4 w-4 text-orange-500" />
-              {BISHOP?.name ?? "Bishop"}
-              <span className="text-xs text-muted-foreground">(required)</span>
-            </div>
-          ) : (
-            <Select value={interviewer || "unassigned"} onValueChange={(v) => setInterviewer(v === "unassigned" ? "" : v)}>
-              <SelectTrigger><SelectValue placeholder="Any bishopric member" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="unassigned">Any bishopric member</SelectItem>
-                {INTERVIEWERS.map((m) => (
-                  <SelectItem key={m.id} value={m.name}>
-                    {m.name} <span className="text-muted-foreground capitalize">({m.role})</span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
+          <Label>Length</Label>
+          <DurationPicker value={duration} onChange={setDuration} />
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="schedDate">Date</Label>
-            <Input id="schedDate" type="date" value={scheduledDate} onChange={(e) => setScheduledDate(e.target.value)} />
+        <SlotPicker
+          availability={availability}
+          exceptions={exceptions}
+          interviews={interviews}
+          durationMins={duration}
+          restrictToMember={mustBeBishop ? BISHOP?.name : undefined}
+          allowedMembers={INTERVIEWERS}
+          value={pick}
+          onChange={setPick}
+          ignoreInterviewId={interview.id}
+        />
+
+        {pick.date && pick.time && (
+          <div className="rounded-lg border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/60 p-3 text-xs text-blue-800 dark:text-blue-200">
+            Booking <strong>{formatDate(pick.date)}</strong> at <strong>{formatTime(pick.time)}</strong>
+            {pick.interviewer ? <> with <strong>{pick.interviewer}</strong></> : null} ({duration} min).
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="schedTime">Time</Label>
-            <Input id="schedTime" type="time" value={scheduledTime} onChange={(e) => setScheduledTime(e.target.value)} />
-          </div>
-        </div>
+        )}
 
         <div className="flex justify-end gap-2 pt-1">
           <Button variant="ghost" onClick={onClose}>Not Yet</Button>
           <Button
-            disabled={!scheduledDate}
+            disabled={!pick.date || !pick.time || !pick.interviewer}
             onClick={() => onSave({
               stage:         "scheduled",
-              interviewer:   mustBeBishop ? BISHOP?.name : (interviewer || undefined),
-              scheduledDate,
-              scheduledTime: scheduledTime || undefined,
+              interviewer:   pick.interviewer,
+              scheduledDate: pick.date,
+              scheduledTime: pick.time,
+              durationMins:  duration,
             })}
           >
-            {scheduledDate ? "Schedule" : "Pick a date"}
+            {pick.date && pick.time ? "Schedule" : "Pick a slot"}
           </Button>
         </div>
       </div>
@@ -492,24 +792,37 @@ function StageAdvancePanel({ interview, onSave, onClose, onEdit }: AdvancePanelP
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
+type PageView = "board" | "availability";
+
 const EMPTY_FORM = {
   memberName: "",
   type: "temple_recommend" as InterviewType,
   requiresBishop: false,
+  durationMins: durationForType("temple_recommend"),
   interviewer: "",
   scheduledDate: "",
   scheduledTime: "",
   notes: "",
 };
 
+const EMPTY_BLOCK = { open: false, member: null as BishopricMember | null, weekday: 2, startTime: "18:00", endTime: "19:00" };
+const EMPTY_EXCEPTION = { open: false, member: null as BishopricMember | null, startDate: "", endDate: "", reason: "" };
+
 export default function InterviewsPage() {
   const { user } = useAuth();
-  const [interviews, setInterviews] = useState<Interview[]>([...MOCK_INTERVIEWS]);
+  const [interviews,   setInterviews]   = useState<Interview[]>([...MOCK_INTERVIEWS]);
+  const [availability, setAvailability] = useState<AvailabilityBlock[]>([...MOCK_AVAILABILITY]);
+  const [exceptions,   setExceptions]   = useState<AvailabilityException[]>([...MOCK_AVAILABILITY_EXCEPTIONS]);
+
+  const [view,       setView]       = useState<PageView>("board");
   const [selected,   setSelected]   = useState<Interview | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing,    setEditing]    = useState<Interview | null>(null);
   const [form,       setForm]       = useState(EMPTY_FORM);
   const [saving,     setSaving]     = useState(false);
+
+  const [blockForm,     setBlockForm]     = useState(EMPTY_BLOCK);
+  const [exceptionForm, setExceptionForm] = useState(EMPTY_EXCEPTION);
 
   // ── Derived counts ─────────────────────────────────────────────────────────
   const needsScheduling = interviews.filter(
@@ -518,7 +831,7 @@ export default function InterviewsPage() {
   const upcoming  = interviews.filter((i) => deriveStage(i) === "scheduled").length;
   const toReview  = interviews.filter((i) => deriveStage(i) === "date_passed").length;
 
-  // ── Handlers ─────────────────────────────────────────────────────────────────
+  // ── Interview handlers ─────────────────────────────────────────────────────
 
   function patch(id: string, updates: Partial<Interview>) {
     const now = new Date().toISOString();
@@ -554,6 +867,7 @@ export default function InterviewsPage() {
       memberName:     i.memberName,
       type:           i.type,
       requiresBishop: i.requiresBishop ?? false,
+      durationMins:   i.durationMins ?? durationForType(i.type),
       interviewer:    i.interviewer ?? "",
       scheduledDate:  i.scheduledDate ?? "",
       scheduledTime:  i.scheduledTime ?? "",
@@ -573,17 +887,15 @@ export default function InterviewsPage() {
     const baseStage: InterviewStage = form.scheduledDate
       ? "scheduled"
       : form.requiresBishop ? "schedule_bishop" : "schedule_any";
-    // Preserve a completed interview's stage when editing unless it's being rescheduled.
     const stage: InterviewStage =
       editing?.stage === "completed" && !form.scheduledDate ? "completed" : baseStage;
-    const interviewer =
-      form.requiresBishop && form.scheduledDate ? (BISHOP?.name ?? form.interviewer) : form.interviewer;
 
     const fields = {
       memberName:     form.memberName.trim(),
       type:           form.type,
       requiresBishop: form.requiresBishop,
-      interviewer:    interviewer || undefined,
+      durationMins:   form.durationMins,
+      interviewer:    form.interviewer || undefined,
       scheduledDate:  form.scheduledDate || undefined,
       scheduledTime:  form.scheduledTime || undefined,
       notes:          form.notes.trim() || undefined,
@@ -605,6 +917,49 @@ export default function InterviewsPage() {
     setDialogOpen(false);
     setSaving(false);
   }
+
+  // ── Availability handlers ──────────────────────────────────────────────────
+
+  function saveBlock() {
+    if (!blockForm.member || blockForm.startTime >= blockForm.endTime) return;
+    const m = blockForm.member;
+    setAvailability((prev) => [
+      ...prev,
+      {
+        id: `av-${Date.now()}`,
+        memberId: m.id,
+        memberName: m.name,
+        weekday: blockForm.weekday,
+        startTime: blockForm.startTime,
+        endTime: blockForm.endTime,
+      },
+    ]);
+    setBlockForm(EMPTY_BLOCK);
+  }
+
+  function saveException() {
+    if (!exceptionForm.member || !exceptionForm.startDate) return;
+    const m = exceptionForm.member;
+    const endDate = exceptionForm.endDate || exceptionForm.startDate;
+    if (endDate < exceptionForm.startDate) return;
+    setExceptions((prev) => [
+      ...prev,
+      {
+        id: `ax-${Date.now()}`,
+        memberId: m.id,
+        memberName: m.name,
+        startDate: exceptionForm.startDate,
+        endDate,
+        reason: exceptionForm.reason.trim() || undefined,
+      },
+    ]);
+    setExceptionForm(EMPTY_EXCEPTION);
+  }
+
+  const TAB_CONFIG: { view: PageView; label: string; count?: number }[] = [
+    { view: "board",        label: "Board",        count: needsScheduling + toReview },
+    { view: "availability", label: "Availability", count: availability.length },
+  ];
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -631,7 +986,7 @@ export default function InterviewsPage() {
       </div>
 
       {/* Date-passed review banner */}
-      {toReview > 0 && (
+      {toReview > 0 && view === "board" && (
         <div className="rounded-xl border border-purple-200 bg-purple-50 dark:border-purple-800 dark:bg-purple-950/60 p-3 flex items-center gap-2">
           <AlertTriangle className="h-4 w-4 text-purple-600 dark:text-purple-400 shrink-0" />
           <p className="text-sm text-purple-800 dark:text-purple-200">
@@ -640,8 +995,47 @@ export default function InterviewsPage() {
         </div>
       )}
 
-      {/* Kanban board */}
-      <KanbanView interviews={interviews} onSelect={setSelected} onMove={handleMove} />
+      {/* View tabs */}
+      <div className="flex gap-1 border-b border-border">
+        {TAB_CONFIG.map(({ view: v, label, count }) => (
+          <button
+            key={v}
+            onClick={() => setView(v)}
+            className={cn(
+              "flex items-center gap-1.5 px-4 py-2 text-sm font-medium transition-colors rounded-t-lg",
+              view === v
+                ? "bg-background border border-b-background border-border text-foreground -mb-px"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            {label}
+            {count != null && count > 0 && (
+              <span className={cn(
+                "text-[10px] font-bold px-1.5 rounded-full tabular-nums",
+                view === v ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"
+              )}>
+                {count}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Views ── */}
+      {view === "board" && (
+        <KanbanView interviews={interviews} onSelect={setSelected} onMove={handleMove} />
+      )}
+
+      {view === "availability" && (
+        <AvailabilityView
+          availability={availability}
+          exceptions={exceptions}
+          onAddBlock={(m) => setBlockForm({ ...EMPTY_BLOCK, open: true, member: m })}
+          onDeleteBlock={(id) => setAvailability((prev) => prev.filter((b) => b.id !== id))}
+          onAddException={(m) => setExceptionForm({ ...EMPTY_EXCEPTION, open: true, member: m })}
+          onDeleteException={(id) => setExceptions((prev) => prev.filter((e) => e.id !== id))}
+        />
+      )}
 
       {/* ── Detail dialog ── */}
       <Dialog open={!!selected} onOpenChange={(open) => !open && setSelected(null)}>
@@ -691,6 +1085,9 @@ export default function InterviewsPage() {
 
                 <StageAdvancePanel
                   interview={selected}
+                  availability={availability}
+                  exceptions={exceptions}
+                  interviews={interviews}
                   onSave={handleAdvance}
                   onClose={() => setSelected(null)}
                   onEdit={() => openEdit(selected)}
@@ -721,11 +1118,21 @@ export default function InterviewsPage() {
 
             <div className="space-y-1.5">
               <Label>Type</Label>
-              <Select value={form.type} onValueChange={(v) => setForm((f) => ({ ...f, type: v as InterviewType }))}>
+              <Select
+                value={form.type}
+                onValueChange={(v) => setForm((f) => ({
+                  ...f,
+                  type: v as InterviewType,
+                  durationMins: durationForType(v as InterviewType),
+                }))}
+              >
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {TYPES.map((t) => (
-                    <SelectItem key={t} value={t}>{INTERVIEW_TYPE_LABELS[t]}</SelectItem>
+                    <SelectItem key={t} value={t}>
+                      {INTERVIEW_TYPE_LABELS[t]}
+                      <span className="text-muted-foreground"> · {INTERVIEW_DURATION_MINS[t]} min</span>
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -757,38 +1164,26 @@ export default function InterviewsPage() {
               </div>
             </div>
 
-            <div className="rounded-lg border border-dashed border-border p-3 space-y-3">
+            <div className="space-y-1.5">
+              <Label>Length</Label>
+              <DurationPicker value={form.durationMins} onChange={(n) => setForm((f) => ({ ...f, durationMins: n }))} />
+            </div>
+
+            <div className="rounded-lg border border-dashed border-border p-3 space-y-2">
               <p className="text-xs text-muted-foreground">
-                Optional — fill in a date now to schedule it straight away, or leave blank to schedule later.
+                Optional — book an open slot now, or leave blank to schedule later from the board.
               </p>
-              <div className="space-y-1.5">
-                <Label>Interviewer</Label>
-                {form.requiresBishop ? (
-                  <div className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
-                    <Crown className="h-4 w-4 text-orange-500" /> {BISHOP?.name ?? "Bishop"}
-                  </div>
-                ) : (
-                  <Select value={form.interviewer || "unassigned"} onValueChange={(v) => setForm((f) => ({ ...f, interviewer: v === "unassigned" ? "" : v }))}>
-                    <SelectTrigger><SelectValue placeholder="Any bishopric member" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="unassigned">Any bishopric member</SelectItem>
-                      {INTERVIEWERS.map((m) => (
-                        <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label htmlFor="newDate">Date</Label>
-                  <Input id="newDate" type="date" value={form.scheduledDate} onChange={(e) => setForm((f) => ({ ...f, scheduledDate: e.target.value }))} />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="newTime">Time</Label>
-                  <Input id="newTime" type="time" value={form.scheduledTime} onChange={(e) => setForm((f) => ({ ...f, scheduledTime: e.target.value }))} />
-                </div>
-              </div>
+              <SlotPicker
+                availability={availability}
+                exceptions={exceptions}
+                interviews={interviews}
+                durationMins={form.durationMins}
+                restrictToMember={form.requiresBishop ? BISHOP?.name : undefined}
+                allowedMembers={INTERVIEWERS}
+                value={{ date: form.scheduledDate, time: form.scheduledTime, interviewer: form.interviewer }}
+                onChange={(v) => setForm((f) => ({ ...f, scheduledDate: v.date, scheduledTime: v.time, interviewer: v.interviewer }))}
+                ignoreInterviewId={editing?.id}
+              />
             </div>
 
             <div className="space-y-1.5">
@@ -801,6 +1196,80 @@ export default function InterviewsPage() {
             <Button onClick={handleSave} disabled={saving || !form.memberName.trim()}>
               {saving ? "Saving…" : editing ? "Save Changes" : "Create Interview"}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Add availability dialog ── */}
+      <Dialog open={blockForm.open} onOpenChange={(open) => !open && setBlockForm(EMPTY_BLOCK)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add availability — {blockForm.member?.name}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label>Day of week</Label>
+              <Select
+                value={String(blockForm.weekday)}
+                onValueChange={(v) => setBlockForm((f) => ({ ...f, weekday: Number(v) }))}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {WEEKDAY_LABELS.map((label, idx) => (
+                    <SelectItem key={idx} value={String(idx)}>{label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="blkStart">From</Label>
+                <Input id="blkStart" type="time" value={blockForm.startTime} onChange={(e) => setBlockForm((f) => ({ ...f, startTime: e.target.value }))} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="blkEnd">To</Label>
+                <Input id="blkEnd" type="time" value={blockForm.endTime} onChange={(e) => setBlockForm((f) => ({ ...f, endTime: e.target.value }))} />
+              </div>
+            </div>
+            {blockForm.startTime >= blockForm.endTime && (
+              <p className="text-xs text-red-600 dark:text-red-400">End time must be after the start time.</p>
+            )}
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setBlockForm(EMPTY_BLOCK)}>Cancel</Button>
+            <Button onClick={saveBlock} disabled={blockForm.startTime >= blockForm.endTime}>Add</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Add time-off dialog ── */}
+      <Dialog open={exceptionForm.open} onOpenChange={(open) => !open && setExceptionForm(EMPTY_EXCEPTION)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add time off — {exceptionForm.member?.name}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-xs text-muted-foreground">
+              Blocks all availability in this date range (e.g. out of town). Leave the end date blank for a single day.
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="exStart">From</Label>
+                <Input id="exStart" type="date" value={exceptionForm.startDate} onChange={(e) => setExceptionForm((f) => ({ ...f, startDate: e.target.value }))} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="exEnd">To</Label>
+                <Input id="exEnd" type="date" value={exceptionForm.endDate} onChange={(e) => setExceptionForm((f) => ({ ...f, endDate: e.target.value }))} />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="exReason">Reason</Label>
+              <Input id="exReason" value={exceptionForm.reason} onChange={(e) => setExceptionForm((f) => ({ ...f, reason: e.target.value }))} placeholder="e.g. Out of town" />
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setExceptionForm(EMPTY_EXCEPTION)}>Cancel</Button>
+            <Button onClick={saveException} disabled={!exceptionForm.startDate}>Add</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

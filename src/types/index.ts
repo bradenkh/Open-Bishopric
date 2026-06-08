@@ -368,6 +368,8 @@ export interface Interview {
   scheduledDate?: string;
   /** 24-hour time string (HH:MM) — present once scheduled. */
   scheduledTime?: string;
+  /** Length of the appointment in minutes (defaults to the type's length). */
+  durationMins?: number;
   notes?: string;
   createdBy: string;
   createdAt: string;
@@ -392,6 +394,53 @@ export const INTERVIEW_STAGE_COLORS: Record<InterviewStage, string> = {
   date_passed:     "bg-purple-100 text-purple-800 dark:bg-purple-900/60 dark:text-purple-200",
   completed:       "bg-green-100 text-green-800 dark:bg-green-900/60 dark:text-green-200",
 };
+
+/** Default appointment length per interview type, in minutes. */
+export const INTERVIEW_DURATION_MINS: Record<InterviewType, number> = {
+  temple_recommend:       15,
+  temple_recommend_youth: 10,
+  calling:                10,
+  ministering:            10,
+  tithing_settlement:     10,
+  youth:                  15,
+  worthiness:             30,
+  other:                  15,
+};
+
+// ── Interview availability ─────────────────────────────────────────────────────
+
+export const WEEKDAY_LABELS = [
+  "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
+] as const;
+
+/**
+ * A recurring weekly window when a bishopric member can hold interviews —
+ * e.g. "Bishop Anderson, Tuesdays 18:00–19:00". Sliced into bookable slots
+ * sized to each interview's length.
+ */
+export interface AvailabilityBlock {
+  id: string;
+  memberId: string;
+  memberName: string;
+  /** 0 = Sunday … 6 = Saturday. */
+  weekday: number;
+  /** 24-hour "HH:MM". */
+  startTime: string;
+  endTime: string;
+}
+
+/**
+ * A date range when a member is unavailable (out of town, etc.), overriding
+ * their recurring availability. Both endpoints inclusive (ISO YYYY-MM-DD).
+ */
+export interface AvailabilityException {
+  id: string;
+  memberId: string;
+  memberName: string;
+  startDate: string;
+  endDate: string;
+  reason?: string;
+}
 
 // ── Calling roster (full org chart) ───────────────────────────────────────────
 

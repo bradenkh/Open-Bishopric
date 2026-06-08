@@ -2,7 +2,7 @@
  * Static mock data used in place of Firebase while the backend is stripped out.
  * All IDs are deterministic strings so they survive HMR refreshes.
  */
-import type { BishopricMember, Calling, Task, Member, Meeting, Interview, Announcement, RosterEntry, RosterGroup } from "@/types";
+import type { BishopricMember, Calling, Task, Member, Meeting, Interview, Announcement, RosterEntry, RosterGroup, AvailabilityBlock, AvailabilityException } from "@/types";
 
 // ── Bishopric roster ──────────────────────────────────────────────────────────
 
@@ -532,6 +532,28 @@ export const MOCK_INTERVIEWS: Interview[] = [
     createdAt: "2026-05-15T00:00:00Z",
     updatedAt: "2026-05-15T00:00:00Z",
   },
+];
+
+// ── Interview availability ──────────────────────────────────────────────────────
+// Recurring weekly windows when each bishopric member can hold interviews.
+// 0 = Sunday … 6 = Saturday.
+
+export const MOCK_AVAILABILITY: AvailabilityBlock[] = [
+  // Bishop Anderson — Sundays after church + a couple weeknights.
+  { id: "av1", memberId: "bm1", memberName: "Bishop Anderson",  weekday: 0, startTime: "12:00", endTime: "13:30" },
+  { id: "av2", memberId: "bm1", memberName: "Bishop Anderson",  weekday: 2, startTime: "18:00", endTime: "19:30" },
+  { id: "av3", memberId: "bm1", memberName: "Bishop Anderson",  weekday: 3, startTime: "19:00", endTime: "20:00" },
+  // Counselor Hughes
+  { id: "av4", memberId: "bm2", memberName: "Counselor Hughes", weekday: 0, startTime: "12:00", endTime: "13:00" },
+  { id: "av5", memberId: "bm2", memberName: "Counselor Hughes", weekday: 4, startTime: "18:30", endTime: "20:00" },
+  // Counselor Davis
+  { id: "av6", memberId: "bm3", memberName: "Counselor Davis",  weekday: 0, startTime: "12:00", endTime: "13:00" },
+  { id: "av7", memberId: "bm3", memberName: "Counselor Davis",  weekday: 3, startTime: "19:00", endTime: "20:30" },
+];
+
+// Time-off overrides — these date ranges remove the recurring availability above.
+export const MOCK_AVAILABILITY_EXCEPTIONS: AvailabilityException[] = [
+  { id: "ax1", memberId: "bm1", memberName: "Bishop Anderson",  startDate: "2026-06-14", endDate: "2026-06-20", reason: "Out of town" },
 ];
 
 // ── Full ward roster (Chart view) ───────────────────────────────────────────────
