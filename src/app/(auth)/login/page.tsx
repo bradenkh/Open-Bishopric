@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { BishopricIcon } from "@/components/icons/bishopric-icon";
+import Image from "next/image";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -90,9 +90,14 @@ export default function LoginPage() {
     <div className="flex min-h-screen flex-col items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm space-y-8">
         <div className="flex flex-col items-center gap-3">
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
-            <BishopricIcon className="h-7 w-7 text-primary" />
-          </div>
+          <Image
+            src="/logo.png"
+            alt="Open Bishopric"
+            width={64}
+            height={64}
+            priority
+            className="h-16 w-16 rounded-2xl shadow-sm"
+          />
           <div className="text-center">
             <h1 className="text-2xl font-bold tracking-tight">Open Bishopric</h1>
             <p className="mt-1 text-sm text-muted-foreground">Sign in to your account</p>
