@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Plus, CalendarClock, Clock, User, GripVertical, CalendarPlus,
   CheckCircle2, AlertTriangle, Pencil, RotateCcw,
@@ -940,13 +940,24 @@ export default function InterviewsPage() {
 
   const [view,       setView]       = useState<PageView>("board");
   const [selected,   setSelected]   = useState<Interview | null>(null);
-  const [dialogOpen, setDialogOpen] = useState(false);
+  // Deep link from the dashboard: /interviews?new=1 opens the New dialog.
+  const [dialogOpen, setDialogOpen] = useState(() =>
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("new") != null
+  );
   const [editing,    setEditing]    = useState<Interview | null>(null);
   const [form,       setForm]       = useState(EMPTY_FORM);
   const [saving,     setSaving]     = useState(false);
 
   const [blockForm,     setBlockForm]     = useState(EMPTY_BLOCK);
   const [exceptionForm, setExceptionForm] = useState(EMPTY_EXCEPTION);
+
+  // Strip the ?new deep-link param so a refresh doesn't reopen the dialog.
+  useEffect(() => {
+    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("new") != null) {
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+  }, []);
 
   // ── Derived counts ─────────────────────────────────────────────────────────
   const needsScheduling = interviews.filter(

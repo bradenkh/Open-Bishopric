@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import {
   ClipboardList, CalendarClock, Church, Calendar, ArrowRight, MessageSquare,
+  CalendarPlus, Plus,
 } from "lucide-react";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -86,6 +87,12 @@ export default function DashboardPage() {
 
       <div className="flex flex-col gap-3 sm:flex-row">
         <Button asChild className="flex-1 sm:flex-none gap-2">
+          <Link href="/interviews?new=1">
+            <CalendarPlus className="h-4 w-4" />
+            Add Interview
+          </Link>
+        </Button>
+        <Button variant="outline" asChild className="flex-1 sm:flex-none gap-2">
           <Link href="/chat">
             <MessageSquare className="h-4 w-4" />
             Ask AI Assistant
@@ -138,13 +145,23 @@ export default function DashboardPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-3">
             <CardTitle className="text-base">Interviews</CardTitle>
-            <Link href="/interviews" className="text-xs text-primary flex items-center gap-1 hover:underline">
-              View all <ArrowRight className="h-3 w-3" />
-            </Link>
+            <div className="flex items-center gap-3">
+              <Link href="/interviews?new=1" className="text-xs text-primary flex items-center gap-1 hover:underline">
+                <Plus className="h-3 w-3" /> Add
+              </Link>
+              <Link href="/interviews" className="text-xs text-primary flex items-center gap-1 hover:underline">
+                View all <ArrowRight className="h-3 w-3" />
+              </Link>
+            </div>
           </CardHeader>
           <CardContent className="p-0">
             {upcomingInterviews.length === 0 ? (
-              <div className="px-6 py-8 text-center text-muted-foreground text-sm">No interviews</div>
+              <div className="flex flex-col items-center gap-3 px-6 py-8 text-center">
+                <p className="text-muted-foreground text-sm">No interviews</p>
+                <Button variant="outline" size="sm" asChild>
+                  <Link href="/interviews?new=1">Add an interview</Link>
+                </Button>
+              </div>
             ) : (
               <ul className="divide-y divide-border">
                 {upcomingInterviews.map((interview) => (
