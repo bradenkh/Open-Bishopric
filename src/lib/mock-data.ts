@@ -2,7 +2,7 @@
  * Static mock data used in place of Firebase while the backend is stripped out.
  * All IDs are deterministic strings so they survive HMR refreshes.
  */
-import type { BishopricMember, Calling, Task, Member, Meeting, Interview, Announcement, RosterEntry, RosterGroup } from "@/types";
+import type { BishopricMember, Calling, Task, Member, Meeting, Interview, Announcement, RosterEntry, RosterGroup, AvailabilityBlock, AvailabilityException } from "@/types";
 
 // ── Bishopric roster ──────────────────────────────────────────────────────────
 
@@ -427,7 +427,8 @@ export const MOCK_INTERVIEWS: Interview[] = [
     memberName: "David Park",
     memberId: "m05",
     type: "temple_recommend",
-    status: "scheduled",
+    stage: "scheduled",
+    requiresBishop: true,
     interviewer: "Bishop Anderson",
     scheduledDate: "2026-06-08",
     scheduledTime: "12:30",
@@ -440,7 +441,8 @@ export const MOCK_INTERVIEWS: Interview[] = [
     id: "int02",
     memberName: "Emma Wilson",
     type: "temple_recommend_youth",
-    status: "scheduled",
+    stage: "scheduled",
+    requiresBishop: false,
     interviewer: "Counselor Hughes",
     scheduledDate: "2026-06-08",
     scheduledTime: "12:45",
@@ -454,7 +456,8 @@ export const MOCK_INTERVIEWS: Interview[] = [
     memberName: "Emily Chen",
     memberId: "m10",
     type: "calling",
-    status: "needs_scheduling",
+    stage: "schedule_any",
+    requiresBishop: false,
     notes: "Approved as Elders Quorum Secretary — needs to be extended.",
     createdBy: "mock-bishop-001",
     createdAt: "2026-05-19T00:00:00Z",
@@ -465,7 +468,8 @@ export const MOCK_INTERVIEWS: Interview[] = [
     memberName: "Robert Johnson",
     memberId: "m09",
     type: "temple_recommend",
-    status: "needs_scheduling",
+    stage: "schedule_bishop",
+    requiresBishop: true,
     notes: "Recommend expires end of June.",
     createdBy: "mock-bishop-001",
     createdAt: "2026-06-01T00:00:00Z",
@@ -476,7 +480,8 @@ export const MOCK_INTERVIEWS: Interview[] = [
     memberName: "Michael Davis",
     memberId: "m11",
     type: "ministering",
-    status: "needs_scheduling",
+    stage: "schedule_any",
+    requiresBishop: false,
     notes: "Quarterly ministering interview.",
     createdBy: "mock-bishop-001",
     createdAt: "2026-06-03T00:00:00Z",
@@ -487,7 +492,8 @@ export const MOCK_INTERVIEWS: Interview[] = [
     memberName: "Sarah Mitchell",
     memberId: "m02",
     type: "calling",
-    status: "scheduled",
+    stage: "scheduled",
+    requiresBishop: false,
     interviewer: "Counselor Davis",
     scheduledDate: "2026-06-15",
     scheduledTime: "19:00",
@@ -497,11 +503,29 @@ export const MOCK_INTERVIEWS: Interview[] = [
     updatedAt: "2026-05-18T00:00:00Z",
   },
   {
+    id: "int09",
+    memberName: "Anna Martinez",
+    memberId: "m06",
+    type: "calling",
+    stage: "pending_confirmation",
+    requiresBishop: false,
+    interviewer: "Counselor Hughes",
+    scheduledDate: "2026-06-18",
+    scheduledTime: "18:30",
+    attendeeConfirmed: true,
+    interviewerConfirmed: false,
+    notes: "Primary teacher — waiting on counselor to confirm the time.",
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-06-05T00:00:00Z",
+    updatedAt: "2026-06-05T00:00:00Z",
+  },
+  {
     id: "int07",
     memberName: "Jennifer Kim",
     memberId: "m08",
     type: "temple_recommend",
-    status: "completed",
+    stage: "completed",
+    requiresBishop: true,
     interviewer: "Bishop Anderson",
     scheduledDate: "2026-05-25",
     scheduledTime: "10:00",
@@ -510,6 +534,43 @@ export const MOCK_INTERVIEWS: Interview[] = [
     createdAt: "2026-05-10T00:00:00Z",
     updatedAt: "2026-05-25T00:00:00Z",
   },
+  {
+    id: "int08",
+    memberName: "Thomas Reed",
+    memberId: "m07",
+    type: "youth",
+    stage: "scheduled",
+    requiresBishop: true,
+    interviewer: "Bishop Anderson",
+    scheduledDate: "2026-06-01",
+    scheduledTime: "18:30",
+    notes: "Semiannual youth interview.",
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-05-15T00:00:00Z",
+    updatedAt: "2026-05-15T00:00:00Z",
+  },
+];
+
+// ── Interview availability ──────────────────────────────────────────────────────
+// Recurring weekly windows when each bishopric member can hold interviews.
+// 0 = Sunday … 6 = Saturday.
+
+export const MOCK_AVAILABILITY: AvailabilityBlock[] = [
+  // Bishop Anderson — Sundays after church + a couple weeknights.
+  { id: "av1", memberId: "bm1", memberName: "Bishop Anderson",  weekday: 0, startTime: "12:00", endTime: "13:30" },
+  { id: "av2", memberId: "bm1", memberName: "Bishop Anderson",  weekday: 2, startTime: "18:00", endTime: "19:30" },
+  { id: "av3", memberId: "bm1", memberName: "Bishop Anderson",  weekday: 3, startTime: "19:00", endTime: "20:00" },
+  // Counselor Hughes
+  { id: "av4", memberId: "bm2", memberName: "Counselor Hughes", weekday: 0, startTime: "12:00", endTime: "13:00" },
+  { id: "av5", memberId: "bm2", memberName: "Counselor Hughes", weekday: 4, startTime: "18:30", endTime: "20:00" },
+  // Counselor Davis
+  { id: "av6", memberId: "bm3", memberName: "Counselor Davis",  weekday: 0, startTime: "12:00", endTime: "13:00" },
+  { id: "av7", memberId: "bm3", memberName: "Counselor Davis",  weekday: 3, startTime: "19:00", endTime: "20:30" },
+];
+
+// Time-off overrides — these date ranges remove the recurring availability above.
+export const MOCK_AVAILABILITY_EXCEPTIONS: AvailabilityException[] = [
+  { id: "ax1", memberId: "bm1", memberName: "Bishop Anderson",  startDate: "2026-06-14", endDate: "2026-06-20", reason: "Out of town" },
 ];
 
 // ── Full ward roster (Chart view) ───────────────────────────────────────────────

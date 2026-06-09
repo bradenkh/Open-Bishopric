@@ -315,20 +315,70 @@ export type InterviewType =
   | "worthiness"
   | "other";
 
-export type InterviewStatus = "needs_scheduling" | "scheduled" | "completed" | "cancelled";
+/**
+ * The pipeline an interview moves through.
+ *
+ *   schedule_any | schedule_bishop → pending_confirmation → scheduled
+ *     → date_passed → completed
+ *
+ * An interview starts in one of the two "schedule" columns — chosen when it's
+ * created — depending on whether anyone in the bishopric can conduct it or it
+ * must be the bishop. Once a slot is booked it sits in `pending_confirmation`
+ * until both the attendee and the bishopric member have confirmed, then it
+ * becomes `scheduled`. After the date passes it drops into `date_passed` so the
+ * bishopric can confirm it happened or send it back to be rescheduled.
+ */
+export type InterviewStage =
+  | "schedule_any"         // Needs scheduling — any bishopric member may conduct
+  | "schedule_bishop"      // Needs scheduling — must be with the bishop
+  | "pending_confirmation" // Slot booked — awaiting confirmation from both sides
+  | "scheduled"            // Confirmed by both; still upcoming
+  | "date_passed"          // Scheduled date has passed — confirm it happened or reschedule
+  | "completed";           // Interview held
+
+/** Ordered list used for the kanban board and progress math. */
+export const INTERVIEW_PIPELINE: InterviewStage[] = [
+  "schedule_any",
+  "schedule_bishop",
+  "pending_confirmation",
+  "scheduled",
+  "date_passed",
+  "completed",
+];
+
+export const INTERVIEW_STAGES: { stage: InterviewStage; label: string }[] = [
+  { stage: "schedule_any",         label: "Schedule" },
+  { stage: "schedule_bishop",      label: "Schedule w/ Bishop" },
+  { stage: "pending_confirmation", label: "Pending Confirmation" },
+  { stage: "scheduled",            label: "Scheduled" },
+  { stage: "date_passed",          label: "Date Passed" },
+  { stage: "completed",            label: "Completed" },
+];
 
 export interface Interview {
   id: string;
   memberName: string;
   memberId?: string;
   type: InterviewType;
-  status: InterviewStatus;
+  stage: InterviewStage;
+  /**
+   * True when this interview must be conducted by the bishop. Chosen when the
+   * interview is created (which "schedule" column it starts in) and preserved
+   * so a cancelled / rescheduled interview returns to the right column.
+   */
+  requiresBishop?: boolean;
   /** Bishopric member conducting the interview. */
   interviewer?: string;
+  /** Confirmation from the member being interviewed (pending_confirmation stage). */
+  attendeeConfirmed?: boolean;
+  /** Confirmation from the bishopric member conducting it (pending_confirmation stage). */
+  interviewerConfirmed?: boolean;
   /** ISO date string (YYYY-MM-DD) — present once scheduled. */
   scheduledDate?: string;
   /** 24-hour time string (HH:MM) — present once scheduled. */
   scheduledTime?: string;
+  /** Length of the appointment in minutes (defaults to the type's length). */
+  durationMins?: number;
   notes?: string;
   createdBy: string;
   createdAt: string;
@@ -346,12 +396,61 @@ export const INTERVIEW_TYPE_LABELS: Record<InterviewType, string> = {
   other:                  "Other",
 };
 
-export const INTERVIEW_STATUS_COLORS: Record<InterviewStatus, string> = {
-  needs_scheduling: "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200",
-  scheduled:        "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
-  completed:        "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
-  cancelled:        "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200",
+export const INTERVIEW_STAGE_COLORS: Record<InterviewStage, string> = {
+  schedule_any:         "bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200",
+  schedule_bishop:      "bg-orange-100 text-orange-800 dark:bg-orange-900/60 dark:text-orange-200",
+  pending_confirmation: "bg-sky-100 text-sky-800 dark:bg-sky-900/60 dark:text-sky-200",
+  scheduled:            "bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-200",
+  date_passed:          "bg-purple-100 text-purple-800 dark:bg-purple-900/60 dark:text-purple-200",
+  completed:            "bg-green-100 text-green-800 dark:bg-green-900/60 dark:text-green-200",
 };
+
+/** Default appointment length per interview type, in minutes. */
+export const INTERVIEW_DURATION_MINS: Record<InterviewType, number> = {
+  temple_recommend:       15,
+  temple_recommend_youth: 10,
+  calling:                10,
+  ministering:            10,
+  tithing_settlement:     10,
+  youth:                  15,
+  worthiness:             30,
+  other:                  15,
+};
+
+// ── Interview availability ─────────────────────────────────────────────────────
+
+export const WEEKDAY_LABELS = [
+  "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
+] as const;
+
+/**
+ * A recurring weekly window when a bishopric member can hold interviews —
+ * e.g. "Bishop Anderson, Tuesdays 18:00–19:00". Sliced into bookable slots
+ * sized to each interview's length.
+ */
+export interface AvailabilityBlock {
+  id: string;
+  memberId: string;
+  memberName: string;
+  /** 0 = Sunday … 6 = Saturday. */
+  weekday: number;
+  /** 24-hour "HH:MM". */
+  startTime: string;
+  endTime: string;
+}
+
+/**
+ * A date range when a member is unavailable (out of town, etc.), overriding
+ * their recurring availability. Both endpoints inclusive (ISO YYYY-MM-DD).
+ */
+export interface AvailabilityException {
+  id: string;
+  memberId: string;
+  memberName: string;
+  startDate: string;
+  endDate: string;
+  reason?: string;
+}
 
 // ── Calling roster (full org chart) ───────────────────────────────────────────
 

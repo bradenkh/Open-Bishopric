@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import {
   ClipboardList, CalendarClock, Church, Calendar, ArrowRight, MessageSquare,
+  CalendarPlus, Plus,
 } from "lucide-react";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
 import { MOCK_CALLINGS, MOCK_MEETINGS, MOCK_INTERVIEWS } from "@/lib/mock-data";
-import { INTERVIEW_STATUS_COLORS, INTERVIEW_TYPE_LABELS, MEETING_TYPE_LABELS } from "@/types";
+import { INTERVIEW_STAGE_COLORS, INTERVIEW_STAGES, INTERVIEW_TYPE_LABELS, MEETING_TYPE_LABELS } from "@/types";
 import { formatDate } from "@/lib/utils";
 
 export default function DashboardPage() {
@@ -19,8 +20,8 @@ export default function DashboardPage() {
   // Compute stats from mock data (memo so they don't recalculate on every render)
   const stats = useMemo(() => {
     const upcomingMeetings   = MOCK_MEETINGS.filter((m) => m.status === "upcoming").length;
-    const needsScheduling    = MOCK_INTERVIEWS.filter((i) => i.status === "needs_scheduling").length;
-    const upcomingInterviews = MOCK_INTERVIEWS.filter((i) => i.status === "scheduled").length;
+    const needsScheduling    = MOCK_INTERVIEWS.filter((i) => i.stage === "schedule_any" || i.stage === "schedule_bishop").length;
+    const upcomingInterviews = MOCK_INTERVIEWS.filter((i) => i.stage === "scheduled" || i.stage === "pending_confirmation").length;
     const callingsInProgress = MOCK_CALLINGS.filter((c) => c.stage !== "recorded" && c.stage !== "vacant").length;
     const vacantCallings     = MOCK_CALLINGS.filter((c) => c.stage === "vacant").length;
     return { upcomingMeetings, needsScheduling, upcomingInterviews, callingsInProgress, vacantCallings };
@@ -32,14 +33,18 @@ export default function DashboardPage() {
     .slice(0, 4);
 
   const upcomingInterviews = MOCK_INTERVIEWS
-    .filter((i) => i.status === "needs_scheduling" || i.status === "scheduled")
+    .filter((i) => i.stage === "schedule_any" || i.stage === "schedule_bishop" || i.stage === "pending_confirmation" || i.stage === "scheduled")
     .sort((a, b) => {
-      const rank = (s: string) => (s === "needs_scheduling" ? 0 : 1);
-      if (rank(a.status) !== rank(b.status)) return rank(a.status) - rank(b.status);
+      // Unscheduled interviews surface first, then upcoming ones by date.
+      const rank = (s: string) => (s === "schedule_any" || s === "schedule_bishop" ? 0 : 1);
+      if (rank(a.stage) !== rank(b.stage)) return rank(a.stage) - rank(b.stage);
       return new Date(`${a.scheduledDate ?? "9999"}T${a.scheduledTime ?? "00:00"}`).getTime()
            - new Date(`${b.scheduledDate ?? "9999"}T${b.scheduledTime ?? "00:00"}`).getTime();
     })
     .slice(0, 5);
+
+  const interviewStageLabel = (s: string) =>
+    INTERVIEW_STAGES.find((x) => x.stage === s)?.label ?? s.replace("_", " ");
 
   const statCards = [
     { label: "Upcoming Meetings",   value: stats.upcomingMeetings,   icon: ClipboardList,  href: "/agendas",    color: "text-blue-600",   badge: undefined },
@@ -82,6 +87,12 @@ export default function DashboardPage() {
 
       <div className="flex flex-col gap-3 sm:flex-row">
         <Button asChild className="flex-1 sm:flex-none gap-2">
+          <Link href="/interviews?new=1">
+            <CalendarPlus className="h-4 w-4" />
+            Add Interview
+          </Link>
+        </Button>
+        <Button variant="outline" asChild className="flex-1 sm:flex-none gap-2">
           <Link href="/chat">
             <MessageSquare className="h-4 w-4" />
             Ask AI Assistant
@@ -134,13 +145,23 @@ export default function DashboardPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-3">
             <CardTitle className="text-base">Interviews</CardTitle>
-            <Link href="/interviews" className="text-xs text-primary flex items-center gap-1 hover:underline">
-              View all <ArrowRight className="h-3 w-3" />
-            </Link>
+            <div className="flex items-center gap-3">
+              <Link href="/interviews?new=1" className="text-xs text-primary flex items-center gap-1 hover:underline">
+                <Plus className="h-3 w-3" /> Add
+              </Link>
+              <Link href="/interviews" className="text-xs text-primary flex items-center gap-1 hover:underline">
+                View all <ArrowRight className="h-3 w-3" />
+              </Link>
+            </div>
           </CardHeader>
           <CardContent className="p-0">
             {upcomingInterviews.length === 0 ? (
-              <div className="px-6 py-8 text-center text-muted-foreground text-sm">No interviews</div>
+              <div className="flex flex-col items-center gap-3 px-6 py-8 text-center">
+                <p className="text-muted-foreground text-sm">No interviews</p>
+                <Button variant="outline" size="sm" asChild>
+                  <Link href="/interviews?new=1">Add an interview</Link>
+                </Button>
+              </div>
             ) : (
               <ul className="divide-y divide-border">
                 {upcomingInterviews.map((interview) => (
@@ -152,8 +173,8 @@ export default function DashboardPage() {
                         {interview.scheduledDate ? ` · ${formatDate(interview.scheduledDate)}` : ""}
                       </p>
                     </div>
-                    <span className={`text-xs px-2 py-0.5 rounded-full shrink-0 capitalize ${INTERVIEW_STATUS_COLORS[interview.status]}`}>
-                      {interview.status.replace("_", " ")}
+                    <span className={`text-xs px-2 py-0.5 rounded-full shrink-0 ${INTERVIEW_STAGE_COLORS[interview.stage]}`}>
+                      {interviewStageLabel(interview.stage)}
                     </span>
                   </li>
                 ))}
