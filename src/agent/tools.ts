@@ -1,6 +1,16 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { adminDb } from "@/lib/firebase-admin";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { fromRow } from "@/lib/db/mappers";
+import type { Calling, Member, Task } from "@/types";
+
+// The agent runs server-side after the Route Handler has verified the session,
+// so it uses the service-role client for data access. Created lazily so the
+// build doesn't require the service-role key to be present.
+let _db: ReturnType<typeof createAdminClient> | undefined;
+function db() {
+  return (_db ??= createAdminClient());
+}
 
 export const getMembers = tool({
   description: "Search or list ward members by name. Use to find member information.",
@@ -9,19 +19,13 @@ export const getMembers = tool({
     limitCount: z.number().optional().default(10),
   }),
   execute: async ({ search, limitCount = 10 }) => {
-    const snap = await adminDb
-      .collection("members")
-      .orderBy("lastName")
-      .limit(limitCount)
-      .get();
-    const members = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    if (!search) return members;
-    const q = search.toLowerCase();
-    return members.filter((m) => {
-      const first = String((m as Record<string, unknown>).firstName ?? "").toLowerCase();
-      const last = String((m as Record<string, unknown>).lastName ?? "").toLowerCase();
-      return first.includes(q) || last.includes(q) || `${first} ${last}`.includes(q);
-    });
+    let query = db().from("members").select("*").order("last_name").limit(limitCount);
+    if (search) {
+      query = query.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%`);
+    }
+    const { data, error } = await query;
+    if (error) throw error;
+    return (data ?? []).map((r) => fromRow<Member>(r));
   },
 });
 
@@ -39,24 +43,12 @@ export const getTasks = tool({
     limitCount: z.number().optional().default(20),
   }),
   execute: async ({ status, type, limitCount = 20 }) => {
-    let ref = adminDb.collection("tasks").orderBy("createdAt", "desc").limit(limitCount);
-
-    if (status && status !== "all") {
-      ref = adminDb
-        .collection("tasks")
-        .where("status", "==", status)
-        .orderBy("createdAt", "desc")
-        .limit(limitCount);
-    }
-
-    const snap = await ref.get();
-    let tasks = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-
-    if (type && type !== "all") {
-      tasks = tasks.filter((t) => (t as Record<string, unknown>).type === type);
-    }
-
-    return tasks;
+    let query = db().from("tasks").select("*").order("created_at", { ascending: false }).limit(limitCount);
+    if (status && status !== "all") query = query.eq("status", status);
+    if (type && type !== "all") query = query.eq("type", type);
+    const { data, error } = await query;
+    if (error) throw error;
+    return (data ?? []).map((r) => fromRow<Task>(r));
   },
 });
 
@@ -70,19 +62,22 @@ export const createTask = tool({
     dueDate: z.string().optional().describe("ISO date string for the due date"),
   }),
   execute: async ({ title, description, type, memberName, dueDate }) => {
-    const now = new Date().toISOString();
-    const ref = await adminDb.collection("tasks").add({
-      title,
-      description: description ?? "",
-      type,
-      status: "active",
-      memberName: memberName ?? "",
-      dueDate: dueDate ?? "",
-      createdBy: "ai-agent",
-      createdAt: now,
-      updatedAt: now,
-    });
-    return { id: ref.id, title, type, status: "active" };
+    const { data, error } = await db()
+      .from("tasks")
+      .insert({
+        id: crypto.randomUUID(),
+        title,
+        description: description ?? null,
+        type,
+        status: "active",
+        member_name: memberName ?? null,
+        due_date: dueDate ?? null,
+        created_by: "ai-agent",
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    return fromRow<Task>(data);
   },
 });
 
@@ -93,10 +88,8 @@ export const updateTaskStatus = tool({
     status: z.enum(["active", "in_progress", "waiting", "completed", "cancelled"]),
   }),
   execute: async ({ taskId, status }) => {
-    await adminDb.collection("tasks").doc(taskId).update({
-      status,
-      updatedAt: new Date().toISOString(),
-    });
+    const { error } = await db().from("tasks").update({ status }).eq("id", taskId);
+    if (error) throw error;
     return { success: true, taskId, status };
   },
 });
@@ -111,18 +104,11 @@ export const getCallings = tool({
     limitCount: z.number().optional().default(20),
   }),
   execute: async ({ stage, limitCount = 20 }) => {
-    let ref = adminDb.collection("callings").orderBy("createdAt", "desc").limit(limitCount);
-
-    if (stage && stage !== "all") {
-      ref = adminDb
-        .collection("callings")
-        .where("stage", "==", stage)
-        .orderBy("createdAt", "desc")
-        .limit(limitCount);
-    }
-
-    const snap = await ref.get();
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    let query = db().from("callings").select("*").order("created_at", { ascending: false }).limit(limitCount);
+    if (stage && stage !== "all") query = query.eq("stage", stage);
+    const { data, error } = await query;
+    if (error) throw error;
+    return (data ?? []).map((r) => fromRow<Calling>(r));
   },
 });
 

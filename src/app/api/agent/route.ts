@@ -1,8 +1,7 @@
 import { streamText, convertToModelMessages, stepCountIs } from "ai";
 import { getAIModel } from "@/lib/ai";
 import { agentTools } from "@/agent/tools";
-import { cookies } from "next/headers";
-import { adminAuth } from "@/lib/firebase-admin";
+import { createClient } from "@/lib/supabase/server";
 
 const SYSTEM_PROMPT = `You are a helpful AI assistant for an LDS ward bishopric. You help the bishop, counselors, clerk, and executive secretary manage their responsibilities efficiently.
 
@@ -13,16 +12,12 @@ When creating tasks or working with data, confirm what you did. When you don't k
 Current date: ${new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}`;
 
 export async function POST(request: Request) {
-  const cookieStore = await cookies();
-  const session = cookieStore.get("__session");
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  if (!session) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  try {
-    await adminAuth.verifySessionCookie(session.value, true);
-  } catch {
+  if (!user) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 

@@ -1,28 +1,26 @@
-import { NextRequest, NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
+import { updateSession } from "@/lib/supabase/proxy";
 
-const publicPaths = ["/login", "/"];
-
-export function proxy(request: NextRequest) {
-  const { pathname } = request.nextUrl;
-
-  if (publicPaths.some((p) => pathname.startsWith(p))) {
-    return NextResponse.next();
-  }
-
-  if (pathname.startsWith("/api/auth")) {
-    return NextResponse.next();
-  }
-
-  const session = request.cookies.get("__session");
-  if (!session) {
-    const loginUrl = new URL("/login", request.url);
-    loginUrl.searchParams.set("from", pathname);
-    return NextResponse.redirect(loginUrl);
-  }
-
-  return NextResponse.next();
+/**
+ * Next.js Proxy (formerly Middleware). Runs on every matched request to
+ * refresh the Supabase session and redirect unauthenticated users to /login.
+ *
+ * This is an optimistic gate only — every Server Action, Route Handler, and
+ * data query also verifies the session (RLS + the data layer), per the
+ * Next.js authentication guidance.
+ */
+export async function proxy(request: NextRequest) {
+  return updateSession(request);
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|manifest.json|icons|.*\\.png$).*)"],
+  matcher: [
+    /*
+     * Match all request paths except:
+     * - _next/static, _next/image (static assets)
+     * - favicon.ico, manifest.json, sw.js, icons (PWA assets)
+     * - image files
+     */
+    "/((?!_next/static|_next/image|favicon.ico|manifest.json|sw.js|icons|.*\\.(?:png|svg|ico|webmanifest)$).*)",
+  ],
 };

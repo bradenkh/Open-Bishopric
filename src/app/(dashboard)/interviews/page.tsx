@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   Plus, CalendarClock, Clock, User, GripVertical, CalendarPlus,
   CheckCircle2, AlertTriangle, Pencil, RotateCcw,
@@ -18,6 +18,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { useAuth } from "@/contexts/AuthContext";
+import { useData, newId } from "@/contexts/DataContext";
 import type {
   Interview, InterviewType, InterviewStage,
   AvailabilityBlock, AvailabilityException, BishopricMember,
@@ -26,9 +27,6 @@ import {
   INTERVIEW_TYPE_LABELS, INTERVIEW_STAGES, INTERVIEW_PIPELINE, INTERVIEW_STAGE_COLORS,
   INTERVIEW_DURATION_MINS, WEEKDAY_LABELS,
 } from "@/types";
-import {
-  MOCK_INTERVIEWS, MOCK_BISHOPRIC_MEMBERS, MOCK_AVAILABILITY, MOCK_AVAILABILITY_EXCEPTIONS,
-} from "@/lib/mock-data";
 import { formatDate, cn } from "@/lib/utils";
 import {
   generateSlots, groupSlotsByDate, durationForType, parseDate, type Slot,
@@ -37,10 +35,12 @@ import {
 // ── Bishopric helpers ─────────────────────────────────────────────────────────
 
 /** Members who can conduct interviews (bishop + counselors). */
-const INTERVIEWERS = MOCK_BISHOPRIC_MEMBERS.filter(
-  (m) => m.role === "bishop" || m.role === "counselor"
-);
-const BISHOP = MOCK_BISHOPRIC_MEMBERS.find((m) => m.role === "bishop");
+function deriveInterviewers(bishopric: BishopricMember[]): BishopricMember[] {
+  return bishopric.filter((m) => m.role === "bishop" || m.role === "counselor");
+}
+function deriveBishop(bishopric: BishopricMember[]): BishopricMember | undefined {
+  return bishopric.find((m) => m.role === "bishop");
+}
 
 const TYPES: InterviewType[] = [
   "temple_recommend", "temple_recommend_youth", "calling", "ministering",
@@ -564,6 +564,7 @@ function KanbanView({ interviews, onSelect, onMove }: KanbanViewProps) {
 interface AvailabilityViewProps {
   availability: AvailabilityBlock[];
   exceptions: AvailabilityException[];
+  interviewers: BishopricMember[];
   onAddBlock: (m: BishopricMember) => void;
   onDeleteBlock: (id: string) => void;
   onAddException: (m: BishopricMember) => void;
@@ -571,7 +572,7 @@ interface AvailabilityViewProps {
 }
 
 function AvailabilityView({
-  availability, exceptions, onAddBlock, onDeleteBlock, onAddException, onDeleteException,
+  availability, exceptions, interviewers, onAddBlock, onDeleteBlock, onAddException, onDeleteException,
 }: AvailabilityViewProps) {
   return (
     <div className="space-y-4">
@@ -579,7 +580,7 @@ function AvailabilityView({
         Set the weekly hours each member is free for interviews. The scheduler slices these into
         bookable slots. Add time off to block a day or week (e.g. out of town).
       </p>
-      {INTERVIEWERS.map((m) => {
+      {interviewers.map((m) => {
         const blocks = availability
           .filter((b) => b.memberId === m.id)
           .sort((a, b) => (a.weekday - b.weekday) || a.startTime.localeCompare(b.startTime));
@@ -682,13 +683,15 @@ interface AdvancePanelProps {
   availability: AvailabilityBlock[];
   exceptions: AvailabilityException[];
   interviews: Interview[];
+  interviewers: BishopricMember[];
+  bishop?: BishopricMember;
   onSave: (updates: Partial<Interview> & { stage: InterviewStage }) => void;
   onClose: () => void;
   onEdit: () => void;
 }
 
 function StageAdvancePanel({
-  interview, availability, exceptions, interviews, onSave, onClose, onEdit,
+  interview, availability, exceptions, interviews, interviewers, bishop, onSave, onClose, onEdit,
 }: AdvancePanelProps) {
   const derived = deriveStage(interview);
   const name    = interview.memberName;
@@ -728,8 +731,8 @@ function StageAdvancePanel({
           exceptions={exceptions}
           interviews={interviews}
           durationMins={duration}
-          restrictToMember={mustBeBishop ? BISHOP?.name : undefined}
-          allowedMembers={INTERVIEWERS}
+          restrictToMember={mustBeBishop ? bishop?.name : undefined}
+          allowedMembers={interviewers}
           value={pick}
           onChange={setPick}
           ignoreInterviewId={interview.id}
@@ -934,9 +937,17 @@ const EMPTY_EXCEPTION = { open: false, member: null as BishopricMember | null, s
 
 export default function InterviewsPage() {
   const { user } = useAuth();
-  const [interviews,   setInterviews]   = useState<Interview[]>([...MOCK_INTERVIEWS]);
-  const [availability, setAvailability] = useState<AvailabilityBlock[]>([...MOCK_AVAILABILITY]);
-  const [exceptions,   setExceptions]   = useState<AvailabilityException[]>([...MOCK_AVAILABILITY_EXCEPTIONS]);
+  const data = useData();
+  const interviewsCol  = data.interviews;
+  const availabilityCol = data.availability;
+  const exceptionsCol  = data.exceptions;
+  const interviews   = interviewsCol.items;
+  const availability = availabilityCol.items;
+  const exceptions   = exceptionsCol.items;
+  const bishopric    = data.bishopric;
+
+  const INTERVIEWERS = useMemo(() => deriveInterviewers(bishopric), [bishopric]);
+  const BISHOP       = useMemo(() => deriveBishop(bishopric), [bishopric]);
 
   const [view,       setView]       = useState<PageView>("board");
   const [selected,   setSelected]   = useState<Interview | null>(null);
@@ -969,9 +980,9 @@ export default function InterviewsPage() {
 
   // ── Interview handlers ─────────────────────────────────────────────────────
 
-  function patch(id: string, updates: Partial<Interview>) {
+  async function patch(id: string, updates: Partial<Interview>) {
     const now = new Date().toISOString();
-    setInterviews((prev) => prev.map((i) => (i.id === id ? { ...i, ...updates, updatedAt: now } : i)));
+    await interviewsCol.update(id, { ...updates, updatedAt: now });
   }
 
   function handleAdvance(updates: Partial<Interview> & { stage: InterviewStage }) {
@@ -1061,16 +1072,16 @@ export default function InterviewsPage() {
     };
 
     if (editing) {
-      patch(editing.id, fields);
+      await patch(editing.id, fields);
     } else {
       const newInterview: Interview = {
-        id: `int-${Date.now()}`,
+        id: newId(),
         ...fields,
         createdBy: user?.uid ?? "mock",
         createdAt: now,
         updatedAt: now,
       };
-      setInterviews((prev) => [newInterview, ...prev]);
+      await interviewsCol.create(newInterview);
     }
     setDialogOpen(false);
     setSaving(false);
@@ -1078,39 +1089,33 @@ export default function InterviewsPage() {
 
   // ── Availability handlers ──────────────────────────────────────────────────
 
-  function saveBlock() {
+  async function saveBlock() {
     if (!blockForm.member || blockForm.startTime >= blockForm.endTime) return;
     const m = blockForm.member;
-    setAvailability((prev) => [
-      ...prev,
-      {
-        id: `av-${Date.now()}`,
-        memberId: m.id,
-        memberName: m.name,
-        weekday: blockForm.weekday,
-        startTime: blockForm.startTime,
-        endTime: blockForm.endTime,
-      },
-    ]);
+    await availabilityCol.create({
+      id: newId(),
+      memberId: m.id,
+      memberName: m.name,
+      weekday: blockForm.weekday,
+      startTime: blockForm.startTime,
+      endTime: blockForm.endTime,
+    });
     setBlockForm(EMPTY_BLOCK);
   }
 
-  function saveException() {
+  async function saveException() {
     if (!exceptionForm.member || !exceptionForm.startDate) return;
     const m = exceptionForm.member;
     const endDate = exceptionForm.endDate || exceptionForm.startDate;
     if (endDate < exceptionForm.startDate) return;
-    setExceptions((prev) => [
-      ...prev,
-      {
-        id: `ax-${Date.now()}`,
-        memberId: m.id,
-        memberName: m.name,
-        startDate: exceptionForm.startDate,
-        endDate,
-        reason: exceptionForm.reason.trim() || undefined,
-      },
-    ]);
+    await exceptionsCol.create({
+      id: newId(),
+      memberId: m.id,
+      memberName: m.name,
+      startDate: exceptionForm.startDate,
+      endDate,
+      reason: exceptionForm.reason.trim() || undefined,
+    });
     setExceptionForm(EMPTY_EXCEPTION);
   }
 
@@ -1191,10 +1196,11 @@ export default function InterviewsPage() {
         <AvailabilityView
           availability={availability}
           exceptions={exceptions}
+          interviewers={INTERVIEWERS}
           onAddBlock={(m) => setBlockForm({ ...EMPTY_BLOCK, open: true, member: m })}
-          onDeleteBlock={(id) => setAvailability((prev) => prev.filter((b) => b.id !== id))}
+          onDeleteBlock={(id) => { void availabilityCol.remove(id); }}
           onAddException={(m) => setExceptionForm({ ...EMPTY_EXCEPTION, open: true, member: m })}
-          onDeleteException={(id) => setExceptions((prev) => prev.filter((e) => e.id !== id))}
+          onDeleteException={(id) => { void exceptionsCol.remove(id); }}
         />
       )}
 
@@ -1255,6 +1261,8 @@ export default function InterviewsPage() {
                   availability={availability}
                   exceptions={exceptions}
                   interviews={interviews}
+                  interviewers={INTERVIEWERS}
+                  bishop={BISHOP}
                   onSave={handleAdvance}
                   onClose={() => setSelected(null)}
                   onEdit={() => openEdit(selected)}

@@ -1,26 +1,23 @@
 "use client";
 
 /**
- * Mock AuthContext — no Firebase, no network calls.
- * Auth state is persisted in localStorage so the login page still works
- * as a gate (any email + password is accepted).
+ * Supabase-backed auth. Invite-only: there is no public sign-up — bishopric
+ * members are provisioned in Supabase, and their `profiles` row (with role) is
+ * created automatically by the `handle_new_user` trigger.
+ *
+ * Keeps the same context shape the rest of the app already consumes
+ * (`user`, `appUser`, `loading`, `authError`, `signIn`, `signOut`).
  */
 
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import type { Session } from "@supabase/supabase-js";
 import type { AppUser } from "@/types";
-
-const MOCK_BISHOP: AppUser = {
-  uid: "mock-bishop-001",
-  email: "bishop@ward.demo",
-  displayName: "Bishop Anderson",
-  role: "bishop",
-};
-
-const STORAGE_KEY = "demo-auth";
+import { createClient } from "@/lib/supabase/client";
+import { getProfile } from "@/lib/db";
 
 interface AuthContextValue {
-  /** Lightweight user object (just uid) — mirrors Firebase User shape used by pages. */
+  /** Minimal user object (uid) — mirrors the shape pages already use. */
   user: { uid: string } | null;
   appUser: AppUser | null;
   loading: boolean;
@@ -32,33 +29,77 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [loggedIn, setLoggedIn] = useState(false);
-  const [loading, setLoading]   = useState(true);
-  const [authError]              = useState<string | null>(null);
+  const [supabase] = useState(() => createClient());
+  const [session, setSession] = useState<Session | null>(null);
+  const [appUser, setAppUser] = useState<AppUser | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(null);
   const router = useRouter();
 
+  // Load the signed-in user's profile (identity + role) from the DB.
+  const loadProfile = useCallback(
+    async (userId: string) => {
+      try {
+        const profile = await getProfile(supabase, userId);
+        setAppUser(profile);
+        if (!profile) setAuthError("No profile found for this account.");
+      } catch (err) {
+        setAuthError(err instanceof Error ? err.message : "Failed to load profile.");
+        setAppUser(null);
+      }
+    },
+    [supabase],
+  );
+
   useEffect(() => {
-    // localStorage is only available on the client
-    setLoggedIn(localStorage.getItem(STORAGE_KEY) === "1");
-    setLoading(false);
-  }, []);
+    let active = true;
 
-  const signIn = async (_email: string, _password: string) => {
-    localStorage.setItem(STORAGE_KEY, "1");
-    setLoggedIn(true);
-  };
+    supabase.auth.getSession().then(async ({ data }) => {
+      if (!active) return;
+      setSession(data.session);
+      if (data.session) await loadProfile(data.session.user.id);
+      setLoading(false);
+    });
 
-  const signOut = async () => {
-    localStorage.removeItem(STORAGE_KEY);
-    setLoggedIn(false);
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (_event, nextSession) => {
+      setSession(nextSession);
+      if (nextSession) {
+        await loadProfile(nextSession.user.id);
+      } else {
+        setAppUser(null);
+      }
+    });
+
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
+  }, [supabase, loadProfile]);
+
+  const signIn = useCallback(
+    async (email: string, password: string) => {
+      setAuthError(null);
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+      // onAuthStateChange will populate the session and profile.
+    },
+    [supabase],
+  );
+
+  const signOut = useCallback(async () => {
+    await supabase.auth.signOut();
+    setAppUser(null);
+    setSession(null);
     router.replace("/login");
-  };
+  }, [supabase, router]);
 
   return (
     <AuthContext.Provider
       value={{
-        user:    loggedIn ? { uid: MOCK_BISHOP.uid } : null,
-        appUser: loggedIn ? MOCK_BISHOP : null,
+        user: session ? { uid: session.user.id } : null,
+        appUser,
         loading,
         authError,
         signIn,
