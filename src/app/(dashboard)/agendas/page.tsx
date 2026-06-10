@@ -17,11 +17,11 @@ import {
 } from "@/components/ui/dialog";
 import { useAuth } from "@/contexts/AuthContext";
 import type {
-  Meeting, MeetingType, MeetingStatus, AgendaItem, Announcement, SacramentProgram, WardInfo,
+  Meeting, MeetingType, MeetingStatus, AgendaItem, SacramentProgram, WardInfo,
 } from "@/types";
 import { MEETING_TYPE_LABELS, MEETING_STATUS_COLORS } from "@/types";
-import { MOCK_MEETINGS, MOCK_ANNOUNCEMENTS, MOCK_CALLINGS } from "@/lib/mock-data";
-import { DEFAULT_WARD_INFO, deriveWardBusiness } from "@/lib/ward";
+import { useData, newId } from "@/contexts/DataContext";
+import { deriveWardBusiness } from "@/lib/ward";
 import { isAnnouncementActive } from "@/lib/announcements";
 import { defaultBulletin, addDays, upcomingSunday, todayISODate, formatSunday } from "@/lib/bulletin";
 import { formatDate } from "@/lib/utils";
@@ -39,6 +39,11 @@ const STATUSES: MeetingStatus[] = ["upcoming", "completed", "cancelled"];
 const EMPTY_FORM = {
   title: "", type: "bishopric" as MeetingType, status: "upcoming" as MeetingStatus,
   date: "", time: "", location: "", notes: "",
+};
+
+const BLANK_WARD: WardInfo = {
+  wardName: "", churchName: "", stake: "", address: "",
+  meetingTitle: "", meetingTime: "", leadership: [], submissionNote: "",
 };
 
 const DEFAULT_TITLE: Record<MeetingType, string> = {
@@ -63,11 +68,14 @@ function totalMinutes(agenda: AgendaItem[]) {
 
 export default function AgendasPage() {
   const { user } = useAuth();
-  const [meetings,   setMeetings]   = useState<Meeting[]>([...MOCK_MEETINGS]);
-  const [announcements, setAnnouncements] = useState<Announcement[]>([...MOCK_ANNOUNCEMENTS]);
+  const { wardInfo, updateWardInfo, callings: callingsCol } = useData();
+  const meetingsCol = useData().meetings;
+  const meetings = meetingsCol.items;
+  const announcementsCol = useData().announcements;
+  const announcements = announcementsCol.items;
   const [activeTab,  setActiveTab]  = useState<MeetingType>("bishopric");
   const [filterStatus, setFilterStatus] = useState<MeetingStatus | "all">("upcoming");
-  const [expanded,   setExpanded]   = useState<Set<string>>(new Set([MOCK_MEETINGS[0]?.id]));
+  const [expanded,   setExpanded]   = useState<Set<string>>(new Set());
 
   // Meeting dialog
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -80,11 +88,11 @@ export default function AgendasPage() {
   const [itemForm,   setItemForm]   = useState({ title: "", presenter: "", durationMins: "", notes: "" });
 
   // Bulletin + ward settings
-  const [ward, setWard]               = useState<WardInfo>(DEFAULT_WARD_INFO);
+  const ward = wardInfo ?? BLANK_WARD;
   const [bulletinFor, setBulletinFor] = useState<Meeting | null>(null);
   const [businessFor, setBusinessFor] = useState<Meeting | null>(null);
   const [wardDialogOpen, setWardDialogOpen] = useState(false);
-  const [wardForm, setWardForm]       = useState<WardInfo>(DEFAULT_WARD_INFO);
+  const [wardForm, setWardForm]       = useState<WardInfo>(BLANK_WARD);
 
   // Sacrament tab navigates one Sunday at a time.
   const [selectedSunday, setSelectedSunday] = useState<string>(() => upcomingSunday(todayISODate()));
@@ -93,7 +101,7 @@ export default function AgendasPage() {
   ) ?? null;
 
   // Sustaining lines derived from callings (the separate Ward Business document).
-  const wardBusiness = deriveWardBusiness(MOCK_CALLINGS).map((b) => b.line);
+  const wardBusiness = deriveWardBusiness(callingsCol.items).map((b) => b.line);
   const activeAnnouncements = announcements.filter((a) => isAnnouncementActive(a));
 
   const inTab = meetings.filter((m) => m.type === activeTab);
@@ -142,11 +150,10 @@ export default function AgendasPage() {
     const now = new Date().toISOString();
     if (editing) {
       // Header/program is edited inline in the bulletin editor — leave it intact.
-      setMeetings((prev) => prev.map((m) =>
-        m.id === editing.id ? { ...m, ...form, updatedAt: now } : m));
+      await meetingsCol.update(editing.id, { ...form, updatedAt: now });
     } else {
       const newMeeting: Meeting = {
-        id: `mtg-${Date.now()}`,
+        id: newId(),
         ...form,
         agenda: [],
         program: form.type === "sacrament_meeting" ? defaultBulletin({}) : undefined,
@@ -154,7 +161,7 @@ export default function AgendasPage() {
         createdAt: now,
         updatedAt: now,
       };
-      setMeetings((prev) => [...prev, newMeeting]);
+      await meetingsCol.create(newMeeting);
       setExpanded((prev) => new Set(prev).add(newMeeting.id));
       setActiveTab(newMeeting.type);
       if (newMeeting.type === "sacrament_meeting") setSelectedSunday(newMeeting.date);
@@ -163,13 +170,13 @@ export default function AgendasPage() {
     setSaving(false);
   }
 
-  function deleteMeeting(id: string) {
-    setMeetings((prev) => prev.filter((m) => m.id !== id));
+  async function deleteMeeting(id: string) {
+    await meetingsCol.remove(id);
   }
 
   // ── Announcements ──────────────────────────────────────────────────────────
 
-  function saveAnnouncement(draft: AnnouncementDraft, editingId: string | null) {
+  async function saveAnnouncement(draft: AnnouncementDraft, editingId: string | null) {
     const now = new Date().toISOString();
     const fields = {
       title: draft.title.trim(),
@@ -179,44 +186,42 @@ export default function AgendasPage() {
       location: draft.location.trim() || undefined,
     };
     if (editingId) {
-      setAnnouncements((prev) => prev.map((a) =>
-        a.id === editingId ? { ...a, ...fields, updatedAt: now } : a));
+      await announcementsCol.update(editingId, { ...fields, updatedAt: now });
     } else {
-      setAnnouncements((prev) => [...prev, {
-        id: `ann-${Date.now()}`,
+      await announcementsCol.create({
+        id: newId(),
         ...fields,
         createdBy: user?.uid ?? "mock",
         createdAt: now,
         updatedAt: now,
-      }]);
+      });
     }
   }
 
-  function toggleArchiveAnnouncement(id: string) {
+  async function toggleArchiveAnnouncement(id: string) {
     const now = new Date().toISOString();
-    setAnnouncements((prev) => prev.map((a) =>
-      a.id === id ? { ...a, archived: !a.archived, updatedAt: now } : a));
+    const current = announcements.find((a) => a.id === id);
+    await announcementsCol.update(id, { archived: !current?.archived, updatedAt: now });
   }
 
-  function deleteAnnouncement(id: string) {
-    setAnnouncements((prev) => prev.filter((a) => a.id !== id));
+  async function deleteAnnouncement(id: string) {
+    await announcementsCol.remove(id);
   }
 
-  function updateProgram(meetingId: string, program: SacramentProgram) {
+  async function updateProgram(meetingId: string, program: SacramentProgram) {
     const now = new Date().toISOString();
-    setMeetings((prev) => prev.map((m) =>
-      m.id === meetingId ? { ...m, program, updatedAt: now } : m));
+    await meetingsCol.update(meetingId, { program, updatedAt: now });
   }
 
   // ── Ward settings ──────────────────────────────────────────────────────────
 
   function openWardSettings() {
-    setWardForm(ward);
+    setWardForm(wardInfo ?? BLANK_WARD);
     setWardDialogOpen(true);
   }
 
-  function saveWardSettings() {
-    setWard(wardForm);
+  async function saveWardSettings() {
+    await updateWardInfo(wardForm);
     setWardDialogOpen(false);
   }
 
@@ -244,44 +249,43 @@ export default function AgendasPage() {
     setItemDialog({ meetingId, item });
   }
 
-  function handleSaveItem() {
+  async function handleSaveItem() {
     if (!itemDialog || !itemForm.title.trim()) return;
     const { meetingId, item } = itemDialog;
+    const meeting = meetings.find((m) => m.id === meetingId);
+    if (!meeting) { setItemDialog(null); return; }
     const now = new Date().toISOString();
     const mins = itemForm.durationMins ? Number(itemForm.durationMins) : undefined;
-    setMeetings((prev) => prev.map((m) => {
-      if (m.id !== meetingId) return m;
-      let agenda: AgendaItem[];
-      if (item) {
-        agenda = m.agenda.map((a) => a.id === item.id
-          ? { ...a, title: itemForm.title, presenter: itemForm.presenter || undefined, durationMins: mins, notes: itemForm.notes || undefined }
-          : a);
-      } else {
-        agenda = [...m.agenda, {
-          id: `ai-${Date.now()}`,
-          title: itemForm.title,
-          presenter: itemForm.presenter || undefined,
-          durationMins: mins,
-          notes: itemForm.notes || undefined,
-        }];
-      }
-      return { ...m, agenda, updatedAt: now };
-    }));
+    let agenda: AgendaItem[];
+    if (item) {
+      agenda = meeting.agenda.map((a) => a.id === item.id
+        ? { ...a, title: itemForm.title, presenter: itemForm.presenter || undefined, durationMins: mins, notes: itemForm.notes || undefined }
+        : a);
+    } else {
+      agenda = [...meeting.agenda, {
+        id: newId(),
+        title: itemForm.title,
+        presenter: itemForm.presenter || undefined,
+        durationMins: mins,
+        notes: itemForm.notes || undefined,
+      }];
+    }
+    await meetingsCol.update(meetingId, { agenda, updatedAt: now });
     setItemDialog(null);
   }
 
-  function toggleItemDone(meetingId: string, itemId: string) {
-    setMeetings((prev) => prev.map((m) =>
-      m.id === meetingId
-        ? { ...m, agenda: m.agenda.map((a) => a.id === itemId ? { ...a, done: !a.done } : a) }
-        : m
-    ));
+  async function toggleItemDone(meetingId: string, itemId: string) {
+    const meeting = meetings.find((m) => m.id === meetingId);
+    if (!meeting) return;
+    const agenda = meeting.agenda.map((a) => a.id === itemId ? { ...a, done: !a.done } : a);
+    await meetingsCol.update(meetingId, { agenda });
   }
 
-  function deleteItem(meetingId: string, itemId: string) {
-    setMeetings((prev) => prev.map((m) =>
-      m.id === meetingId ? { ...m, agenda: m.agenda.filter((a) => a.id !== itemId) } : m
-    ));
+  async function deleteItem(meetingId: string, itemId: string) {
+    const meeting = meetings.find((m) => m.id === meetingId);
+    if (!meeting) return;
+    const agenda = meeting.agenda.filter((a) => a.id !== itemId);
+    await meetingsCol.update(meetingId, { agenda });
   }
 
   // ── Render ───────────────────────────────────────────────────────────────

@@ -3,36 +3,40 @@
 import { useMemo } from "react";
 import {
   ClipboardList, CalendarClock, Church, Calendar, ArrowRight, MessageSquare,
-  CalendarPlus, Plus,
+  CalendarPlus, Plus, Settings,
 } from "lucide-react";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
-import { MOCK_CALLINGS, MOCK_MEETINGS, MOCK_INTERVIEWS } from "@/lib/mock-data";
+import { useData } from "@/contexts/DataContext";
 import { INTERVIEW_STAGE_COLORS, INTERVIEW_STAGES, INTERVIEW_TYPE_LABELS, MEETING_TYPE_LABELS } from "@/types";
 import { formatDate } from "@/lib/utils";
 
 export default function DashboardPage() {
   const { appUser } = useAuth();
+  const data = useData();
+  const callings = data.callings.items;
+  const meetings = data.meetings.items;
+  const interviews = data.interviews.items;
 
-  // Compute stats from mock data (memo so they don't recalculate on every render)
+  // Compute stats from live ward data.
   const stats = useMemo(() => {
-    const upcomingMeetings   = MOCK_MEETINGS.filter((m) => m.status === "upcoming").length;
-    const needsScheduling    = MOCK_INTERVIEWS.filter((i) => i.stage === "schedule_any" || i.stage === "schedule_bishop").length;
-    const upcomingInterviews = MOCK_INTERVIEWS.filter((i) => i.stage === "scheduled" || i.stage === "pending_confirmation").length;
-    const callingsInProgress = MOCK_CALLINGS.filter((c) => c.stage !== "recorded" && c.stage !== "vacant").length;
-    const vacantCallings     = MOCK_CALLINGS.filter((c) => c.stage === "vacant").length;
+    const upcomingMeetings   = meetings.filter((m) => m.status === "upcoming").length;
+    const needsScheduling    = interviews.filter((i) => i.stage === "schedule_any" || i.stage === "schedule_bishop").length;
+    const upcomingInterviews = interviews.filter((i) => i.stage === "scheduled" || i.stage === "pending_confirmation").length;
+    const callingsInProgress = callings.filter((c) => c.stage !== "recorded" && c.stage !== "vacant").length;
+    const vacantCallings     = callings.filter((c) => c.stage === "vacant").length;
     return { upcomingMeetings, needsScheduling, upcomingInterviews, callingsInProgress, vacantCallings };
-  }, []);
+  }, [callings, meetings, interviews]);
 
-  const upcomingMeetings = MOCK_MEETINGS
+  const upcomingMeetings = meetings
     .filter((m) => m.status === "upcoming")
     .sort((a, b) => new Date(`${a.date}T${a.time ?? "00:00"}`).getTime() - new Date(`${b.date}T${b.time ?? "00:00"}`).getTime())
     .slice(0, 4);
 
-  const upcomingInterviews = MOCK_INTERVIEWS
+  const upcomingInterviews = interviews
     .filter((i) => i.stage === "schedule_any" || i.stage === "schedule_bishop" || i.stage === "pending_confirmation" || i.stage === "scheduled")
     .sort((a, b) => {
       // Unscheduled interviews surface first, then upcoming ones by date.
@@ -55,13 +59,20 @@ export default function DashboardPage() {
 
   return (
     <div className="p-4 lg:p-8 space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">
-          Good {getTimeOfDay()}, {appUser?.displayName?.split(" ")[0]}
-        </h1>
-        <p className="text-muted-foreground text-sm mt-1">
-          Here&apos;s what&apos;s happening in the ward today.
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold">
+            Good {getTimeOfDay()}, {appUser?.displayName?.split(" ")[0]}
+          </h1>
+          <p className="text-muted-foreground text-sm mt-1">
+            Here&apos;s what&apos;s happening in the ward today.
+          </p>
+        </div>
+        <Button variant="outline" size="icon" asChild className="shrink-0" title="Settings">
+          <Link href="/settings" aria-label="Settings">
+            <Settings className="h-4 w-4" />
+          </Link>
+        </Button>
       </div>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">

@@ -16,23 +16,10 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { useAuth } from "@/contexts/AuthContext";
-import { useTasks } from "@/contexts/TasksContext";
+import { useData, useTasks, newId } from "@/contexts/DataContext";
 import type { Calling, CallingStage, SustainedVenue, Task, RosterGroup, RosterEntry } from "@/types";
 import { CALLING_STAGES, CALLING_PIPELINE } from "@/types";
-import { MOCK_CALLINGS, MOCK_BISHOPRIC_MEMBERS, MOCK_ROSTER } from "@/lib/mock-data";
 import { cn } from "@/lib/utils";
-
-// ── Bishopric helpers ─────────────────────────────────────────────────────────
-
-/** Members who can extend callings or set apart (bishop + counselors) */
-const EXTENDING_MEMBERS = MOCK_BISHOPRIC_MEMBERS.filter(
-  (m) => m.role === "bishop" || m.role === "counselor"
-);
-
-/** All bishopric members (for set-apart — could include stake members in real use) */
-const SET_APART_MEMBERS = MOCK_BISHOPRIC_MEMBERS.filter(
-  (m) => m.role === "bishop" || m.role === "counselor"
-);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -121,7 +108,7 @@ interface AdvancePanelProps {
 function makeCallingTask(calling: Calling, overrides: Partial<Task>): Task {
   const now = new Date().toISOString();
   return {
-    id:        `t-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    id:        newId(),
     type:      "calling",
     status:    "active",
     memberName: calling.memberName ?? undefined,
@@ -138,6 +125,19 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
   const name  = calling.memberName || "this person";
 
   const { addTask, completeCallingTasks } = useTasks();
+  const { bishopric } = useData();
+
+  // Members who can extend callings or set apart (bishop + counselors).
+  // Derived at runtime from the live bishopric roster.
+  const EXTENDING_MEMBERS = useMemo(
+    () => bishopric.filter((m) => m.role === "bishop" || m.role === "counselor"),
+    [bishopric]
+  );
+  // All bishopric members (for set-apart — could include stake members in real use).
+  const SET_APART_MEMBERS = useMemo(
+    () => bishopric.filter((m) => m.role === "bishop" || m.role === "counselor"),
+    [bishopric]
+  );
 
   // ── Form state ────────────────────────────────────────────────────────────
   // Suggested candidates / replacements (needs_release + vacant)
@@ -615,7 +615,7 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
   if (stage === "set_apart") {
     // LCR update is handled by the clerk via the auto-created task.
     // The bishop can also manually confirm here.
-    const clerk = MOCK_BISHOPRIC_MEMBERS.find((m) => m.role === "clerk");
+    const clerk = bishopric.find((m) => m.role === "clerk");
     return (
       <div className="border-t pt-4 space-y-3">
         <p className="text-sm font-semibold">Awaiting LCR Update</p>
@@ -1343,8 +1343,13 @@ const EMPTY_FORM = {
 
 export default function CallingsPage() {
   const { user } = useAuth();
-  const [callings, setCallings] = useState<Calling[]>(() =>
-    MOCK_CALLINGS.map((c) => ({ ...c, stage: normalizeStage(c.stage as string) }))
+  const callingsCollection = useData().callings;
+  const { roster } = useData();
+  // Items come from the DB already valid; normalizeStage is a cheap defensive
+  // map to coerce any legacy stage values to the current enum.
+  const callings = useMemo(
+    () => callingsCollection.items.map((c) => ({ ...c, stage: normalizeStage(c.stage as string) })),
+    [callingsCollection.items]
   );
   const [selected, setSelected] = useState<Calling | null>(null);
   const [newOpen,  setNewOpen]  = useState(false);
@@ -1357,17 +1362,13 @@ export default function CallingsPage() {
   function handleAdvance(updates: Partial<Calling> & { stage: CallingStage }) {
     if (!selected) return;
     const now = new Date().toISOString();
-    setCallings((prev) =>
-      prev.map((c) => (c.id === selected.id ? { ...c, ...updates, updatedAt: now } : c))
-    );
+    void callingsCollection.update(selected.id, { ...updates, updatedAt: now });
     setSelected(null);
   }
 
   function handleMove(callingId: string, toStage: CallingStage) {
     const now = new Date().toISOString();
-    setCallings((prev) =>
-      prev.map((c) => (c.id === callingId ? { ...c, stage: toStage, updatedAt: now } : c))
-    );
+    void callingsCollection.update(callingId, { stage: toStage, updatedAt: now });
   }
 
   async function handleCreate() {
@@ -1380,7 +1381,7 @@ export default function CallingsPage() {
     // then chooses them and assigns a counselor to extend.
     const seededName = form.isVacant ? "" : form.memberName.trim();
     const newCalling: Calling = {
-      id:           `c-${Date.now()}`,
+      id:           newId(),
       memberName:   "",
       memberId:     "",
       position:     form.position.trim(),
@@ -1392,7 +1393,7 @@ export default function CallingsPage() {
       createdAt:    now,
       updatedAt:    now,
     };
-    setCallings((prev) => [newCalling, ...prev]);
+    await callingsCollection.create(newCalling);
     setNewOpen(false);
     setForm(EMPTY_FORM);
     setSaving(false);
@@ -1411,7 +1412,7 @@ export default function CallingsPage() {
     }
     const now = new Date().toISOString();
     const newCalling: Calling = {
-      id:           `c-${Date.now()}`,
+      id:           newId(),
       memberName:   action === "release" ? entry.member ?? "" : "",
       memberId:     "",
       position:     entry.position,
@@ -1422,7 +1423,7 @@ export default function CallingsPage() {
       createdAt:    now,
       updatedAt:    now,
     };
-    setCallings((prev) => [newCalling, ...prev]);
+    void callingsCollection.create(newCalling);
   }
 
   // ── Derived data ──────────────────────────────────────────────────────────
@@ -1436,8 +1437,8 @@ export default function CallingsPage() {
   );
 
   const rosterVacancies = useMemo(
-    () => MOCK_ROSTER.reduce((n, g) => n + g.entries.filter((e) => !e.member).length, 0),
-    []
+    () => roster.reduce((n, g) => n + g.entries.filter((e) => !e.member).length, 0),
+    [roster]
   );
 
   const TAB_CONFIG: { view: PageView; label: string; count?: number }[] = [
@@ -1556,7 +1557,7 @@ export default function CallingsPage() {
         />
       )}
 
-      {view === "chart" && <ChartView roster={MOCK_ROSTER} onAction={handleChartAction} />}
+      {view === "chart" && <ChartView roster={roster} onAction={handleChartAction} />}
 
       {view === "complete" && (
         <CompleteView
