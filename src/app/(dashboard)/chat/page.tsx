@@ -133,9 +133,8 @@ export default function ChatPage() {
         <div className="mx-4 mb-2 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive lg:mx-6">
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
           <p>
-            The assistant is unavailable. Make sure an API key is set under{" "}
-            <Link href="/settings" className="font-medium underline">Settings → AI assistant</Link>,
-            then try again.
+            {cleanErrorMessage(error.message)}{" "}
+            <Link href="/settings" className="font-medium underline">Settings → AI assistant</Link>
           </p>
         </div>
       )}
@@ -166,6 +165,25 @@ export default function ChatPage() {
       </div>
     </div>
   );
+}
+
+/**
+ * The chat transport surfaces a failed response as `new Error(await
+ * response.text())`, so the message may be plain text or a JSON `{error}` body.
+ * Normalize it for display; the Settings link is appended by the caller.
+ */
+function cleanErrorMessage(raw?: string): string {
+  if (!raw) return "The assistant is unavailable. Check";
+  let msg = raw.trim();
+  if (msg.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(msg);
+      if (typeof parsed?.error === "string") msg = parsed.error;
+    } catch {
+      /* not JSON — use as-is */
+    }
+  }
+  return msg.endsWith(".") ? `${msg} See` : `${msg}. See`;
 }
 
 const SUGGESTIONS = [

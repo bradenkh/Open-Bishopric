@@ -29,10 +29,10 @@ export async function POST(request: Request) {
   try {
     model = await getAIModel();
   } catch (err) {
-    if (err instanceof AINotConfiguredError) {
-      return Response.json({ error: err.message }, { status: 503 });
-    }
-    throw err;
+    // Plain-text body so the message reaches the client cleanly — the chat
+    // transport surfaces `await response.text()` as the error message.
+    const message = err instanceof Error ? err.message : "Failed to initialize the assistant.";
+    return new Response(message, { status: err instanceof AINotConfiguredError ? 503 : 500 });
   }
 
   const { messages: uiMessages } = await request.json();
@@ -57,9 +57,11 @@ export async function POST(request: Request) {
   return result.toUIMessageStreamResponse({
     onError: (error) => {
       if (isRateLimit(error)) {
-        return "The assistant is busy with another request. Please try again in a moment.";
+        return "The assistant is busy with another request (the free GLM tier allows one at a time). Please try again in a moment.";
       }
-      return "Something went wrong talking to the assistant. Please try again.";
+      // Surface the provider's actual error (e.g. bad model id, auth, base URL)
+      // so it's diagnosable from the chat instead of a generic message.
+      return `Assistant error: ${describeError(error)}`;
     },
   });
 }
@@ -71,4 +73,15 @@ function isRateLimit(error: unknown): boolean {
   if (status === 429) return true;
   const message = error instanceof Error ? error.message.toLowerCase() : "";
   return message.includes("rate limit") || message.includes("concurren") || message.includes("429");
+}
+
+/** Best-effort human-readable description of a provider/SDK error. */
+function describeError(error: unknown): string {
+  const e = error as { message?: string; responseBody?: string; statusCode?: number };
+  const parts = [
+    e?.statusCode ? `HTTP ${e.statusCode}` : null,
+    e?.message,
+    e?.responseBody,
+  ].filter(Boolean);
+  return parts.join(" — ") || "unknown error";
 }
