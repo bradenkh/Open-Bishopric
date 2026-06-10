@@ -42,9 +42,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const profile = await getProfile(supabase, userId);
         setAppUser(profile);
-        if (!profile) setAuthError("No profile found for this account.");
+        if (!profile) {
+          setAuthError(
+            "No profile row exists for this account. Has the database been " +
+              "set up (migrations applied)? The handle_new_user trigger creates " +
+              "a profile when a user is added.",
+          );
+        }
       } catch (err) {
-        setAuthError(err instanceof Error ? err.message : "Failed to load profile.");
+        // Supabase/Postgrest errors are plain objects, not Error instances —
+        // surface their message (and code/hint) so the real cause is visible.
+        console.error("Failed to load profile", err);
+        const e = err as { message?: string; code?: string; hint?: string };
+        const detail = e?.message ?? (err instanceof Error ? err.message : String(err));
+        setAuthError(
+          `Failed to load profile: ${detail}${e?.code ? ` (${e.code})` : ""}${e?.hint ? ` — ${e.hint}` : ""}`,
+        );
         setAppUser(null);
       }
     },
