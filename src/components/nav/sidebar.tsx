@@ -8,6 +8,7 @@ import {
   ClipboardList,
   CalendarClock,
   Church,
+  Settings,
   LogOut,
   ChevronRight,
 } from "lucide-react";
@@ -23,6 +24,7 @@ const navItems = [
   { href: "/agendas", label: "Agendas", icon: ClipboardList },
   { href: "/interviews", label: "Interviews", icon: CalendarClock },
   { href: "/callings", label: "Callings", icon: Church },
+  { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 export function Sidebar() {

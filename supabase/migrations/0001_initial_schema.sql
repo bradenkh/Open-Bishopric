@@ -32,7 +32,6 @@ drop table if exists
   public.meetings,
   public.callings,
   public.members,
-  public.bishopric_members,
   public.ward_info,
   public.profiles
   cascade;
@@ -92,15 +91,8 @@ create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
 
--- ── Bishopric roster (the leadership members themselves) ────────────────────
-create table public.bishopric_members (
-  id         text primary key,
-  name       text not null,
-  role       text not null
-               check (role in ('bishop', 'counselor', 'clerk', 'exec_secretary')),
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
+-- The bishopric roster is NOT a separate table — it is derived from `profiles`
+-- (the people with bishopric roles who can sign in). See src/contexts/DataContext.
 
 -- ── Ward members ────────────────────────────────────────────────────────────
 create table public.members (
@@ -312,7 +304,6 @@ create trigger ward_info_updated_at
 
 -- Enable RLS on every table.
 alter table public.profiles               enable row level security;
-alter table public.bishopric_members      enable row level security;
 alter table public.members                enable row level security;
 alter table public.callings               enable row level security;
 alter table public.meetings               enable row level security;
@@ -340,7 +331,7 @@ do $$
 declare
   t text;
   domain_tables text[] := array[
-    'bishopric_members', 'members', 'callings', 'meetings', 'announcements',
+    'members', 'callings', 'meetings', 'announcements',
     'interviews', 'availability_blocks', 'availability_exceptions',
     'roster_groups', 'tasks', 'ward_info'
   ];

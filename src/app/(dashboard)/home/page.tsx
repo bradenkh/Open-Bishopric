@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import {
   ClipboardList, CalendarClock, Church, Calendar, ArrowRight, MessageSquare,
-  CalendarPlus, Plus,
+  CalendarPlus, Plus, Settings,
 } from "lucide-react";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -59,13 +59,20 @@ export default function DashboardPage() {
 
   return (
     <div className="p-4 lg:p-8 space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">
-          Good {getTimeOfDay()}, {appUser?.displayName?.split(" ")[0]}
-        </h1>
-        <p className="text-muted-foreground text-sm mt-1">
-          Here&apos;s what&apos;s happening in the ward today.
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold">
+            Good {getTimeOfDay()}, {appUser?.displayName?.split(" ")[0]}
+          </h1>
+          <p className="text-muted-foreground text-sm mt-1">
+            Here&apos;s what&apos;s happening in the ward today.
+          </p>
+        </div>
+        <Button variant="outline" size="icon" asChild className="shrink-0" title="Settings">
+          <Link href="/settings" aria-label="Settings">
+            <Settings className="h-4 w-4" />
+          </Link>
+        </Button>
       </div>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">

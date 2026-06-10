@@ -62,7 +62,7 @@ const ward = await loadModule("src/lib/ward.ts");
 
 const sections = [];
 
-sections.push(insertRows("bishopric_members", mock.MOCK_BISHOPRIC_MEMBERS));
+// The bishopric roster is derived from `profiles` (real users), not seeded.
 sections.push(insertRows("members", mock.MOCK_MEMBERS));
 sections.push(insertRows("callings", mock.MOCK_CALLINGS, ["suggested_replacements"]));
 sections.push(insertRows("meetings", mock.MOCK_MEETINGS, ["agenda", "program"]));

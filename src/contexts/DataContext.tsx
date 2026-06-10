@@ -30,9 +30,9 @@ import {
   announcementsRepo,
   availabilityExceptionsRepo,
   availabilityRepo,
-  bishopricRepo,
   callingsRepo,
   interviewsRepo,
+  listProfiles,
   meetingsRepo,
   membersRepo,
   rosterRepo,
@@ -41,9 +41,11 @@ import {
 } from "@/lib/db";
 import type {
   Announcement,
+  AppUser,
   AvailabilityBlock,
   AvailabilityException,
   BishopricMember,
+  BishopricRole,
   Calling,
   Interview,
   Meeting,
@@ -85,6 +87,11 @@ interface DataContextValue {
   exceptions: Collection<AvailabilityException>;
 
   members: Member[];
+  /** Everyone with a login. The settings screen manages these. */
+  profiles: AppUser[];
+  /** Re-fetch profiles (after an invite or role change). */
+  reloadProfiles: () => Promise<void>;
+  /** The bishopric roster, derived from `profiles` (people with leadership roles). */
   bishopric: BishopricMember[];
   roster: RosterGroup[];
 
@@ -161,8 +168,29 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const [exceptions, setExceptions] = useState<AvailabilityException[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
-  const [bishopric, setBishopric] = useState<BishopricMember[]>([]);
+  const [profiles, setProfiles] = useState<AppUser[]>([]);
   const [roster, setRoster] = useState<RosterGroup[]>([]);
+
+  // The bishopric roster is the set of people with leadership roles who can sign
+  // in. Derived from profiles so there's a single source of truth for roles.
+  const bishopric = useMemo<BishopricMember[]>(
+    () =>
+      profiles.map((p) => ({
+        id: p.uid,
+        name: p.displayName,
+        // AppUser.role is hyphenated; BishopricRole uses underscores.
+        role: p.role.replace(/-/g, "_") as BishopricRole,
+      })),
+    [profiles],
+  );
+
+  const reloadProfiles = useCallback(async () => {
+    try {
+      setProfiles(await listProfiles(db));
+    } catch (err) {
+      console.error("Failed to reload profiles", err);
+    }
+  }, [db]);
   const [wardInfo, setWardInfo] = useState<WardInfo | null>(null);
 
   useEffect(() => {
@@ -178,7 +206,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
           exceptionsData,
           tasksData,
           membersData,
-          bishopricData,
+          profilesData,
           rosterData,
           wardInfoData,
         ] = await Promise.all([
@@ -190,7 +218,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
           availabilityExceptionsRepo.list(db),
           tasksRepo.list(db),
           membersRepo.list(db),
-          bishopricRepo.list(db),
+          listProfiles(db),
           rosterRepo.list(db),
           wardInfoRepo.get(db),
         ]);
@@ -203,7 +231,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         setExceptions(exceptionsData);
         setTasks(tasksData);
         setMembers(membersData);
-        setBishopric(bishopricData);
+        setProfiles(profilesData);
         setRoster(rosterData);
         setWardInfo(wardInfoData);
       } catch (err) {
@@ -332,6 +360,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       availability: makeCollection(db, availabilityRepo, availability, setAvailability),
       exceptions: makeCollection(db, availabilityExceptionsRepo, exceptions, setExceptions),
       members,
+      profiles,
+      reloadProfiles,
       bishopric,
       roster,
       wardInfo,
@@ -352,6 +382,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       availability,
       exceptions,
       members,
+      profiles,
+      reloadProfiles,
       bishopric,
       roster,
       wardInfo,

@@ -7,13 +7,6 @@
 -- Run automatically by `supabase db reset`, or apply manually with psql.
 -- ============================================================================
 
--- bishopric_members
-insert into public.bishopric_members (id, name, role) values ('bm1', 'Bishop Anderson', 'bishop') on conflict (id) do nothing;
-insert into public.bishopric_members (id, name, role) values ('bm2', 'Counselor Hughes', 'counselor') on conflict (id) do nothing;
-insert into public.bishopric_members (id, name, role) values ('bm3', 'Counselor Davis', 'counselor') on conflict (id) do nothing;
-insert into public.bishopric_members (id, name, role) values ('bm4', 'Mark Williams', 'clerk') on conflict (id) do nothing;
-insert into public.bishopric_members (id, name, role) values ('bm5', 'Bro. Peterson', 'exec_secretary') on conflict (id) do nothing;
-
 -- members
 insert into public.members (id, first_name, last_name, email, phone, address, is_active, notes, created_at, updated_at) values ('m01', 'James', 'Anderson', 'james.anderson@email.com', '801-555-0101', '142 Maple St', TRUE, '', '2025-09-01T00:00:00Z', '2025-09-01T00:00:00Z') on conflict (id) do nothing;
 insert into public.members (id, first_name, last_name, email, phone, address, is_active, notes, created_at, updated_at) values ('m02', 'Sarah', 'Mitchell', 'sarah.mitchell@email.com', '801-555-0102', '87 Oak Ave', TRUE, '', '2025-09-01T00:00:00Z', '2025-09-01T00:00:00Z') on conflict (id) do nothing;

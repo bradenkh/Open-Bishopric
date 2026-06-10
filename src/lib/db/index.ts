@@ -4,7 +4,6 @@ import type {
   Announcement,
   AvailabilityBlock,
   AvailabilityException,
-  BishopricMember,
   Calling,
   Interview,
   Meeting,
@@ -67,7 +66,6 @@ function repo<T extends { id: string }>(table: string, order?: Order) {
 }
 
 export const membersRepo = repo<Member>("members", { column: "last_name" });
-export const bishopricRepo = repo<BishopricMember>("bishopric_members", { column: "name" });
 export const callingsRepo = repo<Calling>("callings", { column: "created_at", ascending: false });
 export const meetingsRepo = repo<Meeting>("meetings", { column: "date" });
 export const announcementsRepo = repo<Announcement>("announcements", { column: "created_at", ascending: false });
@@ -111,21 +109,15 @@ function toAppRole(dbRole: string): UserRole {
   return dbRole.replace(/_/g, "-") as UserRole;
 }
 
-export async function getProfile(db: DB, userId: string): Promise<AppUser | null> {
-  const { data, error } = await db
-    .from("profiles")
-    .select("id, email, display_name, role, photo_url")
-    .eq("id", userId)
-    .maybeSingle();
-  if (error) throw error;
-  if (!data) return null;
-  const row = data as {
-    id: string;
-    email: string | null;
-    display_name: string;
-    role: string;
-    photo_url: string | null;
-  };
+interface ProfileRow {
+  id: string;
+  email: string | null;
+  display_name: string;
+  role: string;
+  photo_url: string | null;
+}
+
+function rowToAppUser(row: ProfileRow): AppUser {
   return {
     uid: row.id,
     email: row.email ?? "",
@@ -133,4 +125,24 @@ export async function getProfile(db: DB, userId: string): Promise<AppUser | null
     role: toAppRole(row.role),
     photoURL: row.photo_url ?? undefined,
   };
+}
+
+export async function getProfile(db: DB, userId: string): Promise<AppUser | null> {
+  const { data, error } = await db
+    .from("profiles")
+    .select("id, email, display_name, role, photo_url")
+    .eq("id", userId)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? rowToAppUser(data as ProfileRow) : null;
+}
+
+/** Every profile (i.e. everyone with a login) — the source of the bishopric roster. */
+export async function listProfiles(db: DB): Promise<AppUser[]> {
+  const { data, error } = await db
+    .from("profiles")
+    .select("id, email, display_name, role, photo_url")
+    .order("display_name");
+  if (error) throw error;
+  return (data ?? []).map((r) => rowToAppUser(r as ProfileRow));
 }
