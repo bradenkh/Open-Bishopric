@@ -25,7 +25,7 @@ export async function GET() {
   return NextResponse.json({
     provider: data?.ai_provider ?? "openai-compat",
     model: data?.ai_model ?? "glm-4.7-flash",
-    baseUrl: data?.ai_base_url ?? "https://open.bigmodel.cn/api/paas/v4/",
+    baseUrl: data?.ai_base_url ?? "https://api.z.ai/api/paas/v4",
     hasApiKey: Boolean(data?.ai_api_key),
   });
 }

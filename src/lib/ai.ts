@@ -15,7 +15,7 @@ export interface AISettings {
 const DEFAULTS = {
   provider: "openai-compat" as const,
   model: "glm-4.7-flash",
-  baseUrl: "https://open.bigmodel.cn/api/paas/v4/",
+  baseUrl: "https://api.z.ai/api/paas/v4",
 };
 
 /**
@@ -68,5 +68,7 @@ export async function getAIModel(): Promise<LanguageModel> {
   if (provider === "deepseek") {
     return createDeepSeek({ apiKey })(model) as LanguageModel;
   }
-  return createOpenAI({ apiKey, baseURL: baseUrl })(model);
+  // Strip any trailing slash so the SDK doesn't build a "…/v4//chat/completions"
+  // URL, which some OpenAI-compatible gateways (incl. Z.AI) reject.
+  return createOpenAI({ apiKey, baseURL: baseUrl.replace(/\/+$/, "") })(model);
 }

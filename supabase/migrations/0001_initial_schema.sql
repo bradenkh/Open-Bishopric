@@ -325,7 +325,7 @@ create table public.app_settings (
   ai_provider text not null default 'openai-compat'
                 check (ai_provider in ('openai-compat', 'deepseek')),
   ai_model    text not null default 'glm-4.7-flash',
-  ai_base_url text not null default 'https://open.bigmodel.cn/api/paas/v4/',
+  ai_base_url text not null default 'https://api.z.ai/api/paas/v4',
   ai_api_key  text,
   updated_at  timestamptz not null default now()
 );
