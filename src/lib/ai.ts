@@ -86,5 +86,9 @@ export async function getAIModel(): Promise<LanguageModel> {
   }
   // Strip any trailing slash so the SDK doesn't build a "…/v4//chat/completions"
   // URL, which some OpenAI-compatible gateways (incl. Z.AI) reject.
-  return createOpenAI({ apiKey, baseURL: baseUrl.replace(/\/+$/, "") })(model);
+  //
+  // Use `.chat(...)` explicitly: the default `openai(model)` targets OpenAI's
+  // newer Responses API (`/responses`), which Z.AI and most OpenAI-compatible
+  // gateways don't implement — they only serve `/chat/completions`.
+  return createOpenAI({ apiKey, baseURL: baseUrl.replace(/\/+$/, "") }).chat(model);
 }
