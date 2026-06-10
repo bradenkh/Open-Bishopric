@@ -169,8 +169,8 @@ export default function ChatPage() {
 }
 
 const SUGGESTIONS = [
-  "What tasks are overdue?",
+  "Add a temple recommend interview for Brother Smith",
+  "Find open slots for the next interview to schedule",
+  "Set this Sunday's opening hymn and speakers",
   "Show me callings in progress",
-  "How many active interviews are there?",
-  "Create a follow-up task for Brother Smith",
 ];
