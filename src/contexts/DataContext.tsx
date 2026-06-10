@@ -91,6 +91,8 @@ interface DataContextValue {
   profiles: AppUser[];
   /** Re-fetch profiles (after an invite or role change). */
   reloadProfiles: () => Promise<void>;
+  /** Re-fetch every collection (e.g. after the AI agent changes data server-side). */
+  reloadAll: () => Promise<void>;
   /** The bishopric roster, derived from `profiles` (people with leadership roles). */
   bishopric: BishopricMember[];
   roster: RosterGroup[];
@@ -193,47 +195,61 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   }, [db]);
   const [wardInfo, setWardInfo] = useState<WardInfo | null>(null);
 
+  /** Fetch every collection and replace local state. Used on mount and to
+   *  refresh after the AI agent mutates data server-side (its writes don't go
+   *  through the optimistic collections, so the client cache must be refilled). */
+  const loadAll = useCallback(async () => {
+    const [
+      callingsData,
+      interviewsData,
+      meetingsData,
+      announcementsData,
+      availabilityData,
+      exceptionsData,
+      tasksData,
+      membersData,
+      profilesData,
+      rosterData,
+      wardInfoData,
+    ] = await Promise.all([
+      callingsRepo.list(db),
+      interviewsRepo.list(db),
+      meetingsRepo.list(db),
+      announcementsRepo.list(db),
+      availabilityRepo.list(db),
+      availabilityExceptionsRepo.list(db),
+      tasksRepo.list(db),
+      membersRepo.list(db),
+      listProfiles(db),
+      rosterRepo.list(db),
+      wardInfoRepo.get(db),
+    ]);
+    setCallings(callingsData);
+    setInterviews(interviewsData);
+    setMeetings(meetingsData);
+    setAnnouncements(announcementsData);
+    setAvailability(availabilityData);
+    setExceptions(exceptionsData);
+    setTasks(tasksData);
+    setMembers(membersData);
+    setProfiles(profilesData);
+    setRoster(rosterData);
+    setWardInfo(wardInfoData);
+  }, [db]);
+
+  const reloadAll = useCallback(async () => {
+    try {
+      await loadAll();
+    } catch (err) {
+      console.error("Failed to reload ward data", err);
+    }
+  }, [loadAll]);
+
   useEffect(() => {
     let active = true;
     (async () => {
       try {
-        const [
-          callingsData,
-          interviewsData,
-          meetingsData,
-          announcementsData,
-          availabilityData,
-          exceptionsData,
-          tasksData,
-          membersData,
-          profilesData,
-          rosterData,
-          wardInfoData,
-        ] = await Promise.all([
-          callingsRepo.list(db),
-          interviewsRepo.list(db),
-          meetingsRepo.list(db),
-          announcementsRepo.list(db),
-          availabilityRepo.list(db),
-          availabilityExceptionsRepo.list(db),
-          tasksRepo.list(db),
-          membersRepo.list(db),
-          listProfiles(db),
-          rosterRepo.list(db),
-          wardInfoRepo.get(db),
-        ]);
-        if (!active) return;
-        setCallings(callingsData);
-        setInterviews(interviewsData);
-        setMeetings(meetingsData);
-        setAnnouncements(announcementsData);
-        setAvailability(availabilityData);
-        setExceptions(exceptionsData);
-        setTasks(tasksData);
-        setMembers(membersData);
-        setProfiles(profilesData);
-        setRoster(rosterData);
-        setWardInfo(wardInfoData);
+        await loadAll();
       } catch (err) {
         console.error("Failed to load ward data", err);
       } finally {
@@ -243,7 +259,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     return () => {
       active = false;
     };
-  }, [db]);
+  }, [loadAll]);
 
   // ── Tasks workflow (ported from the old TasksContext, now persisted) ─────────
   const addTask = useCallback(
@@ -362,6 +378,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       members,
       profiles,
       reloadProfiles,
+      reloadAll,
       bishopric,
       roster,
       wardInfo,
@@ -384,6 +401,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       members,
       profiles,
       reloadProfiles,
+      reloadAll,
       bishopric,
       roster,
       wardInfo,

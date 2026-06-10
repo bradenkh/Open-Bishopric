@@ -7,12 +7,14 @@ import { DefaultChatTransport } from "ai";
 import { Send, Bot, User, Loader2, Church, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { useData } from "@/contexts/DataContext";
 import { cn } from "@/lib/utils";
 
 const transport = new DefaultChatTransport({ api: "/api/agent" });
 
 export default function ChatPage() {
   const { messages, sendMessage, status, error } = useChat({ transport });
+  const { reloadAll } = useData();
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -21,6 +23,20 @@ export default function ChatPage() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // The agent writes to the database server-side (outside the optimistic data
+  // collections), so when a turn finishes after using tools, refresh the shared
+  // ward data — otherwise the rest of the app shows stale state until a reload.
+  const prevStatus = useRef(status);
+  useEffect(() => {
+    const finished = prevStatus.current !== "ready" && status === "ready";
+    prevStatus.current = status;
+    if (!finished) return;
+    const last = messages[messages.length - 1];
+    const usedTools = last?.role === "assistant"
+      && last.parts?.some((p) => p.type.startsWith("tool-") || p.type === "dynamic-tool");
+    if (usedTools) void reloadAll();
+  }, [status, messages, reloadAll]);
 
   const handleSubmit = (e?: React.FormEvent) => {
     e?.preventDefault();

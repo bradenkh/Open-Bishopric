@@ -345,8 +345,24 @@ const bulletinRowSchema = z.object({
     .describe("Right-hand value, e.g. \"#19, 'We Thank Thee, O God, for a Prophet'\". Omit for a full-width centered row."),
 });
 
+/** Accept ISO (YYYY-MM-DD) or US (MM/DD/YYYY) dates and return ISO. */
+function normalizeDateInput(input: string): string {
+  const s = input.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const us = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (us) {
+    const [, mm, dd, yyyy] = us;
+    return `${yyyy}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
+  }
+  const d = new Date(s);
+  if (!Number.isNaN(d.getTime())) {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
+  return s;
+}
+
 async function findSacramentMeeting(date: string): Promise<{ row: Record<string, unknown> | null; sunday: string }> {
-  const sunday = upcomingSunday(date);
+  const sunday = upcomingSunday(normalizeDateInput(date));
   const { data, error } = await db()
     .from("meetings")
     .select("*")
