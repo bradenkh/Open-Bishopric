@@ -24,7 +24,7 @@ See `.env.example`. The Supabase values come from your project's
 | `NEXT_PUBLIC_SUPABASE_URL` | Project URL | Safe to expose. |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | anon/public key | Safe to expose — protected by RLS. |
 | `SUPABASE_SERVICE_ROLE_KEY` | service_role key | **Server-only.** Bypasses RLS; used by the AI agent. |
-| `SUPABASE_DB_URL` | Settings → Database → Connection string (URI, port 5432) | Used only by `db:reset` (deploy/CI). |
+| `SUPABASE_DB_URL` | Settings → Database → Connection string → **Session pooler** URI | Used only by `db:reset`. Use the Session pooler (IPv4) for Vercel/CI. |
 | `AI_*` | — | AI assistant provider config. |
 
 ## Backend & data layer
@@ -61,25 +61,28 @@ metadata; otherwise role defaults to `counselor`.
 ## Rebuilding the database on deploy
 
 While we iterate on the backend (and have no production users yet), each deploy
-**rebuilds the database from scratch** rather than migrating existing data:
+**rebuilds the database from scratch** rather than migrating existing data. The
+`build` script runs `scripts/db-reset.mjs` before `next build`; it applies every
+migration (which tears down + recreates) then the seed — but **only when
+`SUPABASE_DB_URL` is set**, otherwise it logs a warning and no-ops. So a build
+resets the DB exactly where you've provided that var, and nowhere else.
 
-```bash
-SUPABASE_DB_URL=postgresql://... npm run db:reset
-```
+### Deploying on Vercel
 
-This applies every migration (which tears down + recreates) and then the seed.
-It is safe to run anywhere: if `SUPABASE_DB_URL` is unset it logs a warning and
-exits without touching anything.
+1. Import the repo into Vercel (Framework preset: Next.js — no Build Command
+   override needed; the default `npm run build` already handles the reset).
+2. **Settings → Environment Variables**, add:
+   - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
+     `SUPABASE_SERVICE_ROLE_KEY`, and the `AI_*` vars → **All Environments**.
+   - `SUPABASE_DB_URL` → **Production only**. This way Production deploys rebuild
+     the DB and Preview deploys leave it alone (and don't fight over the single
+     shared database).
+3. For `SUPABASE_DB_URL`, copy the **Session pooler** URI (Settings → Database →
+   Connection string → Session pooler). It's IPv4-compatible, which Vercel's
+   build needs — the direct `db.<ref>.supabase.co` connection is IPv6-only.
+4. Deploy. The build log will show `[db:reset] Rebuilding database…`. Then invite
+   yourself under **Authentication → Users** in Supabase and sign in.
 
-To run it automatically on deploy (e.g. **Vercel**), set the Build Command to:
-
-```bash
-npm run db:reset && npm run build
-```
-
-and add `SUPABASE_DB_URL` (the direct connection string, port 5432) to the
-deploy environment. Local `npm run build` is never affected unless
-`SUPABASE_DB_URL` is set.
-
-> ⚠️ `db:reset` is destructive by design — it drops all app tables. Remove the
-> deploy step (and rely on regular migrations) once real data needs preserving.
+> ⚠️ `db:reset` is destructive by design — it drops all app tables on every
+> Production deploy. Once real data needs preserving, remove `SUPABASE_DB_URL`
+> from the deploy env (the build then no-ops) and switch to regular migrations.
