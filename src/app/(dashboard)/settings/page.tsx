@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Loader2, Plus, Trash2, Check, Copy } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Loader2, Plus, Trash2, Check, Copy, Sparkles } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,8 +42,141 @@ export default function SettingsPage() {
 
       <AccountCard />
       <WardSettingsCard />
+      <AIAssistantCard />
       <UsersCard />
     </div>
+  );
+}
+
+// ── AI assistant ───────────────────────────────────────────────────────────────
+const AI_PROVIDERS: { value: string; label: string }[] = [
+  { value: "openai-compat", label: "Z.AI / GLM (OpenAI-compatible)" },
+  { value: "deepseek", label: "DeepSeek" },
+];
+
+interface AIConfig {
+  provider: string;
+  model: string;
+  baseUrl: string;
+  hasApiKey: boolean;
+}
+
+function AIAssistantCard() {
+  const [config, setConfig] = useState<AIConfig | null>(null);
+  const [apiKey, setApiKey] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    fetch("/api/settings/ai")
+      .then((r) => r.json())
+      .then((data) => { if (!data.error) setConfig(data); })
+      .catch(() => setError("Couldn't load AI settings."));
+  }, []);
+
+  const set = (patch: Partial<AIConfig>) => {
+    setConfig((c) => (c ? { ...c, ...patch } : c));
+    setSaved(false);
+  };
+
+  const save = async () => {
+    if (!config) return;
+    setSaving(true); setError(""); setSaved(false);
+    try {
+      const res = await fetch("/api/settings/ai", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: config.provider,
+          model: config.model,
+          baseUrl: config.baseUrl,
+          // Only send the key when the user typed a new one.
+          ...(apiKey ? { apiKey } : {}),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to save");
+      setConfig({ ...config, hasApiKey: apiKey ? true : config.hasApiKey });
+      setApiKey("");
+      setSaved(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <Sparkles className="h-4 w-4 text-primary" /> AI assistant
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <p className="text-sm text-muted-foreground">
+          Powers the chat assistant. The free GLM flash model works well and handles one
+          request at a time — requests are queued automatically. Your API key is stored
+          securely on the server and never shown here.
+        </p>
+
+        {!config ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+          </div>
+        ) : (
+          <>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label>Provider</Label>
+                <Select value={config.provider} onValueChange={(v) => set({ provider: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {AI_PROVIDERS.map((p) => (
+                      <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ai-model">Model</Label>
+                <Input id="ai-model" value={config.model}
+                  onChange={(e) => set({ model: e.target.value })} placeholder="glm-4.7-flash" />
+              </div>
+            </div>
+
+            {config.provider === "openai-compat" && (
+              <div className="space-y-1.5">
+                <Label htmlFor="ai-base-url">Base URL</Label>
+                <Input id="ai-base-url" value={config.baseUrl}
+                  onChange={(e) => set({ baseUrl: e.target.value })} />
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <Label htmlFor="ai-api-key">API key</Label>
+              <Input id="ai-api-key" type="password" autoComplete="off" value={apiKey}
+                onChange={(e) => { setApiKey(e.target.value); setSaved(false); }}
+                placeholder={config.hasApiKey ? "•••••••• (leave blank to keep current key)" : "Paste your API key"} />
+              {config.hasApiKey && (
+                <p className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Check className="h-3 w-3 text-green-600" /> A key is configured.
+                </p>
+              )}
+            </div>
+
+            <div className="flex items-center gap-3">
+              <Button onClick={save} disabled={saving}>
+                {saving && <Loader2 className="h-4 w-4 animate-spin" />} Save AI settings
+              </Button>
+              {saved && <span className="text-sm text-green-600 flex items-center gap-1"><Check className="h-4 w-4" /> Saved</span>}
+              {error && <span className="text-sm text-destructive">{error}</span>}
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

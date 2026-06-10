@@ -33,6 +33,7 @@ drop table if exists
   public.callings,
   public.members,
   public.ward_info,
+  public.app_settings,
   public.profiles
   cascade;
 
@@ -313,6 +314,29 @@ create trigger ward_info_updated_at
   before update on public.ward_info
   for each row execute function public.set_updated_at();
 
+-- ── App settings (AI assistant config) — singleton row, server-only ──────────
+-- Holds the AI agent's provider config, including its API key. Unlike the rest
+-- of the schema this row is NEVER exposed to the browser: RLS is enabled with no
+-- policy, so the anon/authenticated clients can't read it. It is read and
+-- written only through the service-role client in the AI settings Route Handler
+-- and the agent, keeping the API key off the client entirely.
+create table public.app_settings (
+  id          text primary key default 'default',
+  ai_provider text not null default 'openai-compat'
+                check (ai_provider in ('openai-compat', 'deepseek')),
+  ai_model    text not null default 'glm-4.7-flash',
+  ai_base_url text not null default 'https://open.bigmodel.cn/api/paas/v4/',
+  ai_api_key  text,
+  updated_at  timestamptz not null default now()
+);
+
+create trigger app_settings_updated_at
+  before update on public.app_settings
+  for each row execute function public.set_updated_at();
+
+-- Seed the singleton row so the settings screen always has a row to update.
+insert into public.app_settings (id) values ('default') on conflict (id) do nothing;
+
 -- ============================================================================
 -- Row Level Security
 -- ============================================================================
@@ -329,6 +353,9 @@ alter table public.availability_exceptions enable row level security;
 alter table public.roster_groups          enable row level security;
 alter table public.tasks                  enable row level security;
 alter table public.ward_info              enable row level security;
+-- app_settings: RLS enabled with NO policy — only the service role (which
+-- bypasses RLS) may read or write it, so the AI API key never reaches a client.
+alter table public.app_settings           enable row level security;
 
 -- Profiles: any authenticated user can read the roster of leaders; a user may
 -- only update their own profile. Inserts happen via the handle_new_user trigger

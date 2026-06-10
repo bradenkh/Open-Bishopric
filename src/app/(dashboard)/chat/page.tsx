@@ -1,9 +1,10 @@
 "use client";
 
 import { useRef, useEffect, useState } from "react";
+import Link from "next/link";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
-import { Send, Bot, User, Loader2, Church } from "lucide-react";
+import { Send, Bot, User, Loader2, Church, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -11,7 +12,7 @@ import { cn } from "@/lib/utils";
 const transport = new DefaultChatTransport({ api: "/api/agent" });
 
 export default function ChatPage() {
-  const { messages, sendMessage, status } = useChat({ transport });
+  const { messages, sendMessage, status, error } = useChat({ transport });
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -127,6 +128,17 @@ export default function ChatPage() {
           </div>
         )}
       </div>
+
+      {error && (
+        <div className="mx-4 mb-2 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive lg:mx-6">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          <p>
+            The assistant is unavailable. Make sure an API key is set under{" "}
+            <Link href="/settings" className="font-medium underline">Settings → AI assistant</Link>,
+            then try again.
+          </p>
+        </div>
+      )}
 
       <div className="border-t border-border p-3 lg:p-4">
         <form onSubmit={handleSubmit} className="flex items-end gap-2">
