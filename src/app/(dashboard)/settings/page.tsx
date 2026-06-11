@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, Plus, Trash2, Check, Copy, Sparkles } from "lucide-react";
+import { Loader2, Plus, Trash2, Check, Copy, Sparkles, Brain } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -43,8 +43,108 @@ export default function SettingsPage() {
       <AccountCard />
       <WardSettingsCard />
       <AIAssistantCard />
+      <AssistantMemoryCard />
       <UsersCard />
     </div>
+  );
+}
+
+// ── Assistant memory ───────────────────────────────────────────────────────────
+interface AgentNote {
+  id: string;
+  content: string;
+}
+
+function AssistantMemoryCard() {
+  const [notes, setNotes] = useState<AgentNote[] | null>(null);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    fetch("/api/settings/memory")
+      .then((r) => r.json())
+      .then((data) => { if (data.error) setError(data.error); else setNotes(data.notes); })
+      .catch(() => setError("Couldn't load assistant memory."));
+  }, []);
+
+  const add = async () => {
+    if (!draft.trim()) return;
+    setBusy(true); setError("");
+    try {
+      const res = await fetch("/api/settings/memory", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: draft }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to save");
+      setNotes((prev) => [...(prev ?? []), { id: data.note.id, content: data.note.content }]);
+      setDraft("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (id: string) => {
+    setNotes((prev) => prev?.filter((n) => n.id !== id) ?? prev);
+    try {
+      await fetch(`/api/settings/memory?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    } catch {
+      setError("Failed to remove. Refresh to retry.");
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <Brain className="h-4 w-4 text-primary" /> Assistant memory
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <p className="text-sm text-muted-foreground">
+          Standing preferences the assistant remembers in every conversation — e.g.
+          &ldquo;when building a bulletin, don&rsquo;t add the conference talk to the agenda.&rdquo;
+          You can also just tell it to remember something in chat.
+        </p>
+
+        {notes === null ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+          </div>
+        ) : notes.length === 0 ? (
+          <p className="text-sm text-muted-foreground italic">Nothing remembered yet.</p>
+        ) : (
+          <ul className="divide-y divide-border rounded-lg border border-border">
+            {notes.map((n) => (
+              <li key={n.id} className="flex items-start gap-3 px-3 py-2.5">
+                <p className="flex-1 text-sm">{n.content}</p>
+                <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0"
+                  onClick={() => remove(n.id)} title="Forget this">
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <div className="flex items-start gap-2">
+          <Input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
+            placeholder="Add something for the assistant to remember…"
+          />
+          <Button onClick={add} disabled={busy || !draft.trim()} className="gap-1 shrink-0">
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Add
+          </Button>
+        </div>
+        {error && <p className="text-sm text-destructive">{error}</p>}
+      </CardContent>
+    </Card>
   );
 }
 

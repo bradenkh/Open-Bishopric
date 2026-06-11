@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { fromRow } from "@/lib/db/mappers";
 import { generateSlots } from "@/lib/availability";
 import { parseBulletin, defaultBulletin, upcomingSunday } from "@/lib/bulletin";
+import { listAgentNotes } from "@/lib/agent-notes";
 import { INTERVIEW_DURATION_MINS } from "@/types";
 import type {
   AvailabilityBlock,
@@ -479,6 +480,48 @@ function toMins(time: string): number {
   return h * 60 + m;
 }
 
+// ── Memory: standing preferences the assistant remembers across conversations ──
+
+export const rememberPreference = tool({
+  description:
+    "Save a standing preference, rule, or fact to remember across ALL future conversations (e.g. 'when building a bulletin, don't add the conference talk to the agenda'). Use this whenever the user asks you to remember something or to always/never do something. Keep each note to a single clear instruction.",
+  inputSchema: z.object({
+    content: z.string().describe("The preference/rule to remember, phrased as a clear instruction"),
+  }),
+  execute: async ({ content }) => {
+    const { data, error } = await db()
+      .from("agent_notes")
+      .insert({ id: crypto.randomUUID(), content: content.trim(), created_by: "ai-agent" })
+      .select("id, content, created_at")
+      .single();
+    if (error) throw error;
+    return { ok: true, id: data.id, content: data.content };
+  },
+});
+
+export const getRememberedPreferences = tool({
+  description:
+    "List the standing preferences/notes you've been asked to remember. The active ones are already applied to your instructions; use this when the user asks what you remember, or to get a note's id before forgetting it.",
+  inputSchema: z.object({}),
+  execute: async () => {
+    const notes = await listAgentNotes(db());
+    return { notes: notes.map((n) => ({ id: n.id, content: n.content })) };
+  },
+});
+
+export const forgetPreference = tool({
+  description:
+    "Delete a remembered preference/note by id (get the id from getRememberedPreferences). Use when the user asks you to forget or stop doing something you were remembering.",
+  inputSchema: z.object({
+    id: z.string(),
+  }),
+  execute: async ({ id }) => {
+    const { error } = await db().from("agent_notes").delete().eq("id", id);
+    if (error) throw error;
+    return { ok: true, id };
+  },
+});
+
 export const agentTools = {
   getMembers,
   getTasks,
@@ -494,4 +537,8 @@ export const agentTools = {
   // Sacrament meeting bulletins
   getSacramentBulletin,
   updateSacramentBulletin,
+  // Memory
+  rememberPreference,
+  getRememberedPreferences,
+  forgetPreference,
 };

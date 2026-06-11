@@ -34,6 +34,7 @@ drop table if exists
   public.members,
   public.ward_info,
   public.app_settings,
+  public.agent_notes,
   public.profiles
   cascade;
 
@@ -337,6 +338,23 @@ create trigger app_settings_updated_at
 -- Seed the singleton row so the settings screen always has a row to update.
 insert into public.app_settings (id) values ('default') on conflict (id) do nothing;
 
+-- ── Agent notes (the assistant's durable memory) ─────────────────────────────
+-- Standing preferences / facts the bishopric asks the AI assistant to remember
+-- across conversations (e.g. "don't add the conference talk to the bulletin
+-- agenda"). They're injected into the agent's system prompt on every request.
+-- Not sensitive, so they use the normal authenticated-full-access policy below.
+create table public.agent_notes (
+  id         text primary key,
+  content    text not null,
+  created_by text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create trigger agent_notes_updated_at
+  before update on public.agent_notes
+  for each row execute function public.set_updated_at();
+
 -- ============================================================================
 -- Row Level Security
 -- ============================================================================
@@ -353,6 +371,7 @@ alter table public.availability_exceptions enable row level security;
 alter table public.roster_groups          enable row level security;
 alter table public.tasks                  enable row level security;
 alter table public.ward_info              enable row level security;
+alter table public.agent_notes            enable row level security;
 -- app_settings: RLS enabled with NO policy — only the service role (which
 -- bypasses RLS) may read or write it, so the AI API key never reaches a client.
 alter table public.app_settings           enable row level security;
@@ -375,7 +394,7 @@ declare
   domain_tables text[] := array[
     'members', 'callings', 'meetings', 'announcements',
     'interviews', 'availability_blocks', 'availability_exceptions',
-    'roster_groups', 'tasks', 'ward_info'
+    'roster_groups', 'tasks', 'ward_info', 'agent_notes'
   ];
 begin
   foreach t in array domain_tables loop
