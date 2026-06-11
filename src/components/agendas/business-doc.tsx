@@ -1,13 +1,13 @@
 "use client";
 
-import { useRef } from "react";
-import { Printer } from "lucide-react";
+import { useRef, useState } from "react";
+import { Download, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import type { WardInfo } from "@/types";
-import { printNode } from "@/lib/print";
+import { downloadNodeAsPdf } from "@/lib/print";
 
 const DOC_CSS = `
 .biz-doc{font-family:Georgia,'Times New Roman',serif;color:#111;background:#fff;max-width:6.8in;margin:0 auto;padding:0.3in;box-sizing:border-box;font-size:12pt;line-height:1.5}
@@ -49,9 +49,16 @@ interface Props {
 export function BusinessDialog({ open, onOpenChange, date, presiding, items, ward }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const lines = items;
+  const [downloading, setDownloading] = useState(false);
 
-  function print() {
-    if (ref.current) printNode(ref.current, `${ward.wardName} Ward Business`);
+  async function download() {
+    if (!ref.current || downloading) return;
+    setDownloading(true);
+    try {
+      await downloadNodeAsPdf(ref.current, `${ward.wardName} Ward Business`);
+    } finally {
+      setDownloading(false);
+    }
   }
 
   return (
@@ -87,8 +94,10 @@ export function BusinessDialog({ open, onOpenChange, date, presiding, items, war
 
         <DialogFooter className="gap-2">
           <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
-          <Button onClick={print} className="gap-2">
-            <Printer className="h-4 w-4" /> Print
+          <Button onClick={download} disabled={downloading} className="gap-2">
+            {downloading
+              ? <><Loader2 className="h-4 w-4 animate-spin" /> Generating…</>
+              : <><Download className="h-4 w-4" /> Download PDF</>}
           </Button>
         </DialogFooter>
       </DialogContent>
