@@ -7,6 +7,7 @@ import { DefaultChatTransport } from "ai";
 import { Send, Bot, User, Loader2, Church, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Markdown } from "@/components/chat/markdown";
 import { useData } from "@/contexts/DataContext";
 import { cn } from "@/lib/utils";
 
@@ -121,11 +122,16 @@ export default function ChatPage() {
                         : "bg-muted rounded-tl-sm"
                     )}
                   >
-                    {textParts.map((part, i) => (
-                      <p key={i} className="whitespace-pre-wrap leading-relaxed">
-                        {(part as { type: "text"; text: string }).text}
-                      </p>
-                    ))}
+                    {textParts.map((part, i) => {
+                      const text = (part as { type: "text"; text: string }).text;
+                      // The assistant replies in markdown; render it. User
+                      // messages stay plain so their text isn't reinterpreted.
+                      return m.role === "user" ? (
+                        <p key={i} className="whitespace-pre-wrap leading-relaxed">{text}</p>
+                      ) : (
+                        <Markdown key={i}>{text}</Markdown>
+                      );
+                    })}
                   </div>
                 </div>
               );
