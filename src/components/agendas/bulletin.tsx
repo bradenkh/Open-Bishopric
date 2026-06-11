@@ -1,13 +1,13 @@
 "use client";
 
-import { useRef } from "react";
-import { Printer } from "lucide-react";
+import { useRef, useState } from "react";
+import { Download, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import type { Announcement, Meeting, WardInfo } from "@/types";
-import { printNode } from "@/lib/print";
+import { downloadNodeAsPdf } from "@/lib/print";
 
 // Self-contained styles travel with the bulletin markup so the exact same DOM
 // renders identically in the on-screen preview and the print iframe.
@@ -80,9 +80,16 @@ interface Props {
 export function BulletinDialog({ open, onOpenChange, meeting, ward, announcements }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const program = meeting.program ?? { rows: [] };
+  const [downloading, setDownloading] = useState(false);
 
-  function print() {
-    if (ref.current) printNode(ref.current, `${ward.wardName} Bulletin`);
+  async function download() {
+    if (!ref.current || downloading) return;
+    setDownloading(true);
+    try {
+      await downloadNodeAsPdf(ref.current, `${ward.wardName} Bulletin`);
+    } finally {
+      setDownloading(false);
+    }
   }
 
   return (
@@ -175,8 +182,10 @@ export function BulletinDialog({ open, onOpenChange, meeting, ward, announcement
 
         <DialogFooter className="gap-2">
           <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
-          <Button onClick={print} className="gap-2">
-            <Printer className="h-4 w-4" /> Print
+          <Button onClick={download} disabled={downloading} className="gap-2">
+            {downloading
+              ? <><Loader2 className="h-4 w-4 animate-spin" /> Generating…</>
+              : <><Download className="h-4 w-4" /> Download PDF</>}
           </Button>
         </DialogFooter>
       </DialogContent>
