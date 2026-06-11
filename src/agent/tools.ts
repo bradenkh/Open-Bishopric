@@ -2,7 +2,23 @@ import { tool } from "ai";
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { fromRow } from "@/lib/db/mappers";
-import type { Calling, Member, Task } from "@/types";
+import { generateSlots } from "@/lib/availability";
+import { parseBulletin, defaultBulletin, upcomingSunday } from "@/lib/bulletin";
+import { isAnnouncementActive } from "@/lib/announcements";
+import { listAgentNotes } from "@/lib/agent-notes";
+import { INTERVIEW_DURATION_MINS } from "@/types";
+import type {
+  Announcement,
+  AvailabilityBlock,
+  AvailabilityException,
+  Calling,
+  Interview,
+  InterviewType,
+  Meeting,
+  Member,
+  SacramentProgram,
+  Task,
+} from "@/types";
 
 // The agent runs server-side after the Route Handler has verified the session,
 // so it uses the service-role client for data access. Created lazily so the
@@ -112,10 +128,510 @@ export const getCallings = tool({
   },
 });
 
+// ── Interviews ─────────────────────────────────────────────────────────────────
+
+const INTERVIEW_TYPES = [
+  "temple_recommend", "temple_recommend_youth", "calling", "ministering",
+  "tithing_settlement", "youth", "worthiness", "other",
+] as const;
+
+/** Bishopric members who can conduct interviews (bishop + counselors), from profiles. */
+async function loadInterviewers(): Promise<{ name: string; role: string }[]> {
+  const { data, error } = await db()
+    .from("profiles")
+    .select("display_name, role")
+    .in("role", ["bishop", "counselor"])
+    .order("display_name");
+  if (error) throw error;
+  return (data ?? []).map((r) => ({ name: r.display_name as string, role: r.role as string }));
+}
+
+async function bishopName(): Promise<string | undefined> {
+  const { data } = await db().from("profiles").select("display_name").eq("role", "bishop").maybeSingle();
+  return (data?.display_name as string | undefined) ?? undefined;
+}
+
+export const getInterviews = tool({
+  description:
+    "List interviews, optionally filtered by stage or member. Use to see who needs scheduling and to get an interview's id before scheduling it.",
+  inputSchema: z.object({
+    stage: z
+      .enum([
+        "schedule_any", "schedule_bishop", "pending_confirmation",
+        "scheduled", "date_passed", "completed", "all",
+      ])
+      .optional()
+      .default("all"),
+    memberName: z.string().optional().describe("Filter to a single member by name"),
+    limitCount: z.number().optional().default(30),
+  }),
+  execute: async ({ stage, memberName, limitCount = 30 }) => {
+    let query = db().from("interviews").select("*").order("created_at", { ascending: false }).limit(limitCount);
+    // `date_passed` is a derived UI stage (a scheduled interview whose date has
+    // passed); it isn't stored, so don't filter on it at the DB level.
+    if (stage && stage !== "all" && stage !== "date_passed") query = query.eq("stage", stage);
+    if (memberName) query = query.ilike("member_name", `%${memberName}%`);
+    const { data, error } = await query;
+    if (error) throw error;
+    return (data ?? []).map((r) => fromRow<Interview>(r));
+  },
+});
+
+export const getInterviewers = tool({
+  description:
+    "List the bishopric members who can conduct interviews (the bishop and counselors). Use to know who to schedule an interview with.",
+  inputSchema: z.object({}),
+  execute: async () => {
+    const interviewers = await loadInterviewers();
+    return { interviewers, bishop: await bishopName() };
+  },
+});
+
+export const createInterview = tool({
+  description:
+    "Add a person to the list of interviews to schedule. Creates the interview in the appropriate scheduling column; it can then be scheduled with `findInterviewSlots` + `scheduleInterview`.",
+  inputSchema: z.object({
+    memberName: z.string().describe("Name of the person to be interviewed"),
+    type: z.enum(INTERVIEW_TYPES).optional().default("temple_recommend"),
+    requiresBishop: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe("True if the interview must be with the bishop (not just any bishopric member)"),
+    notes: z.string().optional(),
+  }),
+  execute: async ({ memberName, type = "temple_recommend", requiresBishop = false, notes }) => {
+    const { data, error } = await db()
+      .from("interviews")
+      .insert({
+        id: crypto.randomUUID(),
+        member_name: memberName,
+        type,
+        stage: requiresBishop ? "schedule_bishop" : "schedule_any",
+        requires_bishop: requiresBishop,
+        duration_mins: INTERVIEW_DURATION_MINS[type as InterviewType],
+        notes: notes ?? null,
+        created_by: "ai-agent",
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    return fromRow<Interview>(data);
+  },
+});
+
+export const findInterviewSlots = tool({
+  description:
+    "Find open appointment slots for an interview over the next few weeks, based on the bishopric's availability and existing bookings. Pass the interviewId to size slots to that interview. Returns conflict-free slots with the interviewer for each.",
+  inputSchema: z.object({
+    interviewId: z.string().describe("The interview to find slots for (from getInterviews/createInterview)"),
+    days: z.number().optional().default(28).describe("How many days ahead to search"),
+    limitCount: z.number().optional().default(20),
+  }),
+  execute: async ({ interviewId, days = 28, limitCount = 20 }) => {
+    const { data: row, error: iErr } = await db().from("interviews").select("*").eq("id", interviewId).maybeSingle();
+    if (iErr) throw iErr;
+    if (!row) return { error: "No interview found with that id." };
+    const interview = fromRow<Interview>(row);
+
+    const [blocksRes, exceptionsRes, interviewsRes] = await Promise.all([
+      db().from("availability_blocks").select("*"),
+      db().from("availability_exceptions").select("*"),
+      db().from("interviews").select("*"),
+    ]);
+    if (blocksRes.error) throw blocksRes.error;
+    if (exceptionsRes.error) throw exceptionsRes.error;
+    if (interviewsRes.error) throw interviewsRes.error;
+
+    const durationMins = interview.durationMins ?? INTERVIEW_DURATION_MINS[interview.type];
+    const restrictToMember = interview.requiresBishop ? await bishopName() : undefined;
+
+    const slots = generateSlots({
+      memberName: restrictToMember,
+      durationMins,
+      blocks: (blocksRes.data ?? []).map((r) => fromRow<AvailabilityBlock>(r)),
+      exceptions: (exceptionsRes.data ?? []).map((r) => fromRow<AvailabilityException>(r)),
+      interviews: (interviewsRes.data ?? []).map((r) => fromRow<Interview>(r)),
+      days,
+      ignoreInterviewId: interviewId,
+    });
+
+    return {
+      durationMins,
+      requiresBishop: interview.requiresBishop ?? false,
+      slots: slots.slice(0, limitCount).map((s) => ({
+        date: s.date,
+        time: s.time,
+        endTime: s.endTime,
+        interviewer: s.memberName,
+      })),
+      note:
+        slots.length === 0
+          ? "No open slots — the bishopric may need to add availability on the Interviews → Availability tab, or schedule manually."
+          : undefined,
+    };
+  },
+});
+
+export const scheduleInterview = tool({
+  description:
+    "Book an interview into a specific date/time with an interviewer (use a slot from findInterviewSlots). By default it moves to 'pending confirmation' until both sides confirm; set markConfirmed to book it as fully scheduled. Rejects times that overlap another booking for the same interviewer.",
+  inputSchema: z.object({
+    interviewId: z.string(),
+    date: z.string().describe("ISO date YYYY-MM-DD"),
+    time: z.string().describe("24-hour time HH:MM"),
+    interviewer: z.string().describe("Name of the bishopric member conducting it"),
+    durationMins: z.number().optional(),
+    markConfirmed: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe("Skip the confirmation step and mark it fully scheduled"),
+  }),
+  execute: async ({ interviewId, date, time, interviewer, durationMins, markConfirmed = false }) => {
+    const { data: row, error: iErr } = await db().from("interviews").select("*").eq("id", interviewId).maybeSingle();
+    if (iErr) throw iErr;
+    if (!row) return { error: "No interview found with that id." };
+    const interview = fromRow<Interview>(row);
+    const duration = durationMins ?? interview.durationMins ?? INTERVIEW_DURATION_MINS[interview.type];
+
+    // Guard against double-booking the interviewer at an overlapping time.
+    const { data: others, error: oErr } = await db()
+      .from("interviews")
+      .select("*")
+      .eq("interviewer", interviewer)
+      .eq("scheduled_date", date)
+      .neq("id", interviewId);
+    if (oErr) throw oErr;
+    const start = toMins(time);
+    const end = start + duration;
+    const conflict = (others ?? [])
+      .map((r) => fromRow<Interview>(r))
+      .find((o) => {
+        if (o.stage === "completed" || !o.scheduledTime) return false;
+        const os = toMins(o.scheduledTime);
+        const oe = os + (o.durationMins ?? INTERVIEW_DURATION_MINS[o.type]);
+        return start < oe && end > os;
+      });
+    if (conflict) {
+      return {
+        error: `${interviewer} is already booked at that time (${conflict.memberName} at ${conflict.scheduledTime}). Pick another slot.`,
+      };
+    }
+
+    const { data, error } = await db()
+      .from("interviews")
+      .update({
+        stage: markConfirmed ? "scheduled" : "pending_confirmation",
+        interviewer,
+        scheduled_date: date,
+        scheduled_time: time,
+        duration_mins: duration,
+        attendee_confirmed: markConfirmed,
+        interviewer_confirmed: markConfirmed,
+      })
+      .eq("id", interviewId)
+      .select()
+      .single();
+    if (error) throw error;
+    return fromRow<Interview>(data);
+  },
+});
+
+// ── Sacrament meeting bulletins ──────────────────────────────────────────────
+
+const bulletinRowSchema = z.object({
+  label: z.string().describe("Left-hand label, e.g. 'Opening Hymn' or 'First Speaker'"),
+  value: z
+    .string()
+    .optional()
+    .describe("Right-hand value, e.g. \"#19, 'We Thank Thee, O God, for a Prophet'\". Omit for a full-width centered row."),
+});
+
+/** Accept ISO (YYYY-MM-DD) or US (MM/DD/YYYY) dates and return ISO. */
+function normalizeDateInput(input: string): string {
+  const s = input.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const us = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (us) {
+    const [, mm, dd, yyyy] = us;
+    return `${yyyy}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
+  }
+  const d = new Date(s);
+  if (!Number.isNaN(d.getTime())) {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
+  return s;
+}
+
+async function findSacramentMeeting(date: string): Promise<{ row: Record<string, unknown> | null; sunday: string }> {
+  const sunday = upcomingSunday(normalizeDateInput(date));
+  const { data, error } = await db()
+    .from("meetings")
+    .select("*")
+    .eq("type", "sacrament_meeting")
+    .eq("date", sunday)
+    .maybeSingle();
+  if (error) throw error;
+  return { row: data, sunday };
+}
+
+export const getSacramentBulletin = tool({
+  description:
+    "Get the sacrament meeting bulletin (order of service) for a given Sunday. Use this before editing so you can modify and write back the full program. If the date isn't a Sunday it's rolled forward to the next one.",
+  inputSchema: z.object({
+    date: z.string().optional().describe("ISO date YYYY-MM-DD; defaults to the upcoming Sunday"),
+  }),
+  execute: async ({ date }) => {
+    const { row, sunday } = await findSacramentMeeting(date ?? new Date().toISOString().slice(0, 10));
+    if (!row) return { exists: false, date: sunday };
+    const meeting = fromRow<Meeting>(row);
+    const program = meeting.program ?? defaultBulletin({});
+    return {
+      exists: true,
+      date: sunday,
+      meetingId: meeting.id,
+      title: meeting.title,
+      time: meeting.time,
+      location: meeting.location,
+      status: meeting.status,
+      program: {
+        presiding: program.presiding,
+        conducting: program.conducting,
+        chorister: program.chorister,
+        organist: program.organist,
+        secondHour: program.secondHour,
+        quote: program.quote,
+        quoteBy: program.quoteBy,
+        rows: program.rows.map((r) => ({ label: r.label, value: r.value, anchor: r.anchor })),
+      },
+    };
+  },
+});
+
+export const updateSacramentBulletin = tool({
+  description:
+    "Create or update the sacrament meeting bulletin for a Sunday. Provide only the header fields you want to change; existing ones are kept. Provide `rows` to replace the full order of service (read it first with getSacramentBulletin, then send back the modified list) — omit `rows` to leave the order of service unchanged. The 'Administration of the Sacrament' anchor row is always preserved.",
+  inputSchema: z.object({
+    date: z.string().describe("ISO date YYYY-MM-DD (rolled forward to the next Sunday if needed)"),
+    presiding: z.string().optional(),
+    conducting: z.string().optional(),
+    chorister: z.string().optional(),
+    organist: z.string().optional(),
+    secondHour: z.string().optional().describe("What happens in the second hour, e.g. 'Sunday School'"),
+    quote: z.string().optional().describe("Spiritual thought / quote printed on the bulletin"),
+    quoteBy: z.string().optional().describe("Attribution for the quote"),
+    rows: z.array(bulletinRowSchema).optional().describe("Full order-of-service rows, in order. Replaces the existing program rows."),
+    title: z.string().optional(),
+    time: z.string().optional().describe("24-hour time HH:MM"),
+    location: z.string().optional(),
+  }),
+  execute: async ({ date, rows, title, time, location, ...header }) => {
+    const { row, sunday } = await findSacramentMeeting(date);
+    const existing = row ? fromRow<Meeting>(row) : null;
+    const base = existing?.program ?? defaultBulletin({});
+
+    // Keep existing header fields unless the caller overrides them; replace rows
+    // only when provided. parseBulletin normalizes the result and guarantees the
+    // single sacrament anchor row exists.
+    const merged = {
+      presiding: header.presiding ?? base.presiding,
+      conducting: header.conducting ?? base.conducting,
+      chorister: header.chorister ?? base.chorister,
+      organist: header.organist ?? base.organist,
+      secondHour: header.secondHour ?? base.secondHour,
+      quote: header.quote ?? base.quote,
+      quoteBy: header.quoteBy ?? base.quoteBy,
+      rows: rows ? rows.map((r) => ({ label: r.label, value: r.value })) : base.rows,
+    };
+    const program: SacramentProgram = parseBulletin(merged);
+
+    if (existing) {
+      const patch: Record<string, unknown> = { program };
+      if (title !== undefined) patch.title = title;
+      if (time !== undefined) patch.time = time;
+      if (location !== undefined) patch.location = location;
+      const { error } = await db().from("meetings").update(patch).eq("id", existing.id);
+      if (error) throw error;
+      return { ok: true, action: "updated", date: sunday, meetingId: existing.id, rowCount: program.rows.length };
+    }
+
+    const id = crypto.randomUUID();
+    const { error } = await db()
+      .from("meetings")
+      .insert({
+        id,
+        title: title ?? "Sacrament Meeting",
+        type: "sacrament_meeting",
+        date: sunday,
+        time: time ?? null,
+        location: location ?? null,
+        status: "upcoming",
+        agenda: [],
+        program,
+        created_by: "ai-agent",
+      });
+    if (error) throw error;
+    return { ok: true, action: "created", date: sunday, meetingId: id, rowCount: program.rows.length };
+  },
+});
+
+/** "HH:MM" → minutes since midnight. */
+function toMins(time: string): number {
+  const [h, m] = time.split(":").map(Number);
+  return h * 60 + m;
+}
+
+// ── Announcements (printed on the sacrament meeting bulletin) ─────────────────
+
+export const getAnnouncements = tool({
+  description:
+    "List ward announcements. By default returns the active ones (not archived, event date not yet passed) that print on the bulletin. Use to find an announcement's id before updating it.",
+  inputSchema: z.object({
+    filter: z.enum(["active", "archived", "all"]).optional().default("active"),
+    limitCount: z.number().optional().default(30),
+  }),
+  execute: async ({ filter = "active", limitCount = 30 }) => {
+    const { data, error } = await db()
+      .from("announcements")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(limitCount);
+    if (error) throw error;
+    let list = (data ?? []).map((r) => fromRow<Announcement>(r));
+    if (filter === "active") list = list.filter((a) => isAnnouncementActive(a));
+    else if (filter === "archived") list = list.filter((a) => a.archived);
+    return list;
+  },
+});
+
+export const createAnnouncement = tool({
+  description:
+    "Create a ward announcement. It is automatically included on the sacrament meeting bulletin until its event date passes (announcements with no date are standing until archived).",
+  inputSchema: z.object({
+    title: z.string().describe("Short headline"),
+    description: z.string().optional(),
+    date: z.string().optional().describe("Event date YYYY-MM-DD (optional; omit for a standing announcement)"),
+    time: z.string().optional().describe("Event time HH:MM"),
+    location: z.string().optional(),
+  }),
+  execute: async ({ title, description, date, time, location }) => {
+    const { data, error } = await db()
+      .from("announcements")
+      .insert({
+        id: crypto.randomUUID(),
+        title,
+        description: description ?? null,
+        date: date ? normalizeDateInput(date) : null,
+        time: time ?? null,
+        location: location ?? null,
+        archived: false,
+        created_by: "ai-agent",
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    return fromRow<Announcement>(data);
+  },
+});
+
+export const updateAnnouncement = tool({
+  description:
+    "Update an existing announcement (get its id from getAnnouncements). Provide only the fields to change. Set archived=true to retire it from the bulletin, or archived=false to restore it.",
+  inputSchema: z.object({
+    id: z.string(),
+    title: z.string().optional(),
+    description: z.string().optional(),
+    date: z.string().optional().describe("Event date YYYY-MM-DD (use an empty string to clear it)"),
+    time: z.string().optional().describe("Event time HH:MM (empty string to clear)"),
+    location: z.string().optional(),
+    archived: z.boolean().optional(),
+  }),
+  execute: async ({ id, title, description, date, time, location, archived }) => {
+    const patch: Record<string, unknown> = {};
+    if (title !== undefined) patch.title = title;
+    if (description !== undefined) patch.description = description || null;
+    if (date !== undefined) patch.date = date ? normalizeDateInput(date) : null;
+    if (time !== undefined) patch.time = time || null;
+    if (location !== undefined) patch.location = location || null;
+    if (archived !== undefined) patch.archived = archived;
+    if (Object.keys(patch).length === 0) {
+      return { error: "No fields to update were provided." };
+    }
+    const { data, error } = await db()
+      .from("announcements")
+      .update(patch)
+      .eq("id", id)
+      .select()
+      .single();
+    if (error) throw error;
+    return fromRow<Announcement>(data);
+  },
+});
+
+// ── Memory: standing preferences the assistant remembers across conversations ──
+
+export const rememberPreference = tool({
+  description:
+    "Save a standing preference, rule, or fact to remember across ALL future conversations (e.g. 'when building a bulletin, don't add the conference talk to the agenda'). Use this whenever the user asks you to remember something or to always/never do something. Keep each note to a single clear instruction.",
+  inputSchema: z.object({
+    content: z.string().describe("The preference/rule to remember, phrased as a clear instruction"),
+  }),
+  execute: async ({ content }) => {
+    const { data, error } = await db()
+      .from("agent_notes")
+      .insert({ id: crypto.randomUUID(), content: content.trim(), created_by: "ai-agent" })
+      .select("id, content, created_at")
+      .single();
+    if (error) throw error;
+    return { ok: true, id: data.id, content: data.content };
+  },
+});
+
+export const getRememberedPreferences = tool({
+  description:
+    "List the standing preferences/notes you've been asked to remember. The active ones are already applied to your instructions; use this when the user asks what you remember, or to get a note's id before forgetting it.",
+  inputSchema: z.object({}),
+  execute: async () => {
+    const notes = await listAgentNotes(db());
+    return { notes: notes.map((n) => ({ id: n.id, content: n.content })) };
+  },
+});
+
+export const forgetPreference = tool({
+  description:
+    "Delete a remembered preference/note by id (get the id from getRememberedPreferences). Use when the user asks you to forget or stop doing something you were remembering.",
+  inputSchema: z.object({
+    id: z.string(),
+  }),
+  execute: async ({ id }) => {
+    const { error } = await db().from("agent_notes").delete().eq("id", id);
+    if (error) throw error;
+    return { ok: true, id };
+  },
+});
+
 export const agentTools = {
   getMembers,
   getTasks,
   createTask,
   updateTaskStatus,
   getCallings,
+  // Interviews
+  getInterviews,
+  getInterviewers,
+  createInterview,
+  findInterviewSlots,
+  scheduleInterview,
+  // Sacrament meeting bulletins
+  getSacramentBulletin,
+  updateSacramentBulletin,
+  // Announcements
+  getAnnouncements,
+  createAnnouncement,
+  updateAnnouncement,
+  // Memory
+  rememberPreference,
+  getRememberedPreferences,
+  forgetPreference,
 };

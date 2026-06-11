@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+/* Let Tailwind generate the utility classes Streamdown uses internally
+   (the markdown renderer behind the chat's <Response>). Path is relative to
+   this file (src/app/globals.css → repo-root node_modules). */
+@source "../../node_modules/streamdown/dist/index.js";
+
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {

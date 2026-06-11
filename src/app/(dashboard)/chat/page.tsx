@@ -1,25 +1,40 @@
 "use client";
 
 import { useRef, useEffect, useState } from "react";
+import Link from "next/link";
 import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport } from "ai";
-import { Send, Bot, User, Loader2, Church } from "lucide-react";
+import { DefaultChatTransport, isToolUIPart } from "ai";
+import { Send, Bot, User, Loader2, Church, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Conversation, ConversationContent, ConversationScrollButton } from "@/components/ai-elements/conversation";
+import { Response } from "@/components/ai-elements/response";
+import { Tool } from "@/components/ai-elements/tool";
+import { useData } from "@/contexts/DataContext";
 import { cn } from "@/lib/utils";
 
 const transport = new DefaultChatTransport({ api: "/api/agent" });
 
 export default function ChatPage() {
-  const { messages, sendMessage, status } = useChat({ transport });
+  const { messages, sendMessage, status, error } = useChat({ transport });
+  const { reloadAll } = useData();
   const [input, setInput] = useState("");
-  const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isLoading = status === "submitted" || status === "streaming";
 
+  // The agent writes to the database server-side (outside the optimistic data
+  // collections), so when a turn finishes after using tools, refresh the shared
+  // ward data — otherwise the rest of the app shows stale state until a reload.
+  const prevStatus = useRef(status);
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    const finished = prevStatus.current !== "ready" && status === "ready";
+    prevStatus.current = status;
+    if (!finished) return;
+    const last = messages[messages.length - 1];
+    const usedTools = last?.role === "assistant"
+      && last.parts?.some((p) => p.type.startsWith("tool-") || p.type === "dynamic-tool");
+    if (usedTools) void reloadAll();
+  }, [status, messages, reloadAll]);
 
   const handleSubmit = (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -47,73 +62,72 @@ export default function ChatPage() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
-        {messages.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
-            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
-              <Bot className="h-8 w-8 text-primary" />
-            </div>
-            <div>
-              <h2 className="font-semibold">How can I help?</h2>
-              <p className="mt-1 text-sm text-muted-foreground max-w-xs">
-                Ask about members, tasks, callings, or anything else related to bishopric work.
-              </p>
-            </div>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 w-full max-w-md">
-              {SUGGESTIONS.map((s) => (
-                <button
-                  key={s}
-                  onClick={() => {
-                    setInput(s);
-                    textareaRef.current?.focus();
-                  }}
-                  className="rounded-lg border border-border px-3 py-2 text-left text-sm hover:bg-accent transition-colors"
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
+      {messages.length === 0 ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
+          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
+            <Bot className="h-8 w-8 text-primary" />
           </div>
-        ) : (
-          <div className="space-y-4 px-4 py-4 lg:px-6">
+          <div>
+            <h2 className="font-semibold">How can I help?</h2>
+            <p className="mt-1 text-sm text-muted-foreground max-w-xs">
+              Ask about members, tasks, callings, or anything else related to bishopric work.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 w-full max-w-md">
+            {SUGGESTIONS.map((s) => (
+              <button
+                key={s}
+                onClick={() => {
+                  setInput(s);
+                  textareaRef.current?.focus();
+                }}
+                className="rounded-lg border border-border px-3 py-2 text-left text-sm hover:bg-accent transition-colors"
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <Conversation className="flex-1">
+          <ConversationContent className="space-y-4">
             {messages.map((m) => {
-              const textParts = m.parts?.filter((p) => p.type === "text") ?? [];
-              if (textParts.length === 0) return null;
+              const parts = m.parts?.filter((p) => p.type === "text" || isToolUIPart(p)) ?? [];
+              if (parts.length === 0) return null;
+              const isUser = m.role === "user";
               return (
-                <div
-                  key={m.id}
-                  className={cn("flex gap-3", m.role === "user" ? "flex-row-reverse" : "flex-row")}
-                >
+                <div key={m.id} className={cn("flex gap-3", isUser ? "flex-row-reverse" : "flex-row")}>
                   <div
                     className={cn(
                       "flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
-                      m.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"
+                      isUser ? "bg-primary text-primary-foreground" : "bg-muted",
                     )}
                   >
-                    {m.role === "user" ? (
-                      <User className="h-4 w-4" />
-                    ) : (
-                      <Bot className="h-4 w-4" />
-                    )}
+                    {isUser ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
                   </div>
-                  <div
-                    className={cn(
-                      "max-w-[80%] rounded-2xl px-4 py-2.5 text-sm",
-                      m.role === "user"
-                        ? "bg-primary text-primary-foreground rounded-tr-sm"
-                        : "bg-muted rounded-tl-sm"
-                    )}
-                  >
-                    {textParts.map((part, i) => (
-                      <p key={i} className="whitespace-pre-wrap leading-relaxed">
-                        {(part as { type: "text"; text: string }).text}
-                      </p>
-                    ))}
+                  <div className="flex max-w-[80%] flex-col gap-2">
+                    {parts.map((part, i) => {
+                      if (isToolUIPart(part)) {
+                        return <Tool key={i} part={part} />;
+                      }
+                      const text = (part as { type: "text"; text: string }).text;
+                      // The assistant replies in markdown; render it. User
+                      // messages stay plain so their text isn't reinterpreted.
+                      return isUser ? (
+                        <div key={i} className="rounded-2xl rounded-tr-sm bg-primary px-4 py-2.5 text-sm text-primary-foreground">
+                          <p className="whitespace-pre-wrap leading-relaxed">{text}</p>
+                        </div>
+                      ) : (
+                        <div key={i} className="rounded-2xl rounded-tl-sm bg-muted px-4 py-2.5 text-sm">
+                          <Response>{text}</Response>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               );
             })}
-            {isLoading && (
+            {status === "submitted" && (
               <div className="flex gap-3">
                 <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted">
                   <Bot className="h-4 w-4" />
@@ -123,10 +137,28 @@ export default function ChatPage() {
                 </div>
               </div>
             )}
-            <div ref={messagesEndRef} />
+          </ConversationContent>
+          <ConversationScrollButton />
+        </Conversation>
+      )}
+
+      {error && (() => {
+        const { text, showSettings } = parseChatError(error.message);
+        return (
+          <div className="mx-4 mb-2 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive lg:mx-6">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <p>
+              {text}
+              {showSettings && (
+                <>
+                  {" "}Check{" "}
+                  <Link href="/settings" className="font-medium underline">Settings → AI assistant</Link>.
+                </>
+              )}
+            </p>
           </div>
-        )}
-      </div>
+        );
+      })()}
 
       <div className="border-t border-border p-3 lg:p-4">
         <form onSubmit={handleSubmit} className="flex items-end gap-2">
@@ -156,9 +188,30 @@ export default function ChatPage() {
   );
 }
 
+/**
+ * The chat transport surfaces a failed response as `new Error(await
+ * response.text())`, so the message may be plain text or a JSON `{error}` body.
+ * Normalize it for display and decide whether to point the user at Settings —
+ * a transient "try again" blip isn't a configuration problem.
+ */
+function parseChatError(raw?: string): { text: string; showSettings: boolean } {
+  let msg = (raw ?? "").trim();
+  if (!msg) return { text: "The assistant is unavailable.", showSettings: true };
+  if (msg.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(msg);
+      if (typeof parsed?.error === "string") msg = parsed.error;
+    } catch {
+      /* not JSON — use as-is */
+    }
+  }
+  const transient = /try again|overload|briefly|busy|moment/i.test(msg);
+  return { text: msg, showSettings: !transient };
+}
+
 const SUGGESTIONS = [
-  "What tasks are overdue?",
+  "Add a temple recommend interview for Brother Smith",
+  "Find open slots for the next interview to schedule",
+  "Set this Sunday's opening hymn and speakers",
   "Show me callings in progress",
-  "How many active interviews are there?",
-  "Create a follow-up task for Brother Smith",
 ];

@@ -33,6 +33,8 @@ drop table if exists
   public.callings,
   public.members,
   public.ward_info,
+  public.app_settings,
+  public.agent_notes,
   public.profiles
   cascade;
 
@@ -313,6 +315,46 @@ create trigger ward_info_updated_at
   before update on public.ward_info
   for each row execute function public.set_updated_at();
 
+-- ── App settings (AI assistant config) — singleton row, server-only ──────────
+-- Holds the AI agent's provider config, including its API key. Unlike the rest
+-- of the schema this row is NEVER exposed to the browser: RLS is enabled with no
+-- policy, so the anon/authenticated clients can't read it. It is read and
+-- written only through the service-role client in the AI settings Route Handler
+-- and the agent, keeping the API key off the client entirely.
+create table public.app_settings (
+  id          text primary key default 'default',
+  ai_provider text not null default 'openai-compat'
+                check (ai_provider in ('openai-compat', 'deepseek')),
+  ai_model    text not null default 'glm-4.7-flash',
+  ai_base_url text not null default 'https://api.z.ai/api/paas/v4',
+  ai_api_key  text,
+  updated_at  timestamptz not null default now()
+);
+
+create trigger app_settings_updated_at
+  before update on public.app_settings
+  for each row execute function public.set_updated_at();
+
+-- Seed the singleton row so the settings screen always has a row to update.
+insert into public.app_settings (id) values ('default') on conflict (id) do nothing;
+
+-- ── Agent notes (the assistant's durable memory) ─────────────────────────────
+-- Standing preferences / facts the bishopric asks the AI assistant to remember
+-- across conversations (e.g. "don't add the conference talk to the bulletin
+-- agenda"). They're injected into the agent's system prompt on every request.
+-- Not sensitive, so they use the normal authenticated-full-access policy below.
+create table public.agent_notes (
+  id         text primary key,
+  content    text not null,
+  created_by text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create trigger agent_notes_updated_at
+  before update on public.agent_notes
+  for each row execute function public.set_updated_at();
+
 -- ============================================================================
 -- Row Level Security
 -- ============================================================================
@@ -329,6 +371,10 @@ alter table public.availability_exceptions enable row level security;
 alter table public.roster_groups          enable row level security;
 alter table public.tasks                  enable row level security;
 alter table public.ward_info              enable row level security;
+alter table public.agent_notes            enable row level security;
+-- app_settings: RLS enabled with NO policy — only the service role (which
+-- bypasses RLS) may read or write it, so the AI API key never reaches a client.
+alter table public.app_settings           enable row level security;
 
 -- Profiles: any authenticated user can read the roster of leaders; a user may
 -- only update their own profile. Inserts happen via the handle_new_user trigger
@@ -348,7 +394,7 @@ declare
   domain_tables text[] := array[
     'members', 'callings', 'meetings', 'announcements',
     'interviews', 'availability_blocks', 'availability_exceptions',
-    'roster_groups', 'tasks', 'ward_info'
+    'roster_groups', 'tasks', 'ward_info', 'agent_notes'
   ];
 begin
   foreach t in array domain_tables loop
