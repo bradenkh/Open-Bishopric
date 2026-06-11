@@ -142,15 +142,23 @@ export default function ChatPage() {
         </Conversation>
       )}
 
-      {error && (
-        <div className="mx-4 mb-2 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive lg:mx-6">
-          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-          <p>
-            {cleanErrorMessage(error.message)}{" "}
-            <Link href="/settings" className="font-medium underline">Settings → AI assistant</Link>
-          </p>
-        </div>
-      )}
+      {error && (() => {
+        const { text, showSettings } = parseChatError(error.message);
+        return (
+          <div className="mx-4 mb-2 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive lg:mx-6">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <p>
+              {text}
+              {showSettings && (
+                <>
+                  {" "}Check{" "}
+                  <Link href="/settings" className="font-medium underline">Settings → AI assistant</Link>.
+                </>
+              )}
+            </p>
+          </div>
+        );
+      })()}
 
       <div className="border-t border-border p-3 lg:p-4">
         <form onSubmit={handleSubmit} className="flex items-end gap-2">
@@ -183,11 +191,12 @@ export default function ChatPage() {
 /**
  * The chat transport surfaces a failed response as `new Error(await
  * response.text())`, so the message may be plain text or a JSON `{error}` body.
- * Normalize it for display; the Settings link is appended by the caller.
+ * Normalize it for display and decide whether to point the user at Settings —
+ * a transient "try again" blip isn't a configuration problem.
  */
-function cleanErrorMessage(raw?: string): string {
-  if (!raw) return "The assistant is unavailable. Check";
-  let msg = raw.trim();
+function parseChatError(raw?: string): { text: string; showSettings: boolean } {
+  let msg = (raw ?? "").trim();
+  if (!msg) return { text: "The assistant is unavailable.", showSettings: true };
   if (msg.startsWith("{")) {
     try {
       const parsed = JSON.parse(msg);
@@ -196,7 +205,8 @@ function cleanErrorMessage(raw?: string): string {
       /* not JSON — use as-is */
     }
   }
-  return msg.endsWith(".") ? `${msg} See` : `${msg}. See`;
+  const transient = /try again|overload|briefly|busy|moment/i.test(msg);
+  return { text: msg, showSettings: !transient };
 }
 
 const SUGGESTIONS = [

@@ -70,6 +70,10 @@ export async function POST(request: Request) {
     messages,
     tools: agentTools,
     stopWhen: stepCountIs(5),
+    // The free GLM tier intermittently returns "overloaded"/5xx; let the SDK
+    // retry a few more times (with exponential backoff) before giving up, since
+    // these clear quickly. We hold the single-slot lock across the retries.
+    maxRetries: 4,
     onFinish: release,
     onError: release,
     onAbort: release,
@@ -77,8 +81,8 @@ export async function POST(request: Request) {
 
   return result.toUIMessageStreamResponse({
     onError: (error) => {
-      if (isRateLimit(error)) {
-        return "The assistant is busy with another request (the free GLM tier allows one at a time). Please try again in a moment.";
+      if (isTransient(error)) {
+        return "The free GLM service is briefly overloaded or busy (it allows one request at a time). Please wait a few seconds and try again.";
       }
       // Surface the provider's actual error (e.g. bad model id, auth, base URL)
       // so it's diagnosable from the chat instead of a generic message.
@@ -87,13 +91,23 @@ export async function POST(request: Request) {
   });
 }
 
-/** GLM's free tier returns 429 / "concurrency" errors when a second call overlaps. */
-function isRateLimit(error: unknown): boolean {
+/**
+ * Transient upstream conditions that usually clear on a retry: GLM's free-tier
+ * rate/concurrency limits, "overloaded", timeouts, 5xx, and the SDK's RetryError
+ * (raised after it exhausts its own retries). These get a friendly "try again"
+ * message instead of a raw error.
+ */
+function isTransient(error: unknown): boolean {
   const status = (error as { statusCode?: number; status?: number })?.statusCode
     ?? (error as { status?: number })?.status;
-  if (status === 429) return true;
-  const message = error instanceof Error ? error.message.toLowerCase() : "";
-  return message.includes("rate limit") || message.includes("concurren") || message.includes("429");
+  if (status === 429 || (typeof status === "number" && status >= 500)) return true;
+  const name = typeof (error as { name?: unknown })?.name === "string" ? (error as { name: string }).name.toLowerCase() : "";
+  if (name.includes("retry")) return true;
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return [
+    "rate limit", "concurren", "429", "overload", "temporarily",
+    "try again", "timeout", "timed out", "unavailable", "503", "502", "500",
+  ].some((k) => message.includes(k));
 }
 
 /** Best-effort human-readable description of a provider/SDK error. */
