@@ -4,9 +4,11 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { fromRow } from "@/lib/db/mappers";
 import { generateSlots } from "@/lib/availability";
 import { parseBulletin, defaultBulletin, upcomingSunday } from "@/lib/bulletin";
+import { isAnnouncementActive } from "@/lib/announcements";
 import { listAgentNotes } from "@/lib/agent-notes";
 import { INTERVIEW_DURATION_MINS } from "@/types";
 import type {
+  Announcement,
   AvailabilityBlock,
   AvailabilityException,
   Calling,
@@ -480,6 +482,93 @@ function toMins(time: string): number {
   return h * 60 + m;
 }
 
+// ── Announcements (printed on the sacrament meeting bulletin) ─────────────────
+
+export const getAnnouncements = tool({
+  description:
+    "List ward announcements. By default returns the active ones (not archived, event date not yet passed) that print on the bulletin. Use to find an announcement's id before updating it.",
+  inputSchema: z.object({
+    filter: z.enum(["active", "archived", "all"]).optional().default("active"),
+    limitCount: z.number().optional().default(30),
+  }),
+  execute: async ({ filter = "active", limitCount = 30 }) => {
+    const { data, error } = await db()
+      .from("announcements")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(limitCount);
+    if (error) throw error;
+    let list = (data ?? []).map((r) => fromRow<Announcement>(r));
+    if (filter === "active") list = list.filter((a) => isAnnouncementActive(a));
+    else if (filter === "archived") list = list.filter((a) => a.archived);
+    return list;
+  },
+});
+
+export const createAnnouncement = tool({
+  description:
+    "Create a ward announcement. It is automatically included on the sacrament meeting bulletin until its event date passes (announcements with no date are standing until archived).",
+  inputSchema: z.object({
+    title: z.string().describe("Short headline"),
+    description: z.string().optional(),
+    date: z.string().optional().describe("Event date YYYY-MM-DD (optional; omit for a standing announcement)"),
+    time: z.string().optional().describe("Event time HH:MM"),
+    location: z.string().optional(),
+  }),
+  execute: async ({ title, description, date, time, location }) => {
+    const { data, error } = await db()
+      .from("announcements")
+      .insert({
+        id: crypto.randomUUID(),
+        title,
+        description: description ?? null,
+        date: date ? normalizeDateInput(date) : null,
+        time: time ?? null,
+        location: location ?? null,
+        archived: false,
+        created_by: "ai-agent",
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    return fromRow<Announcement>(data);
+  },
+});
+
+export const updateAnnouncement = tool({
+  description:
+    "Update an existing announcement (get its id from getAnnouncements). Provide only the fields to change. Set archived=true to retire it from the bulletin, or archived=false to restore it.",
+  inputSchema: z.object({
+    id: z.string(),
+    title: z.string().optional(),
+    description: z.string().optional(),
+    date: z.string().optional().describe("Event date YYYY-MM-DD (use an empty string to clear it)"),
+    time: z.string().optional().describe("Event time HH:MM (empty string to clear)"),
+    location: z.string().optional(),
+    archived: z.boolean().optional(),
+  }),
+  execute: async ({ id, title, description, date, time, location, archived }) => {
+    const patch: Record<string, unknown> = {};
+    if (title !== undefined) patch.title = title;
+    if (description !== undefined) patch.description = description || null;
+    if (date !== undefined) patch.date = date ? normalizeDateInput(date) : null;
+    if (time !== undefined) patch.time = time || null;
+    if (location !== undefined) patch.location = location || null;
+    if (archived !== undefined) patch.archived = archived;
+    if (Object.keys(patch).length === 0) {
+      return { error: "No fields to update were provided." };
+    }
+    const { data, error } = await db()
+      .from("announcements")
+      .update(patch)
+      .eq("id", id)
+      .select()
+      .single();
+    if (error) throw error;
+    return fromRow<Announcement>(data);
+  },
+});
+
 // ── Memory: standing preferences the assistant remembers across conversations ──
 
 export const rememberPreference = tool({
@@ -537,6 +626,10 @@ export const agentTools = {
   // Sacrament meeting bulletins
   getSacramentBulletin,
   updateSacramentBulletin,
+  // Announcements
+  getAnnouncements,
+  createAnnouncement,
+  updateAnnouncement,
   // Memory
   rememberPreference,
   getRememberedPreferences,
