@@ -1,6 +1,5 @@
 import { streamText, convertToModelMessages, stepCountIs } from "ai";
 import { getAIModel, AINotConfiguredError } from "@/lib/ai";
-import { acquireAISlot } from "@/lib/ai-lock";
 import { agentTools } from "@/agent/tools";
 import { listAgentNotes } from "@/lib/agent-notes";
 import { createClient } from "@/lib/supabase/server";
@@ -61,30 +60,22 @@ export async function POST(request: Request) {
     notes = [];
   }
 
-  // The free GLM flash tier allows only one request at a time, so wait for any
-  // in-flight agent call to finish before starting ours. The slot is released
-  // when the stream completes, errors, or aborts.
-  const release = await acquireAISlot();
-
   const result = streamText({
     model,
     system: buildSystemPrompt(notes),
     messages,
     tools: agentTools,
     stopWhen: stepCountIs(5),
-    // The free GLM tier intermittently returns "overloaded"/5xx; let the SDK
-    // retry a few more times (with exponential backoff) before giving up, since
-    // these clear quickly. We hold the single-slot lock across the retries.
+    // Providers intermittently return rate-limit/"overloaded"/5xx responses; let
+    // the SDK retry a few times (with exponential backoff) before giving up,
+    // since these usually clear quickly.
     maxRetries: 4,
-    onFinish: release,
-    onError: release,
-    onAbort: release,
   });
 
   return result.toUIMessageStreamResponse({
     onError: (error) => {
       if (isTransient(error)) {
-        return "The free GLM service is briefly overloaded or busy (it allows one request at a time). Please wait a few seconds and try again.";
+        return "The AI service is briefly rate-limited or overloaded. Please wait a few seconds and try again.";
       }
       // Surface the provider's actual error (e.g. bad model id, auth, base URL)
       // so it's diagnosable from the chat instead of a generic message.
@@ -94,7 +85,7 @@ export async function POST(request: Request) {
 }
 
 /**
- * Transient upstream conditions that usually clear on a retry: GLM's free-tier
+ * Transient upstream conditions that usually clear on a retry: provider
  * rate/concurrency limits, "overloaded", timeouts, 5xx, and the SDK's RetryError
  * (raised after it exhausts its own retries). These get a friendly "try again"
  * message instead of a raw error.

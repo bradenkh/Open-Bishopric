@@ -16,8 +16,11 @@ export interface AISettings {
 
 const DEFAULTS = {
   provider: "openai-compat" as const,
-  model: "glm-4.7-flash",
-  baseUrl: "https://api.z.ai/api/paas/v4",
+  // OpenRouter is OpenAI-compatible, so it runs through the "openai-compat"
+  // provider below. Model ids are namespaced (`vendor/model`); swap this for any
+  // model OpenRouter exposes under Settings → AI assistant.
+  model: "openai/gpt-4o-mini",
+  baseUrl: "https://openrouter.ai/api/v1",
 };
 
 /**
@@ -84,11 +87,16 @@ export async function getAIModel(): Promise<LanguageModel> {
   if (provider === "deepseek") {
     return createDeepSeek({ apiKey })(model) as LanguageModel;
   }
-  // Strip any trailing slash so the SDK doesn't build a "…/v4//chat/completions"
-  // URL, which some OpenAI-compatible gateways (incl. Z.AI) reject.
-  //
+  // Strip any trailing slash so the SDK doesn't build a "…/v1//chat/completions"
+  // URL, which some OpenAI-compatible gateways reject.
+  const baseURL = baseUrl.replace(/\/+$/, "");
+  // OpenRouter likes an app identifier for its usage rankings; it's optional and
+  // ignored by other OpenAI-compatible gateways, so only send it to OpenRouter.
+  const headers = baseURL.includes("openrouter.ai")
+    ? { "X-Title": "Open Bishopric" }
+    : undefined;
   // Use `.chat(...)` explicitly: the default `openai(model)` targets OpenAI's
-  // newer Responses API (`/responses`), which Z.AI and most OpenAI-compatible
+  // newer Responses API (`/responses`), which OpenRouter and most OpenAI-compatible
   // gateways don't implement — they only serve `/chat/completions`.
-  return createOpenAI({ apiKey, baseURL: baseUrl.replace(/\/+$/, "") }).chat(model);
+  return createOpenAI({ apiKey, baseURL, headers }).chat(model);
 }
