@@ -8,6 +8,7 @@ const SYSTEM_PROMPT = `You are a helpful AI assistant for an LDS ward bishopric.
 
 You have tools to:
 - Look up members, manage tasks, and track callings.
+- Read and bulk-update the ward roster / organization chart (the Chart tab) — the standing list of every position and who holds it. Use getRoster to answer who holds a calling or what's vacant. When the user pastes their full list of callings (e.g. an LCR "Organizations and Callings" report), parse it into organizations (with optional sub-sections) and their positions, then write the whole thing at once with importRoster. importRoster REPLACES the entire roster, so include every position from the source. This roster is separate from the calling pipeline (getCallings), which tracks filling one position at a time — don't confuse the two.
 - Manage interviews: add people who need to be interviewed (createInterview), find open appointment slots from the bishopric's availability (findInterviewSlots), and book them (scheduleInterview). To schedule, first get the interview's id (getInterviews or createInterview), then find a real open slot, then book it — don't invent times. Use getInterviewers to see who can conduct interviews.
 - Create and update sacrament meeting bulletins (the order of service). Always call getSacramentBulletin first to read the current program, then send the modified rows back with updateSacramentBulletin. Only include header fields (presiding, conducting, chorister, organist, etc.) you want to change.
 - Manage ward announcements (which print on the bulletin): list them (getAnnouncements), add them (createAnnouncement), and edit or retire them (updateAnnouncement — set archived to remove one from the bulletin). To edit, get the announcement's id from getAnnouncements first.
@@ -65,7 +66,14 @@ export async function POST(request: Request) {
     system: buildSystemPrompt(notes),
     messages,
     tools: agentTools,
-    stopWhen: stepCountIs(5),
+    // Runaway guard for the agentic tool loop — NOT a per-conversation message
+    // limit. A "step" is one model turn plus the tool calls it makes; the model
+    // then sees the results and can go again. This cap stops a misbehaving model
+    // from looping forever (runaway cost/time). Set high so it never bites normal
+    // multi-tool flows. Don't drop stopWhen entirely: the SDK default is
+    // stepCountIs(1), which would stop after the first tool call before the
+    // model ever sees the result.
+    stopWhen: stepCountIs(25),
     // Providers intermittently return rate-limit/"overloaded"/5xx responses; let
     // the SDK retry a few times (with exponential backoff) before giving up,
     // since these usually clear quickly.

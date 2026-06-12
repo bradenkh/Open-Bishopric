@@ -83,6 +83,16 @@ export const rosterRepo = {
     if (error) throw error;
     return (data ?? []).map((r) => fromRow<RosterGroup>(r as Record<string, unknown>));
   },
+  async update(db: DB, id: string, patch: Partial<RosterGroup>): Promise<RosterGroup> {
+    const { data, error } = await db
+      .from("roster_groups")
+      .update(toRow(patch as Record<string, unknown>))
+      .eq("id", id)
+      .select()
+      .single();
+    if (error) throw error;
+    return fromRow<RosterGroup>(data as Record<string, unknown>);
+  },
 };
 
 // ── Ward info: singleton row keyed 'default'. ──────────────────────────────────

@@ -4,6 +4,7 @@ import { useState, useMemo } from "react";
 import {
   Plus, AlertTriangle, CheckCircle2, ClipboardList,
   GripVertical, User, ArrowRight, Search, X, UserPlus, UserMinus,
+  Eye, EyeOff, Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -981,11 +982,13 @@ interface ChartRowProps {
   holdCount: number;
   isActiveMember: boolean;
   isHighlighted: boolean;
+  /** The current holder is in the pipeline at the "needs release" stage. */
+  needsRelease: boolean;
   onMemberClick: (member: string) => void;
   onAction: (action: "release" | "fill", entry: RosterEntry, org: string) => void;
 }
 
-function ChartRow({ entry, org, holdCount, isActiveMember, isHighlighted, onMemberClick, onAction }: ChartRowProps) {
+function ChartRow({ entry, org, holdCount, isActiveMember, isHighlighted, needsRelease, onMemberClick, onAction }: ChartRowProps) {
   const isVacant = !entry.member;
   return (
     <div
@@ -994,11 +997,13 @@ function ChartRow({ entry, org, holdCount, isActiveMember, isHighlighted, onMemb
         // Search highlight takes precedence so matches stand out everywhere.
         isHighlighted
           ? "bg-yellow-200/80 ring-1 ring-yellow-400 dark:bg-yellow-500/25 dark:ring-yellow-500/50"
-          : isVacant
-            ? "bg-red-50/70 dark:bg-red-950/20"
-            : isActiveMember
-              ? "bg-primary/10 ring-1 ring-primary/40"
-              : "hover:bg-muted/60"
+          : needsRelease
+            ? "bg-orange-50/80 ring-1 ring-orange-300 dark:bg-orange-950/25 dark:ring-orange-800/60"
+            : isVacant
+              ? "bg-red-50/70 dark:bg-red-950/20"
+              : isActiveMember
+                ? "bg-primary/10 ring-1 ring-primary/40"
+                : "hover:bg-muted/60"
       )}
     >
       <p className={cn("min-w-0 flex-1 truncate", isVacant && "text-muted-foreground")}>
@@ -1025,6 +1030,15 @@ function ChartRow({ entry, org, holdCount, isActiveMember, isHighlighted, onMemb
             >
               {entry.member}
             </button>
+            {needsRelease && (
+              <Badge
+                className="bg-orange-100 text-orange-800 dark:bg-orange-900/60 dark:text-orange-200 text-[10px] h-5 px-2 gap-1 shrink-0"
+                title="Marked for release — in the pipeline"
+              >
+                <UserMinus className="h-3 w-3" />
+                <span className="hidden sm:inline">Needs release</span>
+              </Badge>
+            )}
             {holdCount > 1 && (
               <span
                 className="text-[10px] font-bold tabular-nums px-1.5 h-4 inline-flex items-center rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200"
@@ -1074,12 +1088,24 @@ function ChartRow({ entry, org, holdCount, isActiveMember, isHighlighted, onMemb
   );
 }
 
+/** Build the lookup key for a roster entry's holder against the needs-release set. */
+function releaseKey(org: string, position: string, member: string): string {
+  return `${org}|||${position}|||${member}`;
+}
+
 interface ChartViewProps {
   roster: RosterGroup[];
+  /** Keys (org|position|member) for holders currently at the "needs release" stage. */
+  needsReleaseSet: Set<string>;
   onAction: (action: "release" | "fill", entry: RosterEntry, org: string) => void;
 }
 
-function ChartView({ roster, onAction }: ChartViewProps) {
+function ChartView({ roster: fullRoster, needsReleaseSet, onAction }: ChartViewProps) {
+  // Entries hidden in settings are dropped entirely from the chart.
+  const roster = useMemo(
+    () => fullRoster.map((g) => ({ ...g, entries: g.entries.filter((e) => !e.hidden) })),
+    [fullRoster],
+  );
   const [query, setQuery]               = useState("");
   const [vacantOnly, setVacantOnly]     = useState(false);
   const [activeMember, setActiveMember] = useState<string | null>(null);
@@ -1230,6 +1256,7 @@ function ChartView({ roster, onAction }: ChartViewProps) {
                           holdCount={entry.member ? holdCounts.get(entry.member) ?? 1 : 0}
                           isActiveMember={!!entry.member && entry.member === activeMember}
                           isHighlighted={isHighlighted(entry)}
+                          needsRelease={!!entry.member && needsReleaseSet.has(releaseKey(org, entry.position, entry.member))}
                           onMemberClick={(m) => setActiveMember((cur) => (cur === m ? null : m))}
                           onAction={onAction}
                         />
@@ -1242,6 +1269,164 @@ function ChartView({ roster, onAction }: ChartViewProps) {
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Settings View (edit the chart's callings) ─────────────────────────────────
+// Lets the bishopric curate the standing roster that drives the Chart: rename a
+// calling, add or remove positions, and hide callings they don't want cluttering
+// the chart. Edits persist to the same roster groups the Chart reads.
+
+interface SettingsEntryRowProps {
+  entry: RosterEntry;
+  disabled: boolean;
+  onRename: (position: string) => void;
+  onToggleHidden: () => void;
+  onRemove: () => void;
+}
+
+function SettingsEntryRow({ entry, disabled, onRename, onToggleHidden, onRemove }: SettingsEntryRowProps) {
+  const [name, setName] = useState(entry.position);
+
+  const commit = () => {
+    const v = name.trim();
+    if (!v) { setName(entry.position); return; }   // never allow an empty name
+    if (v !== entry.position) onRename(v);
+  };
+
+  return (
+    <div className={cn("flex items-center gap-1.5 px-2 py-1 rounded-lg", entry.hidden && "opacity-50")}>
+      <Input
+        value={name}
+        disabled={disabled}
+        onChange={(e) => setName(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLInputElement).blur(); }
+          if (e.key === "Escape") { setName(entry.position); (e.target as HTMLInputElement).blur(); }
+        }}
+        className="h-8 text-sm flex-1"
+      />
+      {entry.member && (
+        <span className="text-[11px] text-muted-foreground truncate max-w-[7rem] hidden sm:block" title={entry.member}>
+          {entry.member}
+        </span>
+      )}
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={onToggleHidden}
+        title={entry.hidden ? "Hidden from the chart — click to show" : "Shown on the chart — click to hide"}
+        aria-label={entry.hidden ? "Show on chart" : "Hide from chart"}
+        className={cn(
+          "shrink-0 inline-flex items-center justify-center h-8 w-8 rounded-md transition-colors",
+          "hover:bg-muted disabled:opacity-40",
+          entry.hidden ? "text-muted-foreground/60" : "text-foreground"
+        )}
+      >
+        {entry.hidden ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+      </button>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={onRemove}
+        title="Remove this calling"
+        aria-label="Remove calling"
+        className="shrink-0 inline-flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground/60 hover:bg-muted hover:text-red-600 dark:hover:text-red-400 transition-colors disabled:opacity-40"
+      >
+        <Trash2 className="h-4 w-4" />
+      </button>
+    </div>
+  );
+}
+
+interface SettingsGroupCardProps {
+  group: RosterGroup;
+  onUpdate: (id: string, patch: Partial<RosterGroup>) => void;
+}
+
+function SettingsGroupCard({ group, onUpdate }: SettingsGroupCardProps) {
+  const canEdit   = !!group.id;
+  const hiddenCt  = group.entries.filter((e) => e.hidden).length;
+  const setEntries = (entries: RosterEntry[]) => { if (group.id) onUpdate(group.id, { entries }); };
+
+  const renameEntry = (i: number, position: string) =>
+    setEntries(group.entries.map((e, idx) => (idx === i ? { ...e, position } : e)));
+  const toggleHidden = (i: number) =>
+    setEntries(group.entries.map((e, idx) => (idx === i ? { ...e, hidden: !e.hidden } : e)));
+  const removeEntry = (i: number) =>
+    setEntries(group.entries.filter((_, idx) => idx !== i));
+  const addEntry = () =>
+    setEntries([...group.entries, { position: "New calling", custom: true }]);
+
+  return (
+    <div className="rounded-xl border border-border bg-card overflow-hidden inline-block w-full align-top">
+      <div className="flex items-center gap-2 px-4 py-3 bg-muted/40 border-b border-border">
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold truncate">{group.org}</p>
+          {group.subOrg && <p className="text-[11px] text-muted-foreground truncate">{group.subOrg}</p>}
+        </div>
+        {hiddenCt > 0 && (
+          <span className="text-[10px] text-muted-foreground tabular-nums shrink-0">{hiddenCt} hidden</span>
+        )}
+      </div>
+      <div className="p-1.5 space-y-0.5">
+        {group.entries.map((entry, i) => (
+          <SettingsEntryRow
+            key={`${i}-${entry.position}`}
+            entry={entry}
+            disabled={!canEdit}
+            onRename={(p) => renameEntry(i, p)}
+            onToggleHidden={() => toggleHidden(i)}
+            onRemove={() => removeEntry(i)}
+          />
+        ))}
+        <button
+          type="button"
+          disabled={!canEdit}
+          onClick={addEntry}
+          className="flex items-center gap-1.5 w-full px-2 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-40"
+        >
+          <Plus className="h-3.5 w-3.5" /> Add calling
+        </button>
+      </div>
+    </div>
+  );
+}
+
+interface SettingsViewProps {
+  roster: RosterGroup[];
+  onUpdateGroup: (id: string, patch: Partial<RosterGroup>) => void;
+}
+
+function SettingsView({ roster, onUpdateGroup }: SettingsViewProps) {
+  const hiddenTotal = useMemo(
+    () => roster.reduce((n, g) => n + g.entries.filter((e) => e.hidden).length, 0),
+    [roster],
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-border bg-muted/30 p-4 text-sm text-muted-foreground">
+        Edit the standing list of callings that drives the <strong className="text-foreground">Chart</strong>.
+        Rename a calling, add or remove positions, or hide callings you don&apos;t want on the chart.
+        Hidden callings stay in your records but won&apos;t appear there.
+        {hiddenTotal > 0 && (
+          <span className="block mt-1 text-foreground/80">
+            {hiddenTotal} calling{hiddenTotal !== 1 ? "s" : ""} currently hidden from the chart.
+          </span>
+        )}
+      </div>
+      <div className="gap-3 columns-1 md:columns-2 xl:columns-3 [&>*]:mb-3 [&>*]:break-inside-avoid">
+        {roster.map((group) => (
+          <SettingsGroupCard
+            key={group.id ?? `${group.org}-${group.subOrg ?? ""}`}
+            group={group}
+            onUpdate={onUpdateGroup}
+          />
+        ))}
+      </div>
     </div>
   );
 }
@@ -1331,7 +1516,7 @@ function PipelineFlow({ callings }: PipelineFlowProps) {
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
-type PageView = "pipeline" | "chart" | "complete";
+type PageView = "pipeline" | "chart" | "complete" | "settings";
 
 const EMPTY_FORM = {
   memberName: "",
@@ -1344,7 +1529,7 @@ const EMPTY_FORM = {
 export default function CallingsPage() {
   const { user } = useAuth();
   const callingsCollection = useData().callings;
-  const { roster } = useData();
+  const { roster, updateRosterGroup } = useData();
   // Items come from the DB already valid; normalizeStage is a cheap defensive
   // map to coerce any legacy stage values to the current enum.
   const callings = useMemo(
@@ -1401,13 +1586,14 @@ export default function CallingsPage() {
 
   /** Bring a chart position into the pipeline — either to release its holder or to fill it. */
   function handleChartAction(action: "release" | "fill", entry: RosterEntry, org: string) {
-    setView("pipeline");
     // Don't duplicate a position that's already moving through the pipeline.
     const existing = callings.find(
       (c) => c.stage !== "recorded" && c.position === entry.position && (c.organization ?? "") === org
     );
     if (existing) {
       setSelected(existing);
+      // Filling drops you into the pipeline; marking a release stays on the chart.
+      if (action === "fill") setView("pipeline");
       return;
     }
     const now = new Date().toISOString();
@@ -1424,6 +1610,9 @@ export default function CallingsPage() {
       updatedAt:    now,
     };
     void callingsCollection.create(newCalling);
+    // A release just gets flagged on the chart (orange "Needs release" badge);
+    // filling a vacancy jumps to the pipeline to suggest a candidate.
+    if (action === "fill") setView("pipeline");
   }
 
   // ── Derived data ──────────────────────────────────────────────────────────
@@ -1432,19 +1621,29 @@ export default function CallingsPage() {
   const completeCallings  = callings.filter((c) => c.stage === "recorded");
   const vacantCallings    = callings.filter((c) => c.stage === "vacant");
   const attentionCallings = pipelineCallings.filter((c) => attentionMessage(c));
-  const bizItemCallings   = pipelineCallings.filter(
-    (c) => c.stage === "sustaining" && c.sustainedIn === "sacrament_meeting" && !c.businessItemAdded
-  );
 
   const rosterVacancies = useMemo(
-    () => roster.reduce((n, g) => n + g.entries.filter((e) => !e.member).length, 0),
+    () => roster.reduce((n, g) => n + g.entries.filter((e) => !e.member && !e.hidden).length, 0),
     [roster]
   );
+
+  // Keys (org|position|member) for holders the bishopric has marked for release.
+  // Used to flag those callings on the Chart.
+  const needsReleaseSet = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of callings) {
+      if (c.stage === "needs_release" && c.memberName) {
+        set.add(releaseKey(c.organization ?? "", c.position, c.memberName));
+      }
+    }
+    return set;
+  }, [callings]);
 
   const TAB_CONFIG: { view: PageView; label: string; count?: number }[] = [
     { view: "pipeline", label: "Pipeline",                                    },
     { view: "chart",    label: "Chart",    count: rosterVacancies             },
     { view: "complete", label: "Complete", count: completeCallings.length     },
+    { view: "settings", label: "Settings",                                    },
   ];
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -1476,43 +1675,8 @@ export default function CallingsPage() {
       {/* Pipeline flow summary (desktop only) */}
       {view === "pipeline" && <PipelineFlow callings={pipelineCallings} />}
 
-      {/* Business items banner */}
-      {bizItemCallings.length > 0 && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/60 p-4 space-y-2">
-          <div className="flex items-center gap-2">
-            <ClipboardList className="h-4 w-4 text-amber-700 dark:text-amber-300 shrink-0" />
-            <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">
-              Business Items — Sacrament Meeting Announcements Needed
-            </p>
-          </div>
-          <p className="text-xs text-amber-700 dark:text-amber-300">
-            Add the following to the business items document before the sustaining vote:
-          </p>
-          <ul className="space-y-1.5">
-            {bizItemCallings.map((c) => (
-              <li key={c.id} className="flex items-center justify-between gap-2">
-                <span className="text-sm text-amber-900 dark:text-amber-100">
-                  <strong>{c.memberName || "Vacant"}</strong> — {c.position}
-                  {c.sustainedDate && (
-                    <span className="text-amber-600 dark:text-amber-400"> ({c.sustainedDate})</span>
-                  )}
-                </span>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-6 px-2 text-xs border-amber-300 dark:border-amber-700 shrink-0"
-                  onClick={() => setSelected(c)}
-                >
-                  Mark Added
-                </Button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {/* Attention banner (shown only when no biz-item banner) */}
-      {attentionCallings.length > 0 && bizItemCallings.length === 0 && (
+      {/* Attention banner (pipeline-related — hidden on the chart) */}
+      {view !== "chart" && attentionCallings.length > 0 && (
         <div className="rounded-xl border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/60 p-3 flex items-center gap-2">
           <AlertTriangle className="h-4 w-4 text-blue-600 dark:text-blue-400 shrink-0" />
           <p className="text-sm text-blue-800 dark:text-blue-200">
@@ -1557,13 +1721,19 @@ export default function CallingsPage() {
         />
       )}
 
-      {view === "chart" && <ChartView roster={roster} onAction={handleChartAction} />}
+      {view === "chart" && (
+        <ChartView roster={roster} needsReleaseSet={needsReleaseSet} onAction={handleChartAction} />
+      )}
 
       {view === "complete" && (
         <CompleteView
           callings={completeCallings}
           onSelect={setSelected}
         />
+      )}
+
+      {view === "settings" && (
+        <SettingsView roster={roster} onUpdateGroup={updateRosterGroup} />
       )}
 
       {/* ── Detail dialog ── */}
