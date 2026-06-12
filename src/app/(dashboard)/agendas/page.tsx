@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   Plus, Filter, CalendarDays, Clock, MapPin, Pencil, Trash2,
   CheckCircle2, Circle, ChevronDown, ChevronRight, ChevronLeft, User, FileText, Settings, Gavel,
+  Play, Mail, ArrowRightCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,6 +31,9 @@ import { AnnouncementsPanel, type AnnouncementDraft } from "@/components/agendas
 import { BulletinEditor } from "@/components/agendas/sacrament-program";
 import { BulletinDialog } from "@/components/agendas/bulletin";
 import { BusinessDialog } from "@/components/agendas/business-doc";
+import { MeetingMode } from "@/components/agendas/meeting-mode";
+import { CollectItemsDialog } from "@/components/agendas/collect-items";
+import { templateSections, groupBySection, seedCarriedItems } from "@/lib/agenda";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -85,7 +89,11 @@ export default function AgendasPage() {
 
   // Agenda-item dialog
   const [itemDialog, setItemDialog] = useState<{ meetingId: string; item: AgendaItem | null } | null>(null);
-  const [itemForm,   setItemForm]   = useState({ title: "", presenter: "", durationMins: "", notes: "" });
+  const [itemForm,   setItemForm]   = useState({ title: "", presenter: "", durationMins: "", notes: "", section: "" });
+
+  // Meeting mode + pre-meeting collection
+  const [meetingModeFor, setMeetingModeFor] = useState<string | null>(null);
+  const [collectFor, setCollectFor] = useState<Meeting | null>(null);
 
   // Bulletin + ward settings
   const ward = wardInfo ?? BLANK_WARD;
@@ -114,6 +122,13 @@ export default function AgendasPage() {
               - new Date(`${b.date}T${b.time ?? "00:00"}`).getTime();
     return filterStatus === "completed" ? -cmp : cmp;
   });
+
+  // Section options for the agenda-item dialog (the meeting's sections, or the
+  // template default for its type).
+  const itemDialogMeeting = itemDialog ? meetings.find((m) => m.id === itemDialog.meetingId) ?? null : null;
+  const itemSectionOptions = itemDialogMeeting
+    ? (itemDialogMeeting.sections?.length ? itemDialogMeeting.sections : templateSections(itemDialogMeeting.type))
+    : [];
 
   function toggleExpand(id: string) {
     setExpanded((prev) => {
@@ -152,16 +167,39 @@ export default function AgendasPage() {
       // Header/program is edited inline in the bulletin editor — leave it intact.
       await meetingsCol.update(editing.id, { ...form, updatedAt: now });
     } else {
+      const newMeetingId = newId();
+      const sectioned = form.type === "bishopric" || form.type === "ward_council";
+
+      // Carry-forward intake: pull items the most recent completed meeting of
+      // this type marked "carried" (and hasn't yet carried elsewhere), then mark
+      // the source so they aren't carried twice.
+      let carried: AgendaItem[] = [];
+      let source: Meeting | undefined;
+      if (sectioned) {
+        source = meetings
+          .filter((m) => m.type === form.type && m.status === "completed")
+          .filter((m) => m.agenda.some((a) => a.outcome === "carried" && !a.carriedInto))
+          .sort((a, b) => b.date.localeCompare(a.date))[0];
+        if (source) carried = seedCarriedItems(source);
+      }
+
       const newMeeting: Meeting = {
-        id: newId(),
+        id: newMeetingId,
         ...form,
-        agenda: [],
+        agenda: carried,
+        sections: sectioned ? templateSections(form.type) : undefined,
         program: form.type === "sacrament_meeting" ? defaultBulletin({}) : undefined,
         createdBy: user?.uid ?? "mock",
         createdAt: now,
         updatedAt: now,
       };
       await meetingsCol.create(newMeeting);
+      if (source) {
+        const agenda = source.agenda.map((a) =>
+          a.outcome === "carried" && !a.carriedInto ? { ...a, carriedInto: newMeetingId } : a,
+        );
+        await meetingsCol.update(source.id, { agenda, updatedAt: now });
+      }
       setExpanded((prev) => new Set(prev).add(newMeeting.id));
       setActiveTab(newMeeting.type);
       if (newMeeting.type === "sacrament_meeting") setSelectedSunday(newMeeting.date);
@@ -234,8 +272,8 @@ export default function AgendasPage() {
 
   // ── Agenda-item CRUD ───────────────────────────────────────────────────────
 
-  function openNewItem(meetingId: string) {
-    setItemForm({ title: "", presenter: "", durationMins: "", notes: "" });
+  function openNewItem(meetingId: string, section = "") {
+    setItemForm({ title: "", presenter: "", durationMins: "", notes: "", section });
     setItemDialog({ meetingId, item: null });
   }
 
@@ -245,6 +283,7 @@ export default function AgendasPage() {
       presenter: item.presenter ?? "",
       durationMins: item.durationMins ? String(item.durationMins) : "",
       notes: item.notes ?? "",
+      section: item.section ?? "",
     });
     setItemDialog({ meetingId, item });
   }
@@ -256,10 +295,11 @@ export default function AgendasPage() {
     if (!meeting) { setItemDialog(null); return; }
     const now = new Date().toISOString();
     const mins = itemForm.durationMins ? Number(itemForm.durationMins) : undefined;
+    const section = itemForm.section || undefined;
     let agenda: AgendaItem[];
     if (item) {
       agenda = meeting.agenda.map((a) => a.id === item.id
-        ? { ...a, title: itemForm.title, presenter: itemForm.presenter || undefined, durationMins: mins, notes: itemForm.notes || undefined }
+        ? { ...a, title: itemForm.title, presenter: itemForm.presenter || undefined, durationMins: mins, notes: itemForm.notes || undefined, section }
         : a);
     } else {
       agenda = [...meeting.agenda, {
@@ -268,6 +308,7 @@ export default function AgendasPage() {
         presenter: itemForm.presenter || undefined,
         durationMins: mins,
         notes: itemForm.notes || undefined,
+        section,
       }];
     }
     await meetingsCol.update(meetingId, { agenda, updatedAt: now });
@@ -289,6 +330,61 @@ export default function AgendasPage() {
   }
 
   // ── Render ───────────────────────────────────────────────────────────────
+
+  // A single agenda-item row (shared by every section group in build mode).
+  function renderAgendaItem(m: Meeting, item: AgendaItem) {
+    const idx = m.agenda.indexOf(item);
+    const carried = item.outcome === "carried";
+    return (
+      <li key={item.id} className="group flex items-start gap-2 rounded-lg bg-card px-3 py-2 border border-border">
+        <button
+          className="mt-0.5 shrink-0"
+          onClick={() => toggleItemDone(m.id, item.id)}
+          title={item.done ? "Mark not done" : "Mark done"}
+        >
+          {item.done
+            ? <CheckCircle2 className="h-4 w-4 text-green-600" />
+            : carried
+            ? <ArrowRightCircle className="h-4 w-4 text-amber-600" />
+            : <Circle className="h-4 w-4 text-muted-foreground/40 hover:text-primary" />}
+        </button>
+        <div className="flex-1 min-w-0 cursor-pointer" onClick={() => openEditItem(m.id, item)}>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-muted-foreground shrink-0">{idx + 1}.</span>
+            <p className={cn("text-sm", item.done && "line-through text-muted-foreground")}>
+              {item.title}
+            </p>
+            {item.durationMins ? (
+              <span className="text-[10px] text-muted-foreground">{item.durationMins}m</span>
+            ) : null}
+            {carried && (
+              <span className="text-[10px] text-amber-700 dark:text-amber-300">carrying forward</span>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-x-3 mt-0.5 pl-5">
+            {item.presenter && (
+              <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                <User className="h-3 w-3" /> {item.presenter}
+              </span>
+            )}
+            {item.source && (
+              <span className="text-xs text-muted-foreground italic">from {item.source}</span>
+            )}
+            {item.notes && (
+              <span className="text-xs text-muted-foreground">{item.notes}</span>
+            )}
+          </div>
+        </div>
+        <button
+          className="shrink-0 text-muted-foreground/40 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
+          onClick={() => deleteItem(m.id, item.id)}
+          title="Remove item"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      </li>
+    );
+  }
 
   return (
     <div className="p-4 lg:p-8 space-y-4">
@@ -499,68 +595,52 @@ export default function AgendasPage() {
                       )}>
                         {m.status}
                       </span>
-                      <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => openEdit(m)}>
+                      <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => setMeetingModeFor(m.id)} title="Start meeting">
+                        <Play className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => openEdit(m)} title="Edit details">
                         <Pencil className="h-3.5 w-3.5" />
                       </Button>
                     </div>
 
                     {isOpen && (
-                      <div className="border-t border-border bg-muted/30 px-4 py-3 space-y-2">
-                        {m.agenda.length === 0 ? (
+                      <div className="border-t border-border bg-muted/30 px-4 py-3 space-y-3">
+                        {m.agenda.length === 0 && (m.sections?.length ?? 0) === 0 ? (
                           <p className="text-xs text-muted-foreground py-2">No agenda items yet.</p>
                         ) : (
-                          <ol className="space-y-1.5">
-                            {m.agenda.map((item, idx) => (
-                              <li key={item.id} className="group flex items-start gap-2 rounded-lg bg-card px-3 py-2 border border-border">
-                                <button
-                                  className="mt-0.5 shrink-0"
-                                  onClick={() => toggleItemDone(m.id, item.id)}
-                                  title={item.done ? "Mark not done" : "Mark done"}
+                          groupBySection(m.agenda, m.sections?.length ? m.sections : templateSections(m.type)).map((group) => (
+                            <div key={group.section} className="space-y-1.5">
+                              <div className="flex items-center justify-between">
+                                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{group.section}</p>
+                                <Button
+                                  variant="ghost" size="sm" className="h-6 gap-1 text-xs text-muted-foreground hover:text-primary"
+                                  onClick={() => openNewItem(m.id, group.section === "Other" ? "" : group.section)}
                                 >
-                                  {item.done
-                                    ? <CheckCircle2 className="h-4 w-4 text-green-600" />
-                                    : <Circle className="h-4 w-4 text-muted-foreground/40 hover:text-primary" />}
-                                </button>
-                                <div className="flex-1 min-w-0 cursor-pointer" onClick={() => openEditItem(m.id, item)}>
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <span className="text-xs text-muted-foreground shrink-0">{idx + 1}.</span>
-                                    <p className={cn("text-sm", item.done && "line-through text-muted-foreground")}>
-                                      {item.title}
-                                    </p>
-                                    {item.durationMins ? (
-                                      <span className="text-[10px] text-muted-foreground">{item.durationMins}m</span>
-                                    ) : null}
-                                  </div>
-                                  <div className="flex flex-wrap gap-x-3 mt-0.5 pl-5">
-                                    {item.presenter && (
-                                      <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                                        <User className="h-3 w-3" /> {item.presenter}
-                                      </span>
-                                    )}
-                                    {item.notes && (
-                                      <span className="text-xs text-muted-foreground">{item.notes}</span>
-                                    )}
-                                  </div>
-                                </div>
-                                <button
-                                  className="shrink-0 text-muted-foreground/40 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
-                                  onClick={() => deleteItem(m.id, item.id)}
-                                  title="Remove item"
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </button>
-                              </li>
-                            ))}
-                          </ol>
+                                  <Plus className="h-3 w-3" /> Add
+                                </Button>
+                              </div>
+                              {group.items.length > 0 && (
+                                <ol className="space-y-1.5">
+                                  {group.items.map((item) => renderAgendaItem(m, item))}
+                                </ol>
+                              )}
+                            </div>
+                          ))
                         )}
 
                         {m.notes && (
                           <p className="text-xs text-muted-foreground pt-1 italic">Notes: {m.notes}</p>
                         )}
 
-                        <div className="flex items-center gap-2 pt-1">
+                        <div className="flex items-center gap-2 pt-1 flex-wrap">
                           <Button variant="outline" size="sm" className="gap-1.5 h-7 text-xs" onClick={() => openNewItem(m.id)}>
                             <Plus className="h-3 w-3" /> Add item
+                          </Button>
+                          <Button variant="outline" size="sm" className="gap-1.5 h-7 text-xs" onClick={() => setMeetingModeFor(m.id)}>
+                            <Play className="h-3 w-3" /> Start meeting
+                          </Button>
+                          <Button variant="outline" size="sm" className="gap-1.5 h-7 text-xs" onClick={() => setCollectFor(m)}>
+                            <Mail className="h-3 w-3" /> Collect items
                           </Button>
                           <Button
                             variant="ghost"
@@ -680,6 +760,23 @@ export default function AgendasPage() {
                 <Input id="item-mins" type="number" min="0" value={itemForm.durationMins} onChange={(e) => setItemForm((f) => ({ ...f, durationMins: e.target.value }))} placeholder="e.g. 10" />
               </div>
             </div>
+            {itemSectionOptions.length > 0 && (
+              <div className="space-y-1.5">
+                <Label>Section</Label>
+                <Select
+                  value={itemForm.section || "__none"}
+                  onValueChange={(v) => setItemForm((f) => ({ ...f, section: v === "__none" ? "" : v }))}
+                >
+                  <SelectTrigger><SelectValue placeholder="No section" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none">No section</SelectItem>
+                    {itemSectionOptions.map((s) => (
+                      <SelectItem key={s} value={s}>{s}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div className="space-y-1.5">
               <Label htmlFor="item-notes">Notes</Label>
               <Textarea id="item-notes" value={itemForm.notes} onChange={(e) => setItemForm((f) => ({ ...f, notes: e.target.value }))} placeholder="Optional notes" rows={2} />
@@ -777,6 +874,20 @@ export default function AgendasPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* ── Meeting mode (full-screen) ── */}
+      {meetingModeFor && (
+        <MeetingMode meetingId={meetingModeFor} onClose={() => setMeetingModeFor(null)} />
+      )}
+
+      {/* ── Pre-meeting collection ── */}
+      {collectFor && (
+        <CollectItemsDialog
+          open={!!collectFor}
+          onOpenChange={(o) => !o && setCollectFor(null)}
+          meeting={collectFor}
+        />
+      )}
     </div>
   );
 }

@@ -8,6 +8,7 @@ import { isAnnouncementActive } from "@/lib/announcements";
 import { listAgentNotes } from "@/lib/agent-notes";
 import { INTERVIEW_DURATION_MINS } from "@/types";
 import type {
+  AgendaItem,
   Announcement,
   AvailabilityBlock,
   AvailabilityException,
@@ -569,6 +570,111 @@ export const updateAnnouncement = tool({
   },
 });
 
+// ── Meeting agendas (bishopric & ward council) ───────────────────────────────
+
+const AGENDA_MEETING_TYPES = ["bishopric", "ward_council"] as const;
+
+/** Find the meeting to act on: an exact date if given, else the soonest upcoming. */
+async function resolveAgendaMeeting(
+  type: "bishopric" | "ward_council",
+  date?: string,
+): Promise<Meeting | null> {
+  let query = db().from("meetings").select("*").eq("type", type);
+  if (date) {
+    query = query.eq("date", normalizeDateInput(date));
+  } else {
+    const today = new Date().toISOString().slice(0, 10);
+    query = query.gte("date", today).eq("status", "upcoming").order("date", { ascending: true });
+  }
+  const { data, error } = await query.limit(1).maybeSingle();
+  if (error) throw error;
+  return data ? fromRow<Meeting>(data) : null;
+}
+
+export const getMeetingAgenda = tool({
+  description:
+    "Read a bishopric or ward council meeting's agenda (its sections and items). Use this before adding items so you can place them under the right section. Defaults to the soonest upcoming meeting of that type; pass a date to target a specific one.",
+  inputSchema: z.object({
+    type: z.enum(AGENDA_MEETING_TYPES).describe("Which meeting's agenda to read"),
+    date: z.string().optional().describe("ISO date YYYY-MM-DD; omit for the next upcoming meeting"),
+  }),
+  execute: async ({ type, date }) => {
+    const meeting = await resolveAgendaMeeting(type, date);
+    if (!meeting) return { exists: false, type, date };
+    return {
+      exists: true,
+      meetingId: meeting.id,
+      title: meeting.title,
+      date: meeting.date,
+      sections: meeting.sections ?? [],
+      agenda: meeting.agenda.map((a) => ({
+        id: a.id, title: a.title, section: a.section, presenter: a.presenter,
+        notes: a.notes, outcome: a.outcome, source: a.source,
+      })),
+    };
+  },
+});
+
+export const addAgendaItems = tool({
+  description:
+    "Add one or more items to a bishopric or ward council meeting's agenda — e.g. after an organization leader replies with the items they want discussed. Place each item under one of the meeting's sections (read them first with getMeetingAgenda). Set `source` to the organization or leader the items came from. Targets the soonest upcoming meeting of the given type unless meetingId or date is provided.",
+  inputSchema: z.object({
+    type: z.enum(AGENDA_MEETING_TYPES).optional().describe("Meeting type (used when meetingId is omitted)"),
+    meetingId: z.string().optional().describe("Specific meeting id (from getMeetingAgenda)"),
+    date: z.string().optional().describe("ISO date YYYY-MM-DD (used with type when meetingId is omitted)"),
+    source: z.string().optional().describe("Organization or leader the items came from, e.g. 'Relief Society'"),
+    items: z.array(z.object({
+      title: z.string(),
+      section: z.string().optional().describe("Section heading the item belongs under"),
+      presenter: z.string().optional(),
+      durationMins: z.number().optional(),
+      notes: z.string().optional(),
+    })).min(1),
+  }),
+  execute: async ({ type, meetingId, date, source, items }) => {
+    let meeting: Meeting | null = null;
+    if (meetingId) {
+      const { data, error } = await db().from("meetings").select("*").eq("id", meetingId).maybeSingle();
+      if (error) throw error;
+      meeting = data ? fromRow<Meeting>(data) : null;
+    } else if (type) {
+      meeting = await resolveAgendaMeeting(type, date);
+    }
+    if (!meeting) return { error: "No matching meeting found. Provide a meetingId, or a type (and optional date)." };
+
+    const additions: AgendaItem[] = items.map((i) => ({
+      id: crypto.randomUUID(),
+      title: i.title,
+      section: i.section,
+      presenter: i.presenter,
+      durationMins: i.durationMins,
+      notes: i.notes,
+      source,
+    }));
+    const agenda = [...meeting.agenda, ...additions];
+    const { error } = await db().from("meetings").update({ agenda }).eq("id", meeting.id);
+    if (error) throw error;
+    return { ok: true, meetingId: meeting.id, date: meeting.date, added: additions.length };
+  },
+});
+
+export const recordSolicitationReply = tool({
+  description:
+    "Record an organization leader's reply to a pre-meeting agenda request, marking that request as replied. Use after you've added the leader's items with addAgendaItems.",
+  inputSchema: z.object({
+    solicitationId: z.string().describe("The agenda request's id"),
+    replyText: z.string().describe("The leader's raw reply text"),
+  }),
+  execute: async ({ solicitationId, replyText }) => {
+    const { error } = await db()
+      .from("agenda_solicitations")
+      .update({ reply_text: replyText, status: "replied" })
+      .eq("id", solicitationId);
+    if (error) throw error;
+    return { ok: true, solicitationId };
+  },
+});
+
 // ── Memory: standing preferences the assistant remembers across conversations ──
 
 export const rememberPreference = tool({
@@ -630,6 +736,10 @@ export const agentTools = {
   getAnnouncements,
   createAnnouncement,
   updateAnnouncement,
+  // Meeting agendas
+  getMeetingAgenda,
+  addAgendaItems,
+  recordSolicitationReply,
   // Memory
   rememberPreference,
   getRememberedPreferences,

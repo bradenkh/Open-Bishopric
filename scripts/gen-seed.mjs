@@ -65,7 +65,7 @@ const sections = [];
 // The bishopric roster is derived from `profiles` (real users), not seeded.
 sections.push(insertRows("members", mock.MOCK_MEMBERS));
 sections.push(insertRows("callings", mock.MOCK_CALLINGS, ["suggested_replacements"]));
-sections.push(insertRows("meetings", mock.MOCK_MEETINGS, ["agenda", "program"]));
+sections.push(insertRows("meetings", mock.MOCK_MEETINGS, ["agenda", "program", "sections"]));
 sections.push(insertRows("announcements", mock.MOCK_ANNOUNCEMENTS));
 sections.push(insertRows("interviews", mock.MOCK_INTERVIEWS));
 sections.push(insertRows("availability_blocks", mock.MOCK_AVAILABILITY));
