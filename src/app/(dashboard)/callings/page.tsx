@@ -1586,13 +1586,14 @@ export default function CallingsPage() {
 
   /** Bring a chart position into the pipeline — either to release its holder or to fill it. */
   function handleChartAction(action: "release" | "fill", entry: RosterEntry, org: string) {
-    setView("pipeline");
     // Don't duplicate a position that's already moving through the pipeline.
     const existing = callings.find(
       (c) => c.stage !== "recorded" && c.position === entry.position && (c.organization ?? "") === org
     );
     if (existing) {
       setSelected(existing);
+      // Filling drops you into the pipeline; marking a release stays on the chart.
+      if (action === "fill") setView("pipeline");
       return;
     }
     const now = new Date().toISOString();
@@ -1609,6 +1610,9 @@ export default function CallingsPage() {
       updatedAt:    now,
     };
     void callingsCollection.create(newCalling);
+    // A release just gets flagged on the chart (orange "Needs release" badge);
+    // filling a vacancy jumps to the pipeline to suggest a candidate.
+    if (action === "fill") setView("pipeline");
   }
 
   // ── Derived data ──────────────────────────────────────────────────────────
@@ -1674,8 +1678,8 @@ export default function CallingsPage() {
       {/* Pipeline flow summary (desktop only) */}
       {view === "pipeline" && <PipelineFlow callings={pipelineCallings} />}
 
-      {/* Business items banner */}
-      {bizItemCallings.length > 0 && (
+      {/* Business items banner (pipeline-related — hidden on the chart) */}
+      {view !== "chart" && bizItemCallings.length > 0 && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/60 p-4 space-y-2">
           <div className="flex items-center gap-2">
             <ClipboardList className="h-4 w-4 text-amber-700 dark:text-amber-300 shrink-0" />
@@ -1709,8 +1713,8 @@ export default function CallingsPage() {
         </div>
       )}
 
-      {/* Attention banner (shown only when no biz-item banner) */}
-      {attentionCallings.length > 0 && bizItemCallings.length === 0 && (
+      {/* Attention banner (shown only when no biz-item banner — hidden on the chart) */}
+      {view !== "chart" && attentionCallings.length > 0 && bizItemCallings.length === 0 && (
         <div className="rounded-xl border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/60 p-3 flex items-center gap-2">
           <AlertTriangle className="h-4 w-4 text-blue-600 dark:text-blue-400 shrink-0" />
           <p className="text-sm text-blue-800 dark:text-blue-200">
