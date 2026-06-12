@@ -26,7 +26,7 @@ export default function DashboardPage() {
     const upcomingMeetings   = meetings.filter((m) => m.status === "upcoming").length;
     const needsScheduling    = interviews.filter((i) => i.stage === "schedule_any" || i.stage === "schedule_bishop").length;
     const upcomingInterviews = interviews.filter((i) => i.stage === "scheduled" || i.stage === "pending_confirmation").length;
-    const callingsInProgress = callings.filter((c) => c.stage !== "recorded" && c.stage !== "vacant").length;
+    const callingsInProgress = callings.filter((c) => c.stage !== "recorded" && c.stage !== "vacant" && c.stage !== "needs_calling").length;
     const vacantCallings     = callings.filter((c) => c.stage === "vacant").length;
     return { upcomingMeetings, needsScheduling, upcomingInterviews, callingsInProgress, vacantCallings };
   }, [callings, meetings, interviews]);

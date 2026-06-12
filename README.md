@@ -60,9 +60,17 @@ metadata; otherwise role defaults to `counselor`.
 
 ## Database setup & schema changes
 
-Deploys **do not touch the database** — `build` runs only `next build`, so your
-data is preserved across deploys. Applying the schema is a deliberate, manual
-step.
+Migrations are tracked and applied automatically. A `schema_migrations` table
+records which files in `supabase/migrations` have run, and the runner
+(`scripts/migrate.mjs`) applies only the pending ones, each in a transaction —
+it never drops data. It runs as the `prebuild` step, so **every deploy applies
+any new migrations before the app builds**, as long as `SUPABASE_DB_URL` is set
+in that environment. Without `SUPABASE_DB_URL` it is a no-op, so local builds and
+previews are unaffected.
+
+```bash
+npm run db:migrate   # apply pending migrations (what prebuild runs)
+```
 
 **First-time setup** (or any disposable dev database): point `SUPABASE_DB_URL`
 at the database and run `npm run db:reset`. This applies the migrations and the
@@ -70,23 +78,28 @@ demo seed. ⚠️ It is destructive — it drops and recreates all app tables �
 only run it against a database you're willing to wipe, **never** production once
 it holds real data.
 
-**Evolving the schema in production:** add a new, forward-only migration (one
-that uses `alter table ... add column if not exists`, `create table if not
-exists`, etc. and does **not** drop existing data) and apply just that file to
-your production database — e.g. via the Supabase SQL editor or
-`psql "$SUPABASE_DB_URL" -f supabase/migrations/000N_*.sql`. The existing
-migrations include destructive teardown for the dev `db:reset` flow, so don't
-re-run them wholesale against production.
+**Evolving the schema:** add a new, forward-only migration — give it the next
+number (`000N_*.sql`) and use idempotent, non-destructive statements (`alter
+table ... add column if not exists`, `create table if not exists`, swap a
+constraint with `drop constraint if exists` then `add constraint`, etc.). It
+will be applied on the next deploy. The two original migrations (`0001`, `0002`)
+contain destructive teardown for the dev `db:reset` flow; the runner **baselines**
+them on an already-provisioned database (records them as applied without
+re-running) so production data is never wiped.
 
 ### Deploying on Vercel
 
 1. Import the repo into Vercel (Framework preset: Next.js — no Build Command
-   override needed; the default `npm run build` just builds the app).
+   override needed; the default `npm run build` runs migrations then builds).
 2. **Settings → Environment Variables**, add `NEXT_PUBLIC_SUPABASE_URL`,
    `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, and the `AI_*`
-   vars → **All Environments**. `SUPABASE_DB_URL` is **not** needed by the build;
-   only set it where you intend to run `db:reset`/migrations manually.
-3. Before your first deploy, run `npm run db:reset` once against your Supabase
-   database (see above) to create the schema.
-4. Deploy, then invite yourself under **Authentication → Users** in Supabase and
+   vars → **All Environments**.
+3. Add `SUPABASE_DB_URL` (Session pooler URI) → **Production only**. The
+   `prebuild` step uses it to apply pending migrations on each deploy. ⚠️ Keep it
+   off Preview/Development so feature-branch deploys don't migrate your
+   production database — without the var the migration step is a harmless no-op.
+4. Before your first deploy, run `npm run db:reset` once against your Supabase
+   database (see above) to create the schema and seed demo data. After that,
+   schema changes ride along automatically on each production deploy.
+5. Deploy, then invite yourself under **Authentication → Users** in Supabase and
    sign in.

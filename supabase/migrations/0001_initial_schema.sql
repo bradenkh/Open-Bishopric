@@ -140,9 +140,9 @@ create table public.callings (
   organization           text,
   stage                  text not null
                            check (stage in (
-                             'needs_release', 'vacant', 'extending', 'accepted',
-                             'sustaining', 'sustained', 'set_apart',
-                             'lcr_updated', 'recorded')),
+                             'needs_calling', 'vacant', 'needs_release',
+                             'extending', 'sustaining', 'set_apart',
+                             'lcr_update', 'recorded')),
   notes                  text,
   suggested_replacements jsonb,
   replacement_name       text,
