@@ -32,9 +32,9 @@ export const MOCK_MEMBERS: Member[] = [
 ];
 
 // ── Callings ──────────────────────────────────────────────────────────────────
-// Spread across all lifecycle stages so every kanban column has something.
-// Thomas Hughes (c07) is in "sustaining" for sacrament meeting without
-// businessItemAdded — this deliberately triggers the business-items banner.
+// Spread across all lifecycle stages so every kanban column has something:
+//   needs_calling → needs_release → extending → sustaining → set_apart
+//     → lcr_update → recorded
 
 export const MOCK_CALLINGS: Calling[] = [
   // ── Needs release (current holder being moved out) ──────────────────────────
@@ -66,12 +66,12 @@ export const MOCK_CALLINGS: Calling[] = [
     updatedAt: "2026-05-28T00:00:00Z",
   },
 
-  // ── Vacant positions ──────────────────────────────────────────────────────
+  // ── Needs calling (open positions) ─────────────────────────────────────────
   {
     id: "c01",
     position: "Primary President",
     organization: "Primary",
-    stage: "vacant",
+    stage: "needs_calling",
     notes: "Previous president moved out of ward last month",
     createdBy: "mock-bishop-001",
     createdAt: "2026-05-10T00:00:00Z",
@@ -81,20 +81,20 @@ export const MOCK_CALLINGS: Calling[] = [
     id: "c02",
     position: "Young Women President",
     organization: "Young Women",
-    stage: "vacant",
+    stage: "needs_calling",
     createdBy: "mock-bishop-001",
     createdAt: "2026-05-20T00:00:00Z",
     updatedAt: "2026-05-20T00:00:00Z",
   },
 
-  // ── Vacant with suggested candidates ──────────────────────────────────────
+  // ── Needs calling with suggested candidates ────────────────────────────────
   {
     id: "c03",
     memberId: "",
     memberName: "",
     position: "Sunday School Teacher",
     organization: "Sunday School",
-    stage: "vacant",
+    stage: "needs_calling",
     suggestedReplacements: ["Sarah Mitchell", "Anna Martinez"],
     notes: "Sarah has teaching experience, available Sundays",
     createdBy: "mock-bishop-001",
@@ -117,22 +117,23 @@ export const MOCK_CALLINGS: Calling[] = [
     updatedAt: "2026-05-21T14:00:00Z",
   },
 
-  // ── Accepted ──────────────────────────────────────────────────────────────
+  // ── Sustaining (accepted → on the sacrament-meeting business items) ─────────
   {
     id: "c06",
     memberId: "m05",
     memberName: "David Park",
     position: "Young Men Advisor",
     organization: "Young Men",
-    stage: "accepted",
+    stage: "sustaining",
     extendedBy: "Bishop Anderson",
     extendedAt: "2026-05-14T00:00:00Z",
+    sustainedIn: "sacrament_meeting",
+    sustainedDate: "2026-06-08",
+    businessItemAdded: true,
     createdBy: "mock-bishop-001",
     createdAt: "2026-05-10T00:00:00Z",
     updatedAt: "2026-05-14T00:00:00Z",
   },
-
-  // ── Sustaining (sacrament meeting — NO business item yet → triggers banner)
   {
     id: "c07",
     memberId: "m03",
@@ -144,23 +145,23 @@ export const MOCK_CALLINGS: Calling[] = [
     extendedAt: "2026-05-08T00:00:00Z",
     sustainedIn: "sacrament_meeting",
     sustainedDate: "2026-06-01",
-    businessItemAdded: false,           // ← deliberate: triggers the banner
+    businessItemAdded: true,
     createdBy: "mock-bishop-001",
     createdAt: "2026-05-01T00:00:00Z",
     updatedAt: "2026-05-22T00:00:00Z",
   },
 
-  // ── Sustained ─────────────────────────────────────────────────────────────
+  // ── Set apart (sustained — awaiting confirmation of the setting apart) ──────
   {
     id: "c08",
     memberId: "m06",
     memberName: "Anna Martinez",
     position: "Young Women Advisor",
     organization: "Young Women",
-    stage: "sustained",
+    stage: "set_apart",
     extendedBy: "Counselor Davis",
     extendedAt: "2026-04-22T00:00:00Z",
-    sustainedIn: "class",
+    sustainedIn: "sacrament_meeting",
     sustainedDate: "2026-05-11",
     businessItemAdded: true,
     createdBy: "mock-bishop-001",
@@ -168,14 +169,14 @@ export const MOCK_CALLINGS: Calling[] = [
     updatedAt: "2026-05-11T00:00:00Z",
   },
 
-  // ── Set Apart (LCR not updated yet) ───────────────────────────────────────
+  // ── Update LCR (set apart — awaiting the ward clerk to record it) ───────────
   {
     id: "c09",
     memberId: "m07",
     memberName: "Mark Williams",
     position: "Ward Clerk",
     organization: "Ward Clerk",
-    stage: "set_apart",
+    stage: "lcr_update",
     extendedBy: "Bishop Anderson",
     extendedAt: "2026-04-13T00:00:00Z",
     sustainedIn: "sacrament_meeting",
@@ -187,25 +188,20 @@ export const MOCK_CALLINGS: Calling[] = [
     createdAt: "2026-04-08T00:00:00Z",
     updatedAt: "2026-04-20T00:00:00Z",
   },
-
-  // ── LCR Updated (just needs to be archived) ───────────────────────────────
   {
     id: "c10",
     memberId: "m08",
     memberName: "Jennifer Kim",
     position: "Relief Society Teacher",
     organization: "Relief Society",
-    stage: "lcr_updated",
+    stage: "lcr_update",
     extendedBy: "Counselor Hughes",
     extendedAt: "2026-03-27T00:00:00Z",
-    sustainedIn: "class",
+    sustainedIn: "sacrament_meeting",
     sustainedDate: "2026-04-06",
     businessItemAdded: true,
     setApartBy: "Counselor Hughes",
     setApartDate: "2026-04-06",
-    lcrUpdated: true,
-    lcrUpdatedBy: "Ward Clerk",
-    lcrUpdatedAt: "2026-04-07T00:00:00Z",
     createdBy: "mock-bishop-001",
     createdAt: "2026-03-20T00:00:00Z",
     updatedAt: "2026-04-07T00:00:00Z",

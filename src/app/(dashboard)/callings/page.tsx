@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/dialog";
 import { useAuth } from "@/contexts/AuthContext";
 import { useData, useTasks, newId } from "@/contexts/DataContext";
-import type { Calling, CallingStage, SustainedVenue, Task, RosterGroup, RosterEntry } from "@/types";
+import type { Calling, CallingStage, Task, RosterGroup, RosterEntry } from "@/types";
 import { CALLING_STAGES, CALLING_PIPELINE } from "@/types";
 import { cn } from "@/lib/utils";
 
@@ -26,13 +26,25 @@ import { cn } from "@/lib/utils";
 
 function normalizeStage(stage: string): CallingStage {
   const legacy: Record<string, CallingStage> = {
-    identified: "vacant",
-    discussing: "vacant",
-    approved: "extending",
-    extended: "extending",
-    responded: "accepted",
+    identified:  "needs_calling",
+    discussing:  "needs_calling",
+    vacant:      "needs_calling",
+    approved:    "extending",
+    extended:    "extending",
+    responded:   "sustaining",
+    accepted:    "sustaining",
+    sustained:   "set_apart",
+    lcr_updated: "lcr_update",
   };
   return (legacy[stage] ?? stage) as CallingStage;
+}
+
+/** ISO date (yyyy-mm-dd) of the upcoming Sunday — used as the default sustaining date. */
+function upcomingSundayISO(): string {
+  const d = new Date();
+  const offset = (7 - d.getDay()) % 7; // 0 if today is Sunday
+  d.setDate(d.getDate() + offset);
+  return d.toISOString().slice(0, 10);
 }
 
 function stageLabel(stage: CallingStage): string {
@@ -53,48 +65,38 @@ function getInitials(name: string): string {
 }
 
 const STAGE_COLORS: Record<CallingStage, string> = {
+  needs_calling: "bg-red-100 text-red-800 dark:bg-red-900/60 dark:text-red-200",
   needs_release: "bg-orange-100 text-orange-800 dark:bg-orange-900/60 dark:text-orange-200",
-  vacant:      "bg-red-100 text-red-800 dark:bg-red-900/60 dark:text-red-200",
   extending:   "bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-200",
-  accepted:    "bg-sky-100 text-sky-800 dark:bg-sky-900/60 dark:text-sky-200",
   sustaining:  "bg-purple-100 text-purple-800 dark:bg-purple-900/60 dark:text-purple-200",
-  sustained:   "bg-violet-100 text-violet-800 dark:bg-violet-900/60 dark:text-violet-200",
   set_apart:   "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/60 dark:text-indigo-200",
-  lcr_updated: "bg-teal-100 text-teal-800 dark:bg-teal-900/60 dark:text-teal-200",
+  lcr_update:  "bg-teal-100 text-teal-800 dark:bg-teal-900/60 dark:text-teal-200",
   recorded:    "bg-green-100 text-green-800 dark:bg-green-900/60 dark:text-green-200",
 };
 
 // Per-stage column header styling
 const STAGE_COLUMN_COLORS: Record<CallingStage, { header: string; ring: string; drop: string }> = {
+  needs_calling: { header: "bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-800",       ring: "ring-red-400",    drop: "bg-red-50/60 dark:bg-red-950/20" },
   needs_release: { header: "bg-orange-50 border-orange-200 dark:bg-orange-950/30 dark:border-orange-800", ring: "ring-orange-400", drop: "bg-orange-50/60 dark:bg-orange-950/20" },
-  vacant:      { header: "bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-800",       ring: "ring-red-400",    drop: "bg-red-50/60 dark:bg-red-950/20" },
   extending:   { header: "bg-blue-50 border-blue-200 dark:bg-blue-950/30 dark:border-blue-800",   ring: "ring-blue-400",   drop: "bg-blue-50/60 dark:bg-blue-950/20" },
-  accepted:    { header: "bg-sky-50 border-sky-200 dark:bg-sky-950/30 dark:border-sky-800",       ring: "ring-sky-400",    drop: "bg-sky-50/60 dark:bg-sky-950/20" },
   sustaining:  { header: "bg-purple-50 border-purple-200 dark:bg-purple-950/30 dark:border-purple-800", ring: "ring-purple-400", drop: "bg-purple-50/60 dark:bg-purple-950/20" },
-  sustained:   { header: "bg-violet-50 border-violet-200 dark:bg-violet-950/30 dark:border-violet-800", ring: "ring-violet-400", drop: "bg-violet-50/60 dark:bg-violet-950/20" },
   set_apart:   { header: "bg-indigo-50 border-indigo-200 dark:bg-indigo-950/30 dark:border-indigo-800", ring: "ring-indigo-400", drop: "bg-indigo-50/60 dark:bg-indigo-950/20" },
-  lcr_updated: { header: "bg-teal-50 border-teal-200 dark:bg-teal-950/30 dark:border-teal-800",   ring: "ring-teal-400",   drop: "bg-teal-50/60 dark:bg-teal-950/20" },
+  lcr_update:  { header: "bg-teal-50 border-teal-200 dark:bg-teal-950/30 dark:border-teal-800",   ring: "ring-teal-400",   drop: "bg-teal-50/60 dark:bg-teal-950/20" },
   recorded:    { header: "bg-green-50 border-green-200 dark:bg-green-950/30 dark:border-green-800", ring: "ring-green-400", drop: "bg-green-50/60 dark:bg-green-950/20" },
 };
 
 const NEXT_ACTION: Partial<Record<CallingStage, string>> = {
+  needs_calling: "Suggest a candidate & extend",
   needs_release: "Suggest & choose a replacement",
-  vacant:      "Suggest a candidate & extend",
   extending:   "Follow up — awaiting response",
-  accepted:    "Schedule sustaining",
-  sustaining:  "Confirm at meeting",
-  sustained:   "Set apart",
-  set_apart:   "Update LCR",
-  lcr_updated: "Mark complete",
+  sustaining:  "Confirm sustained at meeting",
+  set_apart:   "Confirm they were set apart",
+  lcr_update:  "Clerk: update LCR",
 };
 
 function attentionMessage(c: Calling): string | null {
-  if (c.stage === "sustaining" && c.sustainedIn === "sacrament_meeting" && !c.businessItemAdded) {
-    return "Add to business items";
-  }
-  if (c.stage === "accepted")    return "Schedule sustaining";
-  if (c.stage === "set_apart")   return "Update LCR";
-  if (c.stage === "lcr_updated") return "Ready to archive";
+  if (c.stage === "set_apart")  return "Confirm set apart";
+  if (c.stage === "lcr_update") return "Awaiting LCR update";
   return null;
 }
 
@@ -153,9 +155,6 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
   const [releasingMember, setReleasingMember] = useState(
     EXTENDING_MEMBERS.find((m) => m.name === calling.releasedBy)?.id ?? ""
   );
-  const [sustainedIn,     setSustainedIn]     = useState<SustainedVenue>("sacrament_meeting");
-  const [sustainedDate,   setSustainedDate]   = useState(calling.sustainedDate ?? "");
-  const [bizAdded,        setBizAdded]        = useState(calling.businessItemAdded ?? false);
   // Set apart — bishopric member dropdown
   const [setApartMember,  setSetApartMember]  = useState(
     SET_APART_MEMBERS.find((m) => m.name === calling.setApartBy)?.id ?? ""
@@ -353,7 +352,7 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
               onClick={() => {
                 addReleaseTask(releaser!);
                 onSave({
-                  stage:                 "vacant",
+                  stage:                 "needs_calling",
                   memberName:            "",
                   releasedName:          calling.memberName || undefined,
                   releasedBy:            releaser!.name,
@@ -362,7 +361,7 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
                 });
               }}
             >
-              Release &amp; leave vacant
+              Release &amp; leave open
             </Button>
           )}
           <Button variant="ghost" onClick={onClose}>Not Yet</Button>
@@ -372,7 +371,7 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
   }
 
   if (stage === "needs_release") return suggestExtendBody(true);
-  if (stage === "vacant")        return suggestExtendBody(false);
+  if (stage === "needs_calling") return suggestExtendBody(false);
 
   if (stage === "extending") {
     return (
@@ -398,7 +397,14 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
               onClick={() => {
                 // Auto-complete the open extend task for this calling
                 completeCallingTasks(calling.id);
-                onSave({ stage: "accepted" });
+                // Accepting jumps straight to sustaining and is automatically
+                // added to the upcoming sacrament-meeting business items.
+                onSave({
+                  stage:             "sustaining",
+                  sustainedIn:       "sacrament_meeting",
+                  sustainedDate:     upcomingSundayISO(),
+                  businessItemAdded: true,
+                });
               }}
             >
               Accepted ✓
@@ -417,7 +423,7 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
               />
             </div>
             <p className="text-xs text-muted-foreground">
-              The position will return to <strong>Vacant</strong> so you can suggest another candidate.
+              The position will return to <strong>Needs Calling</strong> so you can suggest another candidate.
             </p>
             <div className="flex justify-end gap-2">
               <Button variant="ghost" size="sm" onClick={() => setShowDeclineForm(false)}>Back</Button>
@@ -428,7 +434,7 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
                   // Auto-complete the open extend task
                   completeCallingTasks(calling.id);
                   onSave({
-                    stage:         "vacant",
+                    stage:         "needs_calling",
                     declineReason: declineReason.trim() || undefined,
                     declinedAt:    new Date().toISOString(),
                     memberName:    "",
@@ -444,115 +450,39 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
     );
   }
 
-  if (stage === "accepted") {
-    return (
-      <div className="border-t pt-4 space-y-3">
-        <p className="text-sm font-semibold">Schedule Sustaining</p>
-        <p className="text-sm text-muted-foreground">
-          Where and when will <strong>{name}</strong> be sustained?
-        </p>
-        <div className="space-y-1.5">
-          <Label>Where</Label>
-          <div className="flex gap-4">
-            {([["sacrament_meeting", "Sacrament Meeting"], ["class", "Class / Quorum"]] as [SustainedVenue, string][]).map(([val, label]) => (
-              <label key={val} className="flex items-center gap-2 text-sm cursor-pointer">
-                <input
-                  type="radio"
-                  name="sustainedIn"
-                  value={val}
-                  checked={sustainedIn === val}
-                  onChange={() => setSustainedIn(val)}
-                />
-                {label}
-              </label>
-            ))}
-          </div>
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="sustainedDate">Date</Label>
-          <Input
-            id="sustainedDate"
-            type="date"
-            value={sustainedDate}
-            onChange={(e) => setSustainedDate(e.target.value)}
-          />
-        </div>
-        {sustainedIn === "sacrament_meeting" && (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/60 p-3 flex gap-2 text-sm text-amber-800 dark:text-amber-200">
-            <ClipboardList className="h-4 w-4 shrink-0 mt-0.5" />
-            <span>
-              <strong>Reminder:</strong> Add this to the business items document so counselors know to announce it.
-            </span>
-          </div>
-        )}
-        <div className="flex justify-end gap-2">
-          <Button variant="outline" onClick={onClose}>Not Yet</Button>
-          <Button
-            onClick={() => onSave({
-              stage:             "sustaining",
-              sustainedIn,
-              sustainedDate:     sustainedDate || undefined,
-              businessItemAdded: sustainedIn === "class",
-            })}
-          >
-            Schedule
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
   if (stage === "sustaining") {
-    const needsBizItem = calling.sustainedIn === "sacrament_meeting" && !bizAdded;
     return (
       <div className="border-t pt-4 space-y-3">
         <p className="text-sm font-semibold">Confirm Sustained</p>
         <p className="text-sm text-muted-foreground">
-          Has <strong>{name}</strong> been sustained
-          {calling.sustainedIn === "sacrament_meeting" ? " in sacrament meeting" : " in their class/quorum"}
+          Has <strong>{name}</strong> been sustained in sacrament meeting
           {calling.sustainedDate ? ` on ${calling.sustainedDate}` : ""}?
         </p>
-        {needsBizItem && (
-          <div className="rounded-lg border border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/60 p-3 space-y-2">
-            <div className="flex gap-2 text-sm text-red-800 dark:text-red-200">
-              <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
-              <span>
-                <strong>Action required:</strong> This calling has not been added to the business items document yet.
-              </span>
-            </div>
-            <label className="flex items-center gap-2 text-sm cursor-pointer">
-              <input
-                type="checkbox"
-                checked={bizAdded}
-                onChange={(e) => setBizAdded(e.target.checked)}
-              />
-              I have added this to the business items document
-            </label>
-          </div>
-        )}
+        <div className="rounded-lg border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/60 p-3 flex gap-2 text-xs text-blue-800 dark:text-blue-200">
+          <ClipboardList className="h-4 w-4 shrink-0 mt-0.5" />
+          <span>
+            This calling is on the sacrament-meeting business items
+            {calling.sustainedDate ? ` for ${calling.sustainedDate}` : " for the upcoming meeting"}.
+          </span>
+        </div>
         <div className="flex justify-end gap-2">
           <Button variant="outline" onClick={onClose}>Not Yet</Button>
-          <Button
-            disabled={needsBizItem && !bizAdded}
-            onClick={() => onSave({ stage: "sustained", businessItemAdded: true })}
-          >
-            Confirm Sustained
-          </Button>
+          <Button onClick={() => onSave({ stage: "set_apart" })}>Confirm Sustained</Button>
         </div>
       </div>
     );
   }
 
-  if (stage === "sustained") {
+  if (stage === "set_apart") {
     const selectedMember = SET_APART_MEMBERS.find((m) => m.id === setApartMember);
     return (
       <div className="border-t pt-4 space-y-3">
-        <p className="text-sm font-semibold">Assign: Setting Apart</p>
+        <p className="text-sm font-semibold">Confirm Setting Apart</p>
         <p className="text-sm text-muted-foreground">
-          Who will set <strong>{name}</strong> apart, and when?
+          Who set <strong>{name}</strong> apart, and when?
         </p>
         <div className="space-y-1.5">
-          <Label>Assigned to</Label>
+          <Label>Set apart by</Label>
           <Select value={setApartMember} onValueChange={setSetApartMember}>
             <SelectTrigger>
               <SelectValue placeholder="Select a bishopric member…" />
@@ -567,7 +497,7 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
           </Select>
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="setApartDate">Date</Label>
+          <Label htmlFor="setApartDate">Date set apart</Label>
           <Input
             id="setApartDate"
             type="date"
@@ -576,11 +506,9 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
           />
         </div>
         {selectedMember && (
-          <div className="rounded-lg border border-violet-200 bg-violet-50 dark:border-violet-800 dark:bg-violet-950/60 p-3 space-y-1 text-xs text-violet-800 dark:text-violet-200">
-            <p>A task will be added to <strong>{selectedMember.name}&apos;s</strong> todos to set {name} apart.</p>
-            <p className="text-violet-600 dark:text-violet-300">
-              ✓ After they check it off, the ward clerk will be automatically notified to update LCR.
-            </p>
+          <div className="rounded-lg border border-teal-200 bg-teal-50 dark:border-teal-800 dark:bg-teal-950/60 p-3 text-xs text-teal-800 dark:text-teal-200">
+            Once confirmed, this moves to <strong>Update LCR</strong> so the ward clerk can record the
+            calling in Leader &amp; Clerk Resources.
           </div>
         )}
         <div className="flex justify-end gap-2">
@@ -589,66 +517,41 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
             disabled={!setApartMember}
             onClick={() => {
               const member = SET_APART_MEMBERS.find((m) => m.id === setApartMember)!;
-              // Create set-apart task — when checked off, clerk LCR task is auto-created
-              addTask(makeCallingTask(calling, {
-                title:        `Set apart — ${name} as ${calling.position}`,
-                description:  `Set ${name} apart as ${calling.position}${calling.organization ? ` (${calling.organization})` : ""}${setApartDate ? ` on ${setApartDate}` : ""}.`,
-                assigneeId:   member.id,
-                assigneeName: member.name,
-                context: {
-                  callingId:    calling.id,
-                  taskType:     "set_apart",
-                  position:     calling.position,
-                  setApartDate: setApartDate || undefined,
-                  setApartBy:   member.name,
-                },
-              }));
-              onSave({ stage: "set_apart", setApartBy: member.name, setApartDate: setApartDate || undefined });
+              onSave({ stage: "lcr_update", setApartBy: member.name, setApartDate: setApartDate || undefined });
             }}
           >
-            Assign &amp; Schedule
+            Confirm Set Apart
           </Button>
         </div>
       </div>
     );
   }
 
-  if (stage === "set_apart") {
-    // LCR update is handled by the clerk via the auto-created task.
-    // The bishop can also manually confirm here.
+  if (stage === "lcr_update") {
     const clerk = bishopric.find((m) => m.role === "clerk");
     return (
       <div className="border-t pt-4 space-y-3">
-        <p className="text-sm font-semibold">Awaiting LCR Update</p>
+        <p className="text-sm font-semibold">Update LCR</p>
         <p className="text-sm text-muted-foreground">
-          <strong>{name}</strong> was set apart by{" "}
-          <strong>{calling.setApartBy ?? "bishopric member"}</strong>
-          {calling.setApartDate ? ` on ${calling.setApartDate}` : ""}.
+          <strong>{name}</strong> was set apart
+          {calling.setApartBy ? <> by <strong>{calling.setApartBy}</strong></> : null}
+          {calling.setApartDate ? ` on ${calling.setApartDate}` : ""}. Awaiting the ward clerk to record
+          it in Leader &amp; Clerk Resources.
         </p>
-        <div className="rounded-lg border border-teal-200 bg-teal-50 dark:border-teal-800 dark:bg-teal-950/60 p-3 text-xs text-teal-800 dark:text-teal-200 space-y-1">
-          <p className="font-medium">Clerk notification</p>
-          <p>
-            {clerk
-              ? <><strong>{clerk.name}</strong> has a task to update LCR for this calling.</>
-              : "A task was created for the ward clerk to update LCR."
-            }{" "}
-            Once they check it off, you can mark this calling complete.
-          </p>
-        </div>
         <label className="flex items-center gap-2 text-sm cursor-pointer">
           <input
             type="checkbox"
             checked={lcrConfirmed}
             onChange={(e) => setLcrConfirmed(e.target.checked)}
           />
-          I confirm LCR has been updated and {name} is recorded as set apart
+          I confirm {name} has been updated in LCR
         </label>
         <div className="flex justify-end gap-2">
           <Button variant="outline" onClick={onClose}>Close</Button>
           <Button
             disabled={!lcrConfirmed}
             onClick={() => onSave({
-              stage:        "lcr_updated",
+              stage:        "recorded",
               lcrUpdated:   true,
               lcrUpdatedBy: clerk?.name ?? "Ward Clerk",
               lcrUpdatedAt: new Date().toISOString(),
@@ -656,24 +559,6 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
           >
             Confirm LCR Updated
           </Button>
-        </div>
-      </div>
-    );
-  }
-
-  if (stage === "lcr_updated") {
-    return (
-      <div className="border-t pt-4 space-y-3">
-        <div className="rounded-lg border border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950/60 p-3 flex gap-2 text-sm text-green-800 dark:text-green-200">
-          <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
-          <span>
-            All steps complete for <strong>{name}&apos;s</strong> calling as{" "}
-            <strong>{calling.position}</strong>. Archive it to keep your pipeline clean.
-          </span>
-        </div>
-        <div className="flex justify-end gap-2">
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={() => onSave({ stage: "recorded" })}>Mark Complete</Button>
         </div>
       </div>
     );
@@ -776,7 +661,7 @@ function CallingCard({
         </div>
       </div>
 
-      {(calling.stage === "needs_release" || calling.stage === "vacant") && (() => {
+      {(calling.stage === "needs_release" || calling.stage === "needs_calling") && (() => {
         const isRelease   = calling.stage === "needs_release";
         const suggestions = calling.suggestedReplacements ?? [];
         const chosenExtra =
@@ -1599,7 +1484,7 @@ export default function CallingsPage() {
       position:     form.position.trim(),
       organization: form.organization.trim(),
       notes:        form.notes.trim(),
-      stage:        "vacant",
+      stage:        "needs_calling",
       suggestedReplacements: seededName ? [seededName] : [],
       createdBy:    user?.uid ?? "mock",
       createdAt:    now,
@@ -1631,7 +1516,7 @@ export default function CallingsPage() {
       position:     entry.position,
       organization: org,
       notes:        "",
-      stage:        action === "release" ? "needs_release" : "vacant",
+      stage:        action === "release" ? "needs_release" : "needs_calling",
       createdBy:    user?.uid ?? "mock",
       createdAt:    now,
       updatedAt:    now,
@@ -1646,7 +1531,7 @@ export default function CallingsPage() {
 
   const pipelineCallings  = callings.filter((c) => c.stage !== "recorded");
   const completeCallings  = callings.filter((c) => c.stage === "recorded");
-  const vacantCallings    = callings.filter((c) => c.stage === "vacant");
+  const needsCallingCallings = callings.filter((c) => c.stage === "needs_calling");
   const attentionCallings = pipelineCallings.filter((c) => attentionMessage(c));
 
   const rosterVacancies = useMemo(
@@ -1684,8 +1569,8 @@ export default function CallingsPage() {
           <h1 className="text-2xl font-bold tracking-tight">Callings</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             {pipelineCallings.length} active
-            {vacantCallings.length > 0 && (
-              <span className="text-red-600 dark:text-red-400"> · {vacantCallings.length} vacant</span>
+            {needsCallingCallings.length > 0 && (
+              <span className="text-red-600 dark:text-red-400"> · {needsCallingCallings.length} need a calling</span>
             )}
             {attentionCallings.length > 0 && (
               <span className="text-amber-600 dark:text-amber-400"> · {attentionCallings.length} need attention</span>

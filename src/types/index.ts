@@ -74,48 +74,44 @@ export interface Task {
 /**
  * The ordered pipeline every calling moves through.
  *
- *   needs_release → vacant → extending → accepted
- *     → sustaining → sustained → set_apart → lcr_updated → recorded
+ *   needs_calling → needs_release → extending
+ *     → sustaining → set_apart → lcr_update → recorded
  *
- * Candidates are suggested during needs_release / vacant; once one is chosen a
- * counselor is assigned to extend. A decline resets the position to vacant.
+ * Candidates are suggested during needs_calling / needs_release; once one is
+ * chosen a counselor is assigned to extend. When the person accepts, the card
+ * jumps straight to sustaining and is added to the sacrament-meeting business
+ * items. A decline resets the position to needs_calling.
  */
 export type CallingStage =
+  | "needs_calling" // Open position / person who needs a calling — suggest a candidate, then extend
   | "needs_release" // Current holder needs to be released (creates the vacancy)
-  | "vacant"      // Position open — suggest candidates, then extend
   | "extending"   // Bishopric member reaching out to extend
-  | "accepted"    // Person accepted the calling
-  | "sustaining"  // Scheduled for sustaining vote
-  | "sustained"   // Sustained in sacrament meeting or class
-  | "set_apart"   // Set apart by priesthood leader
-  | "lcr_updated" // Updated in Leader & Clerk Resources
-  | "recorded";   // Fully complete / archived
+  | "sustaining"  // Accepted — to be sustained in sacrament meeting (auto-added to business items)
+  | "set_apart"   // Sustained — awaiting a bishopric member to confirm the setting apart
+  | "lcr_update"  // Set apart — awaiting the ward clerk to update Leader & Clerk Resources
+  | "recorded";   // Updated in LCR — fully complete / archived
 
 export type SustainedVenue = "sacrament_meeting" | "class";
 
 /** Ordered list used for pipeline display and progress math. */
 export const CALLING_PIPELINE: CallingStage[] = [
+  "needs_calling",
   "needs_release",
-  "vacant",
   "extending",
-  "accepted",
   "sustaining",
-  "sustained",
   "set_apart",
-  "lcr_updated",
+  "lcr_update",
   "recorded",
 ];
 
 export const CALLING_STAGES: { stage: CallingStage; label: string }[] = [
+  { stage: "needs_calling", label: "Needs Calling" },
   { stage: "needs_release", label: "Needs Release" },
-  { stage: "vacant",      label: "Vacant" },
   { stage: "extending",   label: "Extending" },
-  { stage: "accepted",    label: "Accepted" },
   { stage: "sustaining",  label: "To Be Sustained" },
-  { stage: "sustained",   label: "Sustained" },
   { stage: "set_apart",   label: "Set Apart" },
-  { stage: "lcr_updated", label: "LCR Updated" },
-  { stage: "recorded",    label: "Complete" },
+  { stage: "lcr_update",  label: "Update LCR" },
+  { stage: "recorded",    label: "Sustained in LCR" },
 ];
 
 export interface Calling {
