@@ -526,9 +526,13 @@ export interface RosterEntry {
   setApart?: boolean;
   /** True for ward-defined custom callings (marked * in LCR). */
   custom?: boolean;
+  /** Hidden from the Chart view via calling settings. Still kept in the roster. */
+  hidden?: boolean;
 }
 
 export interface RosterGroup {
+  /** DB row id. Present on persisted rosters; absent for in-memory mock data. */
+  id?: string;
   /** Top-level organization, e.g. "Elders Quorum". */
   org: string;
   /** Optional sub-section within the organization, e.g. "Presidency". */

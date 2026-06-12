@@ -17,6 +17,8 @@ import type {
   InterviewType,
   Meeting,
   Member,
+  RosterEntry,
+  RosterGroup,
   SacramentProgram,
   Task,
 } from "@/types";
@@ -126,6 +128,118 @@ export const getCallings = tool({
     const { data, error } = await query;
     if (error) throw error;
     return (data ?? []).map((r) => fromRow<Calling>(r));
+  },
+});
+
+// ── Roster / organization chart (the Chart tab) ──────────────────────────────
+// The standing org chart of every position and who holds it — what an LCR
+// "Organizations and Callings" report shows. Distinct from the calling pipeline
+// (`callings`), which is the workflow for filling one position at a time.
+
+/** org|||position|||member key used to carry 'hidden from chart' flags across a replace. */
+function rosterEntryKey(org: string, position: string, member?: string): string {
+  return `${org}|||${position}|||${member ?? ""}`;
+}
+
+export const getRoster = tool({
+  description:
+    "Get the ward roster / organization chart (the Chart tab): every organization and the positions in it, with who holds each (or that it's vacant). Use to answer who holds a calling or which positions are vacant. This is the standing org chart — separate from the calling pipeline (getCallings).",
+  inputSchema: z.object({
+    org: z.string().optional().describe("Filter to one organization by name (partial match), e.g. 'Relief Society'"),
+    vacantOnly: z.boolean().optional().default(false).describe("Only return vacant (unfilled) positions"),
+  }),
+  execute: async ({ org, vacantOnly = false }) => {
+    let query = db().from("roster_groups").select("*").order("position");
+    if (org) query = query.ilike("org", `%${org}%`);
+    const { data, error } = await query;
+    if (error) throw error;
+    const groups = (data ?? []).map((r) => fromRow<RosterGroup>(r));
+    return groups
+      .map((g) => ({
+        org: g.org,
+        subOrg: g.subOrg,
+        entries: (g.entries ?? []).filter((e) => !vacantOnly || !e.member),
+      }))
+      .filter((g) => g.entries.length > 0);
+  },
+});
+
+const rosterEntrySchema = z.object({
+  position: z.string().describe("Calling/position name, e.g. 'Elders Quorum President'"),
+  member: z.string().optional().describe("Holder's name as shown in LCR ('Last, First'); omit for a vacant position"),
+  sustained: z.string().optional().describe("Sustained date, verbatim, e.g. '2 Mar 2025'"),
+  setApart: z.boolean().optional().describe("True if the holder has been set apart"),
+  custom: z.boolean().optional().describe("True for ward-defined custom callings (marked * in LCR)"),
+});
+
+export const importRoster = tool({
+  description:
+    "Replace the ENTIRE ward roster / organization chart (the Chart tab) in one call. Use this to bulk-import all of the ward's callings — e.g. from a pasted LCR 'Organizations and Callings' report. Parse the source into organizations (org), optional sub-sections (subOrg), and their positions (entries), keeping the order they appear. This REPLACES the whole roster, so you must include every position — anything omitted is removed. Per-position 'hidden from chart' settings are carried over automatically by matching org+position+member. This does not touch the calling pipeline (getCallings).",
+  inputSchema: z.object({
+    groups: z
+      .array(
+        z.object({
+          org: z.string().describe("Top-level organization, e.g. 'Bishopric', 'Elders Quorum', 'Relief Society'"),
+          subOrg: z.string().optional().describe("Optional sub-section within the org, e.g. 'Presidency', 'Teachers'"),
+          entries: z.array(rosterEntrySchema).describe("Positions in this group, in display order"),
+        }),
+      )
+      .describe("Every roster group for the ward, in display order"),
+  }),
+  execute: async ({ groups }) => {
+    if (groups.length === 0) {
+      return { error: "Provide at least one organization group — an empty roster would wipe the chart." };
+    }
+    const database = db();
+
+    // Existing rows: needed to carry 'hidden' flags forward and to delete after a
+    // successful insert (insert-then-delete avoids data loss if the insert fails).
+    const { data: existingRows, error: exErr } = await database.from("roster_groups").select("id, org, entries");
+    if (exErr) throw exErr;
+
+    const hiddenKeys = new Set<string>();
+    for (const row of existingRows ?? []) {
+      const rowOrg = row.org as string;
+      for (const e of (row.entries as RosterEntry[] | null) ?? []) {
+        if (e.hidden) hiddenKeys.add(rosterEntryKey(rowOrg, e.position, e.member));
+      }
+    }
+
+    const newRows = groups.map((g, i) => ({
+      id: crypto.randomUUID(),
+      org: g.org,
+      sub_org: g.subOrg ?? null,
+      position: i,
+      entries: g.entries.map((e) => {
+        const entry: RosterEntry = { position: e.position };
+        if (e.member) entry.member = e.member;
+        if (e.sustained) entry.sustained = e.sustained;
+        if (e.setApart != null) entry.setApart = e.setApart;
+        if (e.custom != null) entry.custom = e.custom;
+        if (hiddenKeys.has(rosterEntryKey(g.org, e.position, e.member))) entry.hidden = true;
+        return entry;
+      }),
+    }));
+
+    const { error: insErr } = await database.from("roster_groups").insert(newRows);
+    if (insErr) throw insErr;
+
+    const oldIds = (existingRows ?? []).map((r) => r.id as string);
+    if (oldIds.length > 0) {
+      const { error: delErr } = await database.from("roster_groups").delete().in("id", oldIds);
+      if (delErr) throw delErr;
+    }
+
+    const positions = groups.reduce((n, g) => n + g.entries.length, 0);
+    const filled = groups.reduce((n, g) => n + g.entries.filter((e) => e.member).length, 0);
+    return {
+      ok: true,
+      organizations: groups.length,
+      positions,
+      filled,
+      vacant: positions - filled,
+      hiddenPreserved: hiddenKeys.size,
+    };
   },
 });
 
@@ -723,6 +837,9 @@ export const agentTools = {
   createTask,
   updateTaskStatus,
   getCallings,
+  // Roster / org chart (Chart tab)
+  getRoster,
+  importRoster,
   // Interviews
   getInterviews,
   getInterviewers,
