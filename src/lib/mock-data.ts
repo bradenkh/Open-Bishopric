@@ -33,10 +33,34 @@ export const MOCK_MEMBERS: Member[] = [
 
 // ── Callings ──────────────────────────────────────────────────────────────────
 // Spread across all lifecycle stages so every kanban column has something:
-//   needs_calling → needs_release → extending → sustaining → set_apart
-//     → lcr_update → recorded
+//   needs_calling / vacant → needs_release → extending → sustaining
+//     → set_apart → lcr_update → recorded
 
 export const MOCK_CALLINGS: Calling[] = [
+  // ── Needs calling (members who need a calling — no position yet) ─────────────
+  {
+    id: "c00c",
+    memberId: "m10",
+    memberName: "Emily Chen",
+    position: "",
+    stage: "needs_calling",
+    notes: "Recently returned to activity — would love a teaching calling.",
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-06-02T00:00:00Z",
+    updatedAt: "2026-06-02T00:00:00Z",
+  },
+  {
+    id: "c00d",
+    memberId: "m12",
+    memberName: "Linda Brown",
+    position: "",
+    stage: "needs_calling",
+    notes: "Available weekday evenings.",
+    createdBy: "mock-bishop-001",
+    createdAt: "2026-06-04T00:00:00Z",
+    updatedAt: "2026-06-04T00:00:00Z",
+  },
+
   // ── Needs release (current holder being moved out) ──────────────────────────
   {
     id: "c00a",
@@ -66,12 +90,12 @@ export const MOCK_CALLINGS: Calling[] = [
     updatedAt: "2026-05-28T00:00:00Z",
   },
 
-  // ── Needs calling (open positions) ─────────────────────────────────────────
+  // ── Vacant positions ───────────────────────────────────────────────────────
   {
     id: "c01",
     position: "Primary President",
     organization: "Primary",
-    stage: "needs_calling",
+    stage: "vacant",
     notes: "Previous president moved out of ward last month",
     createdBy: "mock-bishop-001",
     createdAt: "2026-05-10T00:00:00Z",
@@ -81,20 +105,20 @@ export const MOCK_CALLINGS: Calling[] = [
     id: "c02",
     position: "Young Women President",
     organization: "Young Women",
-    stage: "needs_calling",
+    stage: "vacant",
     createdBy: "mock-bishop-001",
     createdAt: "2026-05-20T00:00:00Z",
     updatedAt: "2026-05-20T00:00:00Z",
   },
 
-  // ── Needs calling with suggested candidates ────────────────────────────────
+  // ── Vacant with suggested candidates ───────────────────────────────────────
   {
     id: "c03",
     memberId: "",
     memberName: "",
     position: "Sunday School Teacher",
     organization: "Sunday School",
-    stage: "needs_calling",
+    stage: "vacant",
     suggestedReplacements: ["Sarah Mitchell", "Anna Martinez"],
     notes: "Sarah has teaching experience, available Sundays",
     createdBy: "mock-bishop-001",

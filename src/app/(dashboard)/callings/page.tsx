@@ -26,9 +26,8 @@ import { cn } from "@/lib/utils";
 
 function normalizeStage(stage: string): CallingStage {
   const legacy: Record<string, CallingStage> = {
-    identified:  "needs_calling",
-    discussing:  "needs_calling",
-    vacant:      "needs_calling",
+    identified:  "vacant",
+    discussing:  "vacant",
     approved:    "extending",
     extended:    "extending",
     responded:   "sustaining",
@@ -65,7 +64,8 @@ function getInitials(name: string): string {
 }
 
 const STAGE_COLORS: Record<CallingStage, string> = {
-  needs_calling: "bg-red-100 text-red-800 dark:bg-red-900/60 dark:text-red-200",
+  needs_calling: "bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200",
+  vacant:      "bg-red-100 text-red-800 dark:bg-red-900/60 dark:text-red-200",
   needs_release: "bg-orange-100 text-orange-800 dark:bg-orange-900/60 dark:text-orange-200",
   extending:   "bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-200",
   sustaining:  "bg-purple-100 text-purple-800 dark:bg-purple-900/60 dark:text-purple-200",
@@ -76,7 +76,8 @@ const STAGE_COLORS: Record<CallingStage, string> = {
 
 // Per-stage column header styling
 const STAGE_COLUMN_COLORS: Record<CallingStage, { header: string; ring: string; drop: string }> = {
-  needs_calling: { header: "bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-800",       ring: "ring-red-400",    drop: "bg-red-50/60 dark:bg-red-950/20" },
+  needs_calling: { header: "bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-800", ring: "ring-amber-400", drop: "bg-amber-50/60 dark:bg-amber-950/20" },
+  vacant:      { header: "bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-800",       ring: "ring-red-400",    drop: "bg-red-50/60 dark:bg-red-950/20" },
   needs_release: { header: "bg-orange-50 border-orange-200 dark:bg-orange-950/30 dark:border-orange-800", ring: "ring-orange-400", drop: "bg-orange-50/60 dark:bg-orange-950/20" },
   extending:   { header: "bg-blue-50 border-blue-200 dark:bg-blue-950/30 dark:border-blue-800",   ring: "ring-blue-400",   drop: "bg-blue-50/60 dark:bg-blue-950/20" },
   sustaining:  { header: "bg-purple-50 border-purple-200 dark:bg-purple-950/30 dark:border-purple-800", ring: "ring-purple-400", drop: "bg-purple-50/60 dark:bg-purple-950/20" },
@@ -86,7 +87,8 @@ const STAGE_COLUMN_COLORS: Record<CallingStage, { header: string; ring: string; 
 };
 
 const NEXT_ACTION: Partial<Record<CallingStage, string>> = {
-  needs_calling: "Suggest a candidate & extend",
+  needs_calling: "Assign a calling & extend",
+  vacant:      "Suggest a candidate & extend",
   needs_release: "Suggest & choose a replacement",
   extending:   "Follow up — awaiting response",
   sustaining:  "Confirm sustained at meeting",
@@ -163,6 +165,9 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
   const [lcrConfirmed,    setLcrConfirmed]    = useState(false);
   const [declineReason,   setDeclineReason]   = useState("");
   const [showDeclineForm, setShowDeclineForm] = useState(false);
+  // Assign a calling to a member who needs one (needs_calling stage)
+  const [position,        setPosition]        = useState(calling.position ?? "");
+  const [organization,    setOrganization]    = useState(calling.organization ?? "");
 
   // ── Stages ────────────────────────────────────────────────────────────────
 
@@ -371,7 +376,87 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
   }
 
   if (stage === "needs_release") return suggestExtendBody(true);
-  if (stage === "needs_calling") return suggestExtendBody(false);
+  if (stage === "vacant")        return suggestExtendBody(false);
+
+  if (stage === "needs_calling") {
+    return (
+      <div className="border-t pt-4 space-y-4">
+        <div>
+          <p className="text-sm font-semibold">Assign a Calling</p>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            Decide which calling to extend to <strong>{name}</strong>, then assign a counselor to extend it.
+          </p>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="ncPosition">Calling / position</Label>
+          <Input
+            id="ncPosition"
+            value={position}
+            onChange={(e) => setPosition(e.target.value)}
+            placeholder="e.g. Sunday School Teacher"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="ncOrg">Organization</Label>
+          <Input
+            id="ncOrg"
+            value={organization}
+            onChange={(e) => setOrganization(e.target.value)}
+            placeholder="e.g. Sunday School"
+          />
+        </div>
+        {position.trim() && (
+          <div className="space-y-1.5">
+            <Label>Who will extend {position.trim()} to {name}?</Label>
+            <Select value={extendingMember} onValueChange={setExtendingMember}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select a counselor…" />
+              </SelectTrigger>
+              <SelectContent>
+                {EXTENDING_MEMBERS.map((m) => (
+                  <SelectItem key={m.id} value={m.id}>
+                    {m.name} <span className="text-muted-foreground capitalize">({m.role})</span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+        <div className="flex flex-col gap-2 pt-1">
+          <Button
+            disabled={!position.trim() || !extendingMember}
+            onClick={() => {
+              const member = EXTENDING_MEMBERS.find((m) => m.id === extendingMember)!;
+              const pos    = position.trim();
+              const org    = organization.trim();
+              addTask(makeCallingTask(calling, {
+                title:        `Extend calling — ${pos} → ${name}`,
+                description:  `Contact ${name} to extend the calling of ${pos}${org ? ` (${org})` : ""}. Once they respond, record the outcome in the pipeline.`,
+                assigneeId:   member.id,
+                assigneeName: member.name,
+                memberName:   calling.memberName || undefined,
+                context: { callingId: calling.id, taskType: "extend", position: pos },
+              }));
+              onSave({
+                stage:        "extending",
+                position:     pos,
+                organization: org,
+                extendedBy:   member.name,
+                extendedAt:   new Date().toISOString(),
+              });
+            }}
+          >
+            {!position.trim()
+              ? "Enter a calling to continue"
+              : !extendingMember
+                ? "Assign a counselor to extend"
+                : `Assign & extend to ${name}`}
+          </Button>
+          <Button variant="ghost" onClick={onClose}>Not Yet</Button>
+        </div>
+      </div>
+    );
+  }
 
   if (stage === "extending") {
     return (
@@ -629,7 +714,13 @@ function CallingCard({
             <p className="text-xs font-semibold leading-tight truncate">
               {calling.memberName || <span className="italic font-normal text-muted-foreground">Vacant</span>}
             </p>
-            <p className="text-[11px] text-muted-foreground leading-tight truncate">{calling.position}</p>
+            <p className="text-[11px] text-muted-foreground leading-tight truncate">
+              {calling.position || (
+                calling.stage === "needs_calling"
+                  ? <span className="italic">Needs a calling</span>
+                  : null
+              )}
+            </p>
             {calling.organization && (
               <p className="text-[10px] text-muted-foreground/60 leading-tight truncate">{calling.organization}</p>
             )}
@@ -661,7 +752,7 @@ function CallingCard({
         </div>
       </div>
 
-      {(calling.stage === "needs_release" || calling.stage === "needs_calling") && (() => {
+      {(calling.stage === "needs_release" || calling.stage === "vacant") && (() => {
         const isRelease   = calling.stage === "needs_release";
         const suggestions = calling.suggestedReplacements ?? [];
         const chosenExtra =
@@ -1424,11 +1515,13 @@ function PipelineFlow({ callings }: PipelineFlowProps) {
 type PageView = "pipeline" | "chart" | "complete" | "settings";
 
 const EMPTY_FORM = {
+  // "vacant"  → an open position to fill (optionally with a candidate in mind)
+  // "member"  → a member who needs a calling (no position assigned yet)
+  kind: "vacant" as "vacant" | "member",
   memberName: "",
   position: "",
   organization: "",
   notes: "",
-  isVacant: false,
 };
 
 export default function CallingsPage() {
@@ -1469,27 +1562,37 @@ export default function CallingsPage() {
   }
 
   async function handleCreate() {
-    if (!form.position.trim()) return;
-    if (!form.isVacant && !form.memberName.trim()) return;
+    const isMember = form.kind === "member";
+    if (isMember ? !form.memberName.trim() : !form.position.trim()) return;
     setSaving(true);
     await new Promise((r) => setTimeout(r, 200));
     const now = new Date().toISOString();
-    // A named candidate seeds the vacant stage's suggestion list; the bishopric
-    // then chooses them and assigns a counselor to extend.
-    const seededName = form.isVacant ? "" : form.memberName.trim();
-    const newCalling: Calling = {
+    const base = {
       id:           newId(),
-      memberName:   "",
       memberId:     "",
-      position:     form.position.trim(),
       organization: form.organization.trim(),
       notes:        form.notes.trim(),
-      stage:        "needs_calling",
-      suggestedReplacements: seededName ? [seededName] : [],
       createdBy:    user?.uid ?? "mock",
       createdAt:    now,
       updatedAt:    now,
     };
+    const newCalling: Calling = isMember
+      ? {
+          // A member who needs a calling — position is assigned later.
+          ...base,
+          memberName: form.memberName.trim(),
+          position:   "",
+          stage:      "needs_calling",
+        }
+      : {
+          // An open position. A named candidate seeds the suggestion list; the
+          // bishopric then chooses them and assigns a counselor to extend.
+          ...base,
+          memberName: "",
+          position:   form.position.trim(),
+          stage:      "vacant",
+          suggestedReplacements: form.memberName.trim() ? [form.memberName.trim()] : [],
+        };
     await callingsCollection.create(newCalling);
     setNewOpen(false);
     setForm(EMPTY_FORM);
@@ -1516,7 +1619,7 @@ export default function CallingsPage() {
       position:     entry.position,
       organization: org,
       notes:        "",
-      stage:        action === "release" ? "needs_release" : "needs_calling",
+      stage:        action === "release" ? "needs_release" : "vacant",
       createdBy:    user?.uid ?? "mock",
       createdAt:    now,
       updatedAt:    now,
@@ -1532,6 +1635,7 @@ export default function CallingsPage() {
   const pipelineCallings  = callings.filter((c) => c.stage !== "recorded");
   const completeCallings  = callings.filter((c) => c.stage === "recorded");
   const needsCallingCallings = callings.filter((c) => c.stage === "needs_calling");
+  const vacantCallings    = callings.filter((c) => c.stage === "vacant");
   const attentionCallings = pipelineCallings.filter((c) => attentionMessage(c));
 
   const rosterVacancies = useMemo(
@@ -1570,7 +1674,10 @@ export default function CallingsPage() {
           <p className="text-sm text-muted-foreground mt-0.5">
             {pipelineCallings.length} active
             {needsCallingCallings.length > 0 && (
-              <span className="text-red-600 dark:text-red-400"> · {needsCallingCallings.length} need a calling</span>
+              <span className="text-amber-600 dark:text-amber-400"> · {needsCallingCallings.length} need a calling</span>
+            )}
+            {vacantCallings.length > 0 && (
+              <span className="text-red-600 dark:text-red-400"> · {vacantCallings.length} vacant</span>
             )}
             {attentionCallings.length > 0 && (
               <span className="text-amber-600 dark:text-amber-400"> · {attentionCallings.length} need attention</span>
@@ -1666,7 +1773,7 @@ export default function CallingsPage() {
               <div className="space-y-4">
                 {/* Details */}
                 <div className="text-sm space-y-1 text-muted-foreground">
-                  <p><span className="font-medium text-foreground">Position:</span> {selected.position}</p>
+                  <p><span className="font-medium text-foreground">Position:</span> {selected.position || (selected.stage === "needs_calling" ? "Not assigned yet" : "—")}</p>
                   {selected.organization && <p><span className="font-medium text-foreground">Organization:</span> {selected.organization}</p>}
                   {selected.releasedName  && <p><span className="font-medium text-foreground">Replacing:</span> {selected.releasedName}</p>}
                   {selected.releasedBy    && <p><span className="font-medium text-foreground">Release handled by:</span> {selected.releasedBy}</p>}
@@ -1745,19 +1852,30 @@ export default function CallingsPage() {
             <DialogTitle>New Calling</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            <label className="flex items-start gap-3 rounded-lg border border-border p-3 cursor-pointer hover:bg-muted/30 transition-colors">
-              <input
-                type="checkbox"
-                className="mt-0.5"
-                checked={form.isVacant}
-                onChange={(e) => setForm((f) => ({ ...f, isVacant: e.target.checked, memberName: "" }))}
-              />
-              <div>
-                <p className="text-sm font-medium">Vacant position</p>
-                <p className="text-xs text-muted-foreground">No candidate yet — start the process from scratch</p>
-              </div>
-            </label>
-            {!form.isVacant && (
+            {/* What are we adding? */}
+            <div className="grid grid-cols-2 gap-2">
+              {([
+                ["vacant", "Vacant position", "An open position to fill"],
+                ["member", "Member needs a calling", "A person to find a calling for"],
+              ] as [typeof form.kind, string, string][]).map(([kind, title, desc]) => (
+                <button
+                  key={kind}
+                  type="button"
+                  onClick={() => setForm((f) => ({ ...f, kind }))}
+                  className={cn(
+                    "text-left rounded-lg border p-3 transition-colors",
+                    form.kind === kind
+                      ? "border-primary bg-primary/5 ring-1 ring-primary"
+                      : "border-border hover:bg-muted/30"
+                  )}
+                >
+                  <p className="text-sm font-medium">{title}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{desc}</p>
+                </button>
+              ))}
+            </div>
+
+            {form.kind === "member" ? (
               <div className="space-y-1.5">
                 <Label htmlFor="newMemberName">Member Name *</Label>
                 <Input
@@ -1768,16 +1886,29 @@ export default function CallingsPage() {
                   autoFocus
                 />
               </div>
+            ) : (
+              <>
+                <div className="space-y-1.5">
+                  <Label htmlFor="newPosition">Position *</Label>
+                  <Input
+                    id="newPosition"
+                    value={form.position}
+                    onChange={(e) => setForm((f) => ({ ...f, position: e.target.value }))}
+                    placeholder="e.g. Sunday School Teacher"
+                    autoFocus
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="newCandidate">Candidate in mind (optional)</Label>
+                  <Input
+                    id="newCandidate"
+                    value={form.memberName}
+                    onChange={(e) => setForm((f) => ({ ...f, memberName: e.target.value }))}
+                    placeholder="Seeds the suggestion list"
+                  />
+                </div>
+              </>
             )}
-            <div className="space-y-1.5">
-              <Label htmlFor="newPosition">Position *</Label>
-              <Input
-                id="newPosition"
-                value={form.position}
-                onChange={(e) => setForm((f) => ({ ...f, position: e.target.value }))}
-                placeholder="e.g. Sunday School Teacher"
-              />
-            </div>
             <div className="space-y-1.5">
               <Label htmlFor="newOrg">Organization</Label>
               <Input
@@ -1800,7 +1931,7 @@ export default function CallingsPage() {
             <Button variant="outline" onClick={() => setNewOpen(false)}>Cancel</Button>
             <Button
               onClick={handleCreate}
-              disabled={saving || !form.position.trim() || (!form.isVacant && !form.memberName.trim())}
+              disabled={saving || (form.kind === "member" ? !form.memberName.trim() : !form.position.trim())}
             >
               {saving ? "Creating…" : "Create Calling"}
             </Button>

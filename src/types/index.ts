@@ -72,18 +72,24 @@ export interface Task {
 // ── Calling lifecycle ────────────────────────────────────────────────────────
 
 /**
- * The ordered pipeline every calling moves through.
+ * The pipeline every calling moves through.
  *
- *   needs_calling → needs_release → extending
+ * Two intake columns feed the flow:
+ *   • needs_calling — a member who needs a calling (people-first list)
+ *   • vacant        — an open position that needs filling (position-first)
+ *
+ *   needs_calling / vacant → needs_release → extending
  *     → sustaining → set_apart → lcr_update → recorded
  *
- * Candidates are suggested during needs_calling / needs_release; once one is
- * chosen a counselor is assigned to extend. When the person accepts, the card
- * jumps straight to sustaining and is added to the sacrament-meeting business
- * items. A decline resets the position to needs_calling.
+ * From a vacant position, candidates are suggested and one is chosen; from a
+ * needs_calling member, a position is assigned. Either way a counselor is then
+ * assigned to extend. When the person accepts, the card jumps straight to
+ * sustaining and is added to the sacrament-meeting business items. A decline
+ * resets the position to vacant.
  */
 export type CallingStage =
-  | "needs_calling" // Open position / person who needs a calling — suggest a candidate, then extend
+  | "needs_calling" // A member who needs a calling — assign a position, then extend
+  | "vacant"      // Open position — suggest a candidate, then extend
   | "needs_release" // Current holder needs to be released (creates the vacancy)
   | "extending"   // Bishopric member reaching out to extend
   | "sustaining"  // Accepted — to be sustained in sacrament meeting (auto-added to business items)
@@ -96,6 +102,7 @@ export type SustainedVenue = "sacrament_meeting" | "class";
 /** Ordered list used for pipeline display and progress math. */
 export const CALLING_PIPELINE: CallingStage[] = [
   "needs_calling",
+  "vacant",
   "needs_release",
   "extending",
   "sustaining",
@@ -106,6 +113,7 @@ export const CALLING_PIPELINE: CallingStage[] = [
 
 export const CALLING_STAGES: { stage: CallingStage; label: string }[] = [
   { stage: "needs_calling", label: "Needs Calling" },
+  { stage: "vacant",      label: "Vacant" },
   { stage: "needs_release", label: "Needs Release" },
   { stage: "extending",   label: "Extending" },
   { stage: "sustaining",  label: "To Be Sustained" },
