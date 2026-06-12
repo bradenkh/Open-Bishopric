@@ -6,17 +6,16 @@
  *   SUPABASE_DB_URL=postgresql://... node scripts/db-reset.mjs
  *   npm run db:reset
  *
- * Intended to run on each deploy so we can iterate on the backend without
- * migrating old data (there are no production users yet). Wire it into your
- * deploy/build command, e.g. on Vercel set the Build Command to:
+ * This is a *manual*, local/dev convenience for getting a fresh schema + demo
+ * data — it is intentionally NOT wired into `build` or any deploy, so deploys
+ * never touch your data. ⚠️ It is destructive: it drops and recreates all app
+ * tables and re-seeds. Only point SUPABASE_DB_URL at a database you're willing
+ * to wipe.
  *
- *   npm run db:reset && npm run build
+ * SUPABASE_DB_URL is the project's Postgres connection string (Settings →
+ * Database → Connection string; use the Session pooler URI on IPv4-only hosts).
  *
- * and add SUPABASE_DB_URL (the project's *direct* Postgres connection string,
- * Settings → Database → Connection string → URI, port 5432) to the deploy env.
- *
- * Safe by design: if SUPABASE_DB_URL is not set it logs a warning and exits 0,
- * so ordinary local builds are never blocked or wiped.
+ * Safe by omission: if SUPABASE_DB_URL is not set it logs a warning and exits 0.
  */
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";

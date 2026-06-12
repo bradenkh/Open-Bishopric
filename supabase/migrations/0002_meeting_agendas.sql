@@ -10,8 +10,8 @@
 --                           a leader to keep/dismiss prior items and add new ones
 --                           before a meeting.
 --
--- Idempotent (re-applied on every deploy by scripts/db-reset.mjs), mirroring the
--- conventions in 0001_initial_schema.sql.
+-- Idempotent (re-applied by the manual `npm run db:reset`, never on deploy),
+-- mirroring the conventions in 0001_initial_schema.sql.
 -- ============================================================================
 
 -- ── meetings.sections ───────────────────────────────────────────────────────

@@ -24,7 +24,7 @@ See `.env.example`. The Supabase values come from your project's
 | `NEXT_PUBLIC_SUPABASE_URL` | Project URL | Safe to expose. |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | anon/public key | Safe to expose — protected by RLS. |
 | `SUPABASE_SERVICE_ROLE_KEY` | service_role key | **Server-only.** Bypasses RLS; used by the AI agent. |
-| `SUPABASE_DB_URL` | Settings → Database → Connection string → **Session pooler** URI | Used only by `db:reset`. Use the Session pooler (IPv4) for Vercel/CI. |
+| `SUPABASE_DB_URL` | Settings → Database → Connection string → **Session pooler** URI | Used only by the manual `db:reset` — not by builds/deploys. Use the Session pooler (IPv4) on IPv4-only hosts. |
 | `AI_*` | — | AI assistant provider config. |
 
 ## Backend & data layer
@@ -58,31 +58,35 @@ dashboard (**Authentication → Users → Invite**, or Add user). A matching
 (`bishop` | `counselor` | `clerk` | `exec_secretary`) via the invite's user
 metadata; otherwise role defaults to `counselor`.
 
-## Rebuilding the database on deploy
+## Database setup & schema changes
 
-While we iterate on the backend (and have no production users yet), each deploy
-**rebuilds the database from scratch** rather than migrating existing data. The
-`build` script runs `scripts/db-reset.mjs` before `next build`; it applies every
-migration (which tears down + recreates) then the seed — but **only when
-`SUPABASE_DB_URL` is set**, otherwise it logs a warning and no-ops. So a build
-resets the DB exactly where you've provided that var, and nowhere else.
+Deploys **do not touch the database** — `build` runs only `next build`, so your
+data is preserved across deploys. Applying the schema is a deliberate, manual
+step.
+
+**First-time setup** (or any disposable dev database): point `SUPABASE_DB_URL`
+at the database and run `npm run db:reset`. This applies the migrations and the
+demo seed. ⚠️ It is destructive — it drops and recreates all app tables — so
+only run it against a database you're willing to wipe, **never** production once
+it holds real data.
+
+**Evolving the schema in production:** add a new, forward-only migration (one
+that uses `alter table ... add column if not exists`, `create table if not
+exists`, etc. and does **not** drop existing data) and apply just that file to
+your production database — e.g. via the Supabase SQL editor or
+`psql "$SUPABASE_DB_URL" -f supabase/migrations/000N_*.sql`. The existing
+migrations include destructive teardown for the dev `db:reset` flow, so don't
+re-run them wholesale against production.
 
 ### Deploying on Vercel
 
 1. Import the repo into Vercel (Framework preset: Next.js — no Build Command
-   override needed; the default `npm run build` already handles the reset).
-2. **Settings → Environment Variables**, add:
-   - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
-     `SUPABASE_SERVICE_ROLE_KEY`, and the `AI_*` vars → **All Environments**.
-   - `SUPABASE_DB_URL` → **Production only**. This way Production deploys rebuild
-     the DB and Preview deploys leave it alone (and don't fight over the single
-     shared database).
-3. For `SUPABASE_DB_URL`, copy the **Session pooler** URI (Settings → Database →
-   Connection string → Session pooler). It's IPv4-compatible, which Vercel's
-   build needs — the direct `db.<ref>.supabase.co` connection is IPv6-only.
-4. Deploy. The build log will show `[db:reset] Rebuilding database…`. Then invite
-   yourself under **Authentication → Users** in Supabase and sign in.
-
-> ⚠️ `db:reset` is destructive by design — it drops all app tables on every
-> Production deploy. Once real data needs preserving, remove `SUPABASE_DB_URL`
-> from the deploy env (the build then no-ops) and switch to regular migrations.
+   override needed; the default `npm run build` just builds the app).
+2. **Settings → Environment Variables**, add `NEXT_PUBLIC_SUPABASE_URL`,
+   `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, and the `AI_*`
+   vars → **All Environments**. `SUPABASE_DB_URL` is **not** needed by the build;
+   only set it where you intend to run `db:reset`/migrations manually.
+3. Before your first deploy, run `npm run db:reset` once against your Supabase
+   database (see above) to create the schema.
+4. Deploy, then invite yourself under **Authentication → Users** in Supabase and
+   sign in.
