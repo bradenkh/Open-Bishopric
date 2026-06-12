@@ -173,6 +173,9 @@ export type MeetingType = "bishopric" | "sacrament_meeting" | "ward_council";
 
 export type MeetingStatus = "upcoming" | "completed" | "cancelled";
 
+/** What happened to an agenda item when the meeting was run (meeting mode). */
+export type AgendaOutcome = "completed" | "carried";
+
 /** A single line item on a meeting agenda. */
 export interface AgendaItem {
   id: string;
@@ -182,8 +185,22 @@ export interface AgendaItem {
   /** Estimated minutes for the item. */
   durationMins?: number;
   notes?: string;
-  /** Checked off during/after the meeting. */
+  /** Checked off during/after the meeting (build-mode quick toggle). */
   done?: boolean;
+  /** The section heading this item lives under (see AGENDA_SECTIONS). */
+  section?: string;
+  /**
+   * Meeting-mode disposition: "completed" (handled this meeting) or "carried"
+   * (carry forward to the next meeting of the same type).
+   */
+  outcome?: AgendaOutcome;
+  /**
+   * Where the item came from — an organization name, a leader's name, or
+   * "carried" when it was carried forward from a previous meeting.
+   */
+  source?: string;
+  /** Id of the meeting this item was carried into (prevents double-carry). */
+  carriedInto?: string;
 }
 
 // ── Sacrament meeting program (bulletin JSON) ────────────────────────────────
@@ -237,6 +254,12 @@ export interface Meeting {
   status: MeetingStatus;
   /** Free-form agenda — used by bishopric & ward council meetings. */
   agenda: AgendaItem[];
+  /**
+   * Ordered section headings for the agenda (bishopric & ward council). Seeded
+   * from AGENDA_SECTIONS when the meeting is created; items reference these via
+   * AgendaItem.section.
+   */
+  sections?: string[];
   /** Structured order of service — used by sacrament meetings. */
   program?: SacramentProgram;
   notes?: string;
@@ -256,6 +279,40 @@ export const MEETING_STATUS_COLORS: Record<MeetingStatus, string> = {
   completed: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
   cancelled: "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200",
 };
+
+// ── Pre-meeting agenda collection ─────────────────────────────────────────────
+
+export type SolicitationStatus = "draft" | "sent" | "replied";
+
+/**
+ * A request to an organization leader to review their items before a meeting —
+ * they keep or dismiss last meeting's items and add new ones. One row per
+ * (meeting, organization). The assistant parses replies into agenda items.
+ *
+ * NOTE: live email send + inbound reply parsing are not wired yet — sending is a
+ * manual action (mailto/copy) and replies are pasted into the AI assistant. See
+ * the "deferred" seams in collect-items.tsx / agent tools.
+ */
+export interface AgendaSolicitation {
+  id: string;
+  /** The meeting being prepared. */
+  meetingId: string;
+  /** Organization / role label, e.g. "Relief Society". */
+  org: string;
+  leaderName: string;
+  leaderEmail?: string;
+  status: SolicitationStatus;
+  /** Prior items offered to the leader to keep or dismiss. */
+  carriedItems: AgendaItem[];
+  /** The composed message body (editable before sending). */
+  message?: string;
+  /** Raw reply text (pasted in, or future inbound email). */
+  replyText?: string;
+  sentAt?: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
 
 // ── Announcements ────────────────────────────────────────────────────────────
 

@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   AppUser,
   Announcement,
+  AgendaSolicitation,
   AvailabilityBlock,
   AvailabilityException,
   Calling,
@@ -73,6 +74,7 @@ export const interviewsRepo = repo<Interview>("interviews", { column: "created_a
 export const availabilityRepo = repo<AvailabilityBlock>("availability_blocks", { column: "weekday" });
 export const availabilityExceptionsRepo = repo<AvailabilityException>("availability_exceptions", { column: "start_date" });
 export const tasksRepo = repo<Task>("tasks", { column: "created_at", ascending: false });
+export const solicitationsRepo = repo<AgendaSolicitation>("agenda_solicitations", { column: "created_at", ascending: false });
 
 // ── Roster groups: ordered org chart. Rows carry id/position the model omits. ──
 export const rosterRepo = {

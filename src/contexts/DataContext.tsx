@@ -36,11 +36,13 @@ import {
   meetingsRepo,
   membersRepo,
   rosterRepo,
+  solicitationsRepo,
   tasksRepo,
   wardInfoRepo,
 } from "@/lib/db";
 import type {
   Announcement,
+  AgendaSolicitation,
   AppUser,
   AvailabilityBlock,
   AvailabilityException,
@@ -83,6 +85,8 @@ interface DataContextValue {
   interviews: Collection<Interview>;
   meetings: Collection<Meeting>;
   announcements: Collection<Announcement>;
+  /** Pre-meeting agenda requests sent to organization leaders. */
+  solicitations: Collection<AgendaSolicitation>;
   availability: Collection<AvailabilityBlock>;
   exceptions: Collection<AvailabilityException>;
 
@@ -166,6 +170,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const [interviews, setInterviews] = useState<Interview[]>([]);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [solicitations, setSolicitations] = useState<AgendaSolicitation[]>([]);
   const [availability, setAvailability] = useState<AvailabilityBlock[]>([]);
   const [exceptions, setExceptions] = useState<AvailabilityException[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -204,6 +209,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       interviewsData,
       meetingsData,
       announcementsData,
+      solicitationsData,
       availabilityData,
       exceptionsData,
       tasksData,
@@ -216,6 +222,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       interviewsRepo.list(db),
       meetingsRepo.list(db),
       announcementsRepo.list(db),
+      solicitationsRepo.list(db),
       availabilityRepo.list(db),
       availabilityExceptionsRepo.list(db),
       tasksRepo.list(db),
@@ -228,6 +235,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     setInterviews(interviewsData);
     setMeetings(meetingsData);
     setAnnouncements(announcementsData);
+    setSolicitations(solicitationsData);
     setAvailability(availabilityData);
     setExceptions(exceptionsData);
     setTasks(tasksData);
@@ -373,6 +381,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       interviews: makeCollection(db, interviewsRepo, interviews, setInterviews),
       meetings: makeCollection(db, meetingsRepo, meetings, setMeetings),
       announcements: makeCollection(db, announcementsRepo, announcements, setAnnouncements),
+      solicitations: makeCollection(db, solicitationsRepo, solicitations, setSolicitations),
       availability: makeCollection(db, availabilityRepo, availability, setAvailability),
       exceptions: makeCollection(db, availabilityExceptionsRepo, exceptions, setExceptions),
       members,
@@ -396,6 +405,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       interviews,
       meetings,
       announcements,
+      solicitations,
       availability,
       exceptions,
       members,
