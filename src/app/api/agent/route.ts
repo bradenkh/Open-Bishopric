@@ -71,7 +71,15 @@ export async function POST(request: Request) {
     system: buildSystemPrompt(notes),
     messages,
     tools: agentTools,
-    stopWhen: stepCountIs(5),
+    // Runaway guard for the agentic tool loop — NOT a per-conversation message
+    // limit. A "step" is one model turn plus the tool calls it makes; the model
+    // then sees the results and can go again. This cap stops a misbehaving model
+    // from looping forever (runaway cost/time, and it would hold the single GLM
+    // slot lock against everyone else). Set high so it never bites normal
+    // multi-tool flows. Don't drop stopWhen entirely: the SDK default is
+    // stepCountIs(1), which would stop after the first tool call before the
+    // model ever sees the result.
+    stopWhen: stepCountIs(25),
     // The free GLM tier intermittently returns "overloaded"/5xx; let the SDK
     // retry a few more times (with exponential backoff) before giving up, since
     // these clear quickly. We hold the single-slot lock across the retries.
