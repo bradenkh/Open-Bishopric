@@ -150,7 +150,7 @@ function AssistantMemoryCard() {
 
 // ── AI assistant ───────────────────────────────────────────────────────────────
 const AI_PROVIDERS: { value: string; label: string }[] = [
-  { value: "openai-compat", label: "Z.AI / GLM (OpenAI-compatible)" },
+  { value: "openai-compat", label: "OpenRouter (OpenAI-compatible)" },
   { value: "deepseek", label: "DeepSeek" },
 ];
 
@@ -216,9 +216,13 @@ function AIAssistantCard() {
       </CardHeader>
       <CardContent className="space-y-4">
         <p className="text-sm text-muted-foreground">
-          Powers the chat assistant. The free GLM flash model works well and handles one
-          request at a time — requests are queued automatically. Your API key is stored
-          securely on the server and never shown here.
+          Powers the chat assistant. By default it talks to{" "}
+          <a href="https://openrouter.ai" target="_blank" rel="noreferrer" className="underline">
+            OpenRouter
+          </a>
+          , which lets you pick from many models (e.g. <code>openai/gpt-4o-mini</code>) with a
+          single API key. You can also point the base URL at any other OpenAI-compatible
+          gateway. Your API key is stored securely on the server and never shown here.
         </p>
 
         {!config ? (
@@ -242,7 +246,7 @@ function AIAssistantCard() {
               <div className="space-y-1.5">
                 <Label htmlFor="ai-model">Model</Label>
                 <Input id="ai-model" value={config.model}
-                  onChange={(e) => set({ model: e.target.value })} placeholder="glm-4.7-flash" />
+                  onChange={(e) => set({ model: e.target.value })} placeholder="openai/gpt-4o-mini" />
               </div>
             </div>
 

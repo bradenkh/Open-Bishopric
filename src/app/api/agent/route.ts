@@ -1,6 +1,5 @@
 import { streamText, convertToModelMessages, stepCountIs } from "ai";
 import { getAIModel, AINotConfiguredError } from "@/lib/ai";
-import { acquireAISlot } from "@/lib/ai-lock";
 import { agentTools } from "@/agent/tools";
 import { listAgentNotes } from "@/lib/agent-notes";
 import { createClient } from "@/lib/supabase/server";
@@ -62,11 +61,6 @@ export async function POST(request: Request) {
     notes = [];
   }
 
-  // The free GLM flash tier allows only one request at a time, so wait for any
-  // in-flight agent call to finish before starting ours. The slot is released
-  // when the stream completes, errors, or aborts.
-  const release = await acquireAISlot();
-
   const result = streamText({
     model,
     system: buildSystemPrompt(notes),
@@ -75,25 +69,24 @@ export async function POST(request: Request) {
     // Runaway guard for the agentic tool loop — NOT a per-conversation message
     // limit. A "step" is one model turn plus the tool calls it makes; the model
     // then sees the results and can go again. This cap stops a misbehaving model
-    // from looping forever (runaway cost/time, and it would hold the single GLM
-    // slot lock against everyone else). Set high so it never bites normal
+    // from looping forever (runaway cost/time). Set high so it never bites normal
     // multi-tool flows. Don't drop stopWhen entirely: the SDK default is
     // stepCountIs(1), which would stop after the first tool call before the
     // model ever sees the result.
     stopWhen: stepCountIs(25),
-    // The free GLM tier intermittently returns "overloaded"/5xx; let the SDK
-    // retry a few more times (with exponential backoff) before giving up, since
-    // these clear quickly. We hold the single-slot lock across the retries.
+    // Providers intermittently return rate-limit/"overloaded"/5xx responses; let
+    // the SDK retry a few times (with exponential backoff) before giving up,
+    // since these usually clear quickly.
     maxRetries: 4,
-    onFinish: release,
-    onError: release,
-    onAbort: release,
   });
 
   return result.toUIMessageStreamResponse({
     onError: (error) => {
       if (isTransient(error)) {
-        return "The free GLM service is briefly overloaded or busy (it allows one request at a time). Please wait a few seconds and try again.";
+        return "The AI service is briefly rate-limited or overloaded. Please wait a few seconds and try again.";
+      }
+      if (lacksToolSupport(error)) {
+        return "The selected model can't make tool calls, which this assistant needs. Pick a tool-capable model under Settings → AI assistant (e.g. openai/gpt-4o-mini on OpenRouter).";
       }
       // Surface the provider's actual error (e.g. bad model id, auth, base URL)
       // so it's diagnosable from the chat instead of a generic message.
@@ -103,7 +96,7 @@ export async function POST(request: Request) {
 }
 
 /**
- * Transient upstream conditions that usually clear on a retry: GLM's free-tier
+ * Transient upstream conditions that usually clear on a retry: provider
  * rate/concurrency limits, "overloaded", timeouts, 5xx, and the SDK's RetryError
  * (raised after it exhausts its own retries). These get a friendly "try again"
  * message instead of a raw error.
@@ -119,6 +112,17 @@ function isTransient(error: unknown): boolean {
     "rate limit", "concurren", "429", "overload", "temporarily",
     "try again", "timeout", "timed out", "unavailable", "503", "502", "500",
   ].some((k) => message.includes(k));
+}
+
+/**
+ * The configured model (or every upstream provider OpenRouter could route it to)
+ * doesn't support tool calling, which the agent relies on. OpenRouter signals
+ * this as a 404 about the `tool_choice` parameter / no matching endpoints.
+ */
+function lacksToolSupport(error: unknown): boolean {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return message.includes("tool_choice")
+    || (message.includes("no endpoints found") && message.includes("support"));
 }
 
 /** Best-effort human-readable description of a provider/SDK error. */
