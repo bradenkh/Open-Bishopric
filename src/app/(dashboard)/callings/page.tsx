@@ -687,6 +687,7 @@ function StageAdvancePanel({ calling, onSave, onClose }: AdvancePanelProps) {
 interface CallingCardProps {
   calling: Calling;
   onClick: () => void;
+  onDelete?: () => void;
   draggable?: boolean;
   onDragStart?: (e: React.DragEvent) => void;
   onDragEnd?: (e: React.DragEvent) => void;
@@ -698,6 +699,7 @@ interface CallingCardProps {
 function CallingCard({
   calling,
   onClick,
+  onDelete,
   draggable = false,
   onDragStart,
   onDragEnd,
@@ -755,6 +757,22 @@ function CallingCard({
             </Badge>
           )}
           {urgent && <div className="h-2 w-2 rounded-full bg-amber-400" />}
+          {onDelete && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onDelete(); }}
+              onPointerDown={(e) => e.stopPropagation()}
+              className={cn(
+                "inline-flex items-center justify-center h-6 w-6 rounded-md transition-colors",
+                "text-muted-foreground/50 hover:bg-muted hover:text-red-600 dark:hover:text-red-400",
+                "opacity-100 md:opacity-0 md:group-hover:opacity-100 focus-visible:opacity-100"
+              )}
+              title="Delete this calling"
+              aria-label="Delete this calling"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
       </div>
 
@@ -839,9 +857,10 @@ interface KanbanViewProps {
   callings: Calling[];
   onSelect: (c: Calling) => void;
   onMove: (callingId: string, toStage: CallingStage) => void;
+  onDelete: (c: Calling) => void;
 }
 
-function KanbanView({ callings, onSelect, onMove }: KanbanViewProps) {
+function KanbanView({ callings, onSelect, onMove, onDelete }: KanbanViewProps) {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [overStage,  setOverStage]  = useState<CallingStage | null>(null);
 
@@ -943,6 +962,7 @@ function KanbanView({ callings, onSelect, onMove }: KanbanViewProps) {
                       key={c.id}
                       calling={c}
                       onClick={() => onSelect(c)}
+                      onDelete={() => onDelete(c)}
                       draggable
                       onDragStart={(e) => handleDragStart(e, c)}
                       onDragEnd={handleDragEnd}
@@ -1541,6 +1561,7 @@ export default function CallingsPage() {
   const [form,     setForm]     = useState(EMPTY_FORM);
   const [saving,   setSaving]   = useState(false);
   const [view,     setView]     = useState<PageView>("pipeline");
+  const [confirmDelete, setConfirmDelete] = useState<Calling | null>(null);
 
   // ── Handlers ──────────────────────────────────────────────────────────────
 
@@ -1554,6 +1575,12 @@ export default function CallingsPage() {
   function handleMove(callingId: string, toStage: CallingStage) {
     const now = new Date().toISOString();
     void callingsCollection.update(callingId, { stage: toStage, updatedAt: now });
+  }
+
+  function handleDelete(id: string) {
+    void callingsCollection.remove(id);
+    if (selected?.id === id) setSelected(null);
+    setConfirmDelete(null);
   }
 
   async function handleCreate() {
@@ -1718,6 +1745,7 @@ export default function CallingsPage() {
           callings={pipelineCallings}
           onSelect={setSelected}
           onMove={handleMove}
+          onDelete={setConfirmDelete}
         />
       )}
 
@@ -1807,6 +1835,18 @@ export default function CallingsPage() {
                     <Button variant="outline" size="sm" onClick={() => setSelected(null)}>Close</Button>
                   </div>
                 )}
+
+                {/* Delete — removes the card from the pipeline entirely */}
+                <div className="border-t pt-3">
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDelete(selected)}
+                    className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-red-600 dark:hover:text-red-400 transition-colors"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Delete this calling
+                  </button>
+                </div>
               </div>
             </>
           )}
@@ -1878,6 +1918,28 @@ export default function CallingsPage() {
               disabled={saving || !form.position.trim() || (!form.isVacant && !form.memberName.trim())}
             >
               {saving ? "Creating…" : "Create Calling"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Delete confirmation ── */}
+      <Dialog open={!!confirmDelete} onOpenChange={(open) => !open && setConfirmDelete(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete this calling?</DialogTitle>
+          </DialogHeader>
+          {confirmDelete && (
+            <p className="text-sm text-muted-foreground">
+              This permanently removes the <strong className="text-foreground">{confirmDelete.position}</strong> card
+              {confirmDelete.memberName ? <> for <strong className="text-foreground">{confirmDelete.memberName}</strong></> : null}
+              {" "}from the pipeline. This can&apos;t be undone, and any tasks already created stay as they are.
+            </p>
+          )}
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setConfirmDelete(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={() => confirmDelete && handleDelete(confirmDelete.id)}>
+              Delete
             </Button>
           </DialogFooter>
         </DialogContent>
