@@ -1621,9 +1621,6 @@ export default function CallingsPage() {
   const completeCallings  = callings.filter((c) => c.stage === "recorded");
   const vacantCallings    = callings.filter((c) => c.stage === "vacant");
   const attentionCallings = pipelineCallings.filter((c) => attentionMessage(c));
-  const bizItemCallings   = pipelineCallings.filter(
-    (c) => c.stage === "sustaining" && c.sustainedIn === "sacrament_meeting" && !c.businessItemAdded
-  );
 
   const rosterVacancies = useMemo(
     () => roster.reduce((n, g) => n + g.entries.filter((e) => !e.member && !e.hidden).length, 0),
@@ -1678,43 +1675,8 @@ export default function CallingsPage() {
       {/* Pipeline flow summary (desktop only) */}
       {view === "pipeline" && <PipelineFlow callings={pipelineCallings} />}
 
-      {/* Business items banner (pipeline-related — hidden on the chart) */}
-      {view !== "chart" && bizItemCallings.length > 0 && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/60 p-4 space-y-2">
-          <div className="flex items-center gap-2">
-            <ClipboardList className="h-4 w-4 text-amber-700 dark:text-amber-300 shrink-0" />
-            <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">
-              Business Items — Sacrament Meeting Announcements Needed
-            </p>
-          </div>
-          <p className="text-xs text-amber-700 dark:text-amber-300">
-            Add the following to the business items document before the sustaining vote:
-          </p>
-          <ul className="space-y-1.5">
-            {bizItemCallings.map((c) => (
-              <li key={c.id} className="flex items-center justify-between gap-2">
-                <span className="text-sm text-amber-900 dark:text-amber-100">
-                  <strong>{c.memberName || "Vacant"}</strong> — {c.position}
-                  {c.sustainedDate && (
-                    <span className="text-amber-600 dark:text-amber-400"> ({c.sustainedDate})</span>
-                  )}
-                </span>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-6 px-2 text-xs border-amber-300 dark:border-amber-700 shrink-0"
-                  onClick={() => setSelected(c)}
-                >
-                  Mark Added
-                </Button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {/* Attention banner (shown only when no biz-item banner — hidden on the chart) */}
-      {view !== "chart" && attentionCallings.length > 0 && bizItemCallings.length === 0 && (
+      {/* Attention banner (pipeline-related — hidden on the chart) */}
+      {view !== "chart" && attentionCallings.length > 0 && (
         <div className="rounded-xl border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/60 p-3 flex items-center gap-2">
           <AlertTriangle className="h-4 w-4 text-blue-600 dark:text-blue-400 shrink-0" />
           <p className="text-sm text-blue-800 dark:text-blue-200">
