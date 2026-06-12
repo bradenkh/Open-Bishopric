@@ -1,27 +1,36 @@
 "use client";
 
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import {
-  X, CheckCircle2, ArrowRightCircle, Circle, Flag, User, Clock,
+  X, CheckCircle2, ArrowRightCircle, Circle, Flag, User, Clock, Plus, Trash2, FileText,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { useData } from "@/contexts/DataContext";
-import { groupBySection, templateSections, seedCarriedItems, carriedItems } from "@/lib/agenda";
+import { useData, newId } from "@/contexts/DataContext";
+import {
+  groupBySection, templateSections, seedCarriedItems, carriedItems, OTHER_SECTION,
+} from "@/lib/agenda";
 import { MEETING_TYPE_LABELS } from "@/types";
 import type { AgendaItem } from "@/types";
 
+/** Sentinel "section" for the whole-meeting notes document. */
+const MEETING_NOTES = "__meeting_notes";
+
 /**
- * Full-screen "run the meeting" view: agenda on the left (grouped by section),
- * notes for the selected item on the right. Each item is marked Complete or
- * Carry forward. Finishing the meeting marks it completed and carries the
- * carried-forward items into the next meeting of the same type.
+ * Full-screen "run the meeting" view. The left pane is a slim outline (sections
+ * and items) for navigation; the right pane is an editable, document-style view
+ * of the selected section — each item is a heading with its notes flowing
+ * beneath, which suits long lists (e.g. ministering) far better than one card at
+ * a time. Items are marked Complete or Carry forward inline; finishing the
+ * meeting marks it completed and carries the carried-forward items into the next
+ * meeting of the same type.
  */
 export function MeetingMode({ meetingId, onClose }: { meetingId: string; onClose: () => void }) {
   const { meetings } = useData();
   const meeting = meetings.items.find((m) => m.id === meetingId) ?? null;
+  const [activeSection, setActiveSection] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [focusId, setFocusId] = useState<string | null>(null);
   const [finishing, setFinishing] = useState(false);
 
   if (!meeting) return null;
@@ -30,7 +39,16 @@ export function MeetingMode({ meetingId, onClose }: { meetingId: string; onClose
   const groups = groupBySection(meeting.agenda, sections);
   const items = meeting.agenda;
   const decided = items.filter((i) => i.outcome).length;
-  const selected = selectedId ? items.find((i) => i.id === selectedId) ?? null : null;
+  const carriedCount = items.filter((i) => i.outcome === "carried").length;
+
+  // The section currently shown in the document pane: an explicit choice, the
+  // first section with items, or the first section.
+  const effectiveSection =
+    activeSection ??
+    groups.find((g) => g.items.length > 0)?.section ??
+    sections[0] ??
+    OTHER_SECTION;
+  const activeGroup = groups.find((g) => g.section === effectiveSection) ?? null;
 
   function patchItem(itemId: string, patch: Partial<AgendaItem>) {
     if (!meeting) return;
@@ -43,6 +61,26 @@ export function MeetingMode({ meetingId, onClose }: { meetingId: string; onClose
     // build-mode checkbox matches.
     const next = item.outcome === outcome ? undefined : outcome;
     patchItem(item.id, { outcome: next, done: next === "completed" });
+  }
+
+  function deleteItem(itemId: string) {
+    if (!meeting) return;
+    void meetings.update(meeting.id, {
+      agenda: meeting.agenda.filter((a) => a.id !== itemId),
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  function addItem() {
+    if (!meeting) return;
+    const id = newId();
+    const section = effectiveSection === OTHER_SECTION ? undefined : effectiveSection;
+    void meetings.update(meeting.id, {
+      agenda: [...meeting.agenda, { id, title: "", section }],
+      updatedAt: new Date().toISOString(),
+    });
+    setSelectedId(id);
+    setFocusId(id);
   }
 
   async function finishMeeting() {
@@ -60,10 +98,7 @@ export function MeetingMode({ meetingId, onClose }: { meetingId: string; onClose
         .sort((a, b) => a.date.localeCompare(b.date))[0];
       if (next) {
         const seeded = seedCarriedItems(meeting);
-        await meetings.update(next.id, {
-          agenda: [...next.agenda, ...seeded],
-          updatedAt: now,
-        });
+        await meetings.update(next.id, { agenda: [...next.agenda, ...seeded], updatedAt: now });
         // Mark the source items so they aren't carried twice.
         const agenda = meeting.agenda.map((a) =>
           a.outcome === "carried" && !a.carriedInto ? { ...a, carriedInto: next.id } : a,
@@ -79,8 +114,6 @@ export function MeetingMode({ meetingId, onClose }: { meetingId: string; onClose
     setFinishing(false);
     onClose();
   }
-
-  const carriedCount = items.filter((i) => i.outcome === "carried").length;
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-background">
@@ -101,135 +134,243 @@ export function MeetingMode({ meetingId, onClose }: { meetingId: string; onClose
         </Button>
       </div>
 
-      {/* Two panes */}
-      <div className="flex-1 min-h-0 grid md:grid-cols-2">
-        {/* Left: agenda */}
-        <div className="min-h-0 overflow-y-auto border-b md:border-b-0 md:border-r border-border p-4 space-y-4">
-          {items.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-8 text-center">No agenda items.</p>
-          ) : (
-            groups.filter((g) => g.items.length > 0).map((group) => (
-              <div key={group.section} className="space-y-1.5">
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{group.section}</p>
-                <ul className="space-y-1.5">
-                  {group.items.map((item) => {
-                    const active = item.id === selectedId;
-                    return (
-                      <li
-                        key={item.id}
-                        className={cn(
-                          "rounded-lg border bg-card px-3 py-2 cursor-pointer transition-colors",
-                          active ? "border-primary ring-1 ring-primary/30" : "border-border hover:border-primary/40",
-                        )}
-                        onClick={() => setSelectedId(item.id)}
-                      >
-                        <div className="flex items-start gap-2">
-                          <span className="mt-0.5 shrink-0">
-                            {item.outcome === "completed" ? (
-                              <CheckCircle2 className="h-4 w-4 text-green-600" />
-                            ) : item.outcome === "carried" ? (
-                              <ArrowRightCircle className="h-4 w-4 text-amber-600" />
-                            ) : (
-                              <Circle className="h-4 w-4 text-muted-foreground/40" />
-                            )}
-                          </span>
-                          <div className="flex-1 min-w-0">
-                            <p className={cn("text-sm", item.outcome === "completed" && "line-through text-muted-foreground")}>
-                              {item.title}
-                            </p>
-                            <div className="flex flex-wrap gap-x-3 mt-0.5">
-                              {item.presenter && (
-                                <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                                  <User className="h-3 w-3" /> {item.presenter}
-                                </span>
-                              )}
-                              {item.durationMins ? (
-                                <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                                  <Clock className="h-3 w-3" /> {item.durationMins}m
-                                </span>
-                              ) : null}
-                              {item.source && (
-                                <span className="text-[10px] text-muted-foreground italic">from {item.source}</span>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1.5 mt-2 pl-6">
-                          <Button
-                            variant={item.outcome === "completed" ? "default" : "outline"}
-                            size="sm"
-                            className="h-7 gap-1.5 text-xs"
-                            onClick={(e) => { e.stopPropagation(); setOutcome(item, "completed"); }}
-                          >
-                            <CheckCircle2 className="h-3.5 w-3.5" /> Complete
-                          </Button>
-                          <Button
-                            variant={item.outcome === "carried" ? "default" : "outline"}
-                            size="sm"
-                            className="h-7 gap-1.5 text-xs"
-                            onClick={(e) => { e.stopPropagation(); setOutcome(item, "carried"); }}
-                          >
-                            <ArrowRightCircle className="h-3.5 w-3.5" /> Carry forward
-                          </Button>
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            ))
-          )}
+      {/* Two panes: outline + document */}
+      <div className="flex-1 min-h-0 grid md:grid-cols-[18rem_1fr]">
+        {/* Left: outline */}
+        <div className="min-h-0 overflow-y-auto border-b md:border-b-0 md:border-r border-border p-3 space-y-3">
+          {groups.map((group) => (
+            <div key={group.section} className="space-y-0.5">
+              <button
+                onClick={() => { setActiveSection(group.section); setSelectedId(null); }}
+                className={cn(
+                  "w-full text-left text-xs font-semibold uppercase tracking-wide px-2 py-1 rounded",
+                  effectiveSection === group.section ? "text-primary" : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {group.section}
+                {group.items.length > 0 && <span className="ml-1 font-normal opacity-60">{group.items.length}</span>}
+              </button>
+              {group.items.map((item) => (
+                <button
+                  key={item.id}
+                  onClick={() => { setActiveSection(group.section); setSelectedId(item.id); }}
+                  className={cn(
+                    "w-full flex items-center gap-2 px-2 py-1 rounded text-sm text-left transition-colors",
+                    selectedId === item.id ? "bg-accent" : "hover:bg-accent/50",
+                  )}
+                >
+                  <span className="shrink-0">
+                    {item.outcome === "completed" ? (
+                      <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
+                    ) : item.outcome === "carried" ? (
+                      <ArrowRightCircle className="h-3.5 w-3.5 text-amber-600" />
+                    ) : (
+                      <Circle className="h-3.5 w-3.5 text-muted-foreground/30" />
+                    )}
+                  </span>
+                  <span className={cn("truncate", item.outcome === "completed" && "line-through text-muted-foreground")}>
+                    {item.title || "Untitled item"}
+                  </span>
+                </button>
+              ))}
+            </div>
+          ))}
+
+          {/* Whole-meeting notes */}
+          <button
+            onClick={() => { setActiveSection(MEETING_NOTES); setSelectedId(null); }}
+            className={cn(
+              "w-full flex items-center gap-2 px-2 py-1 rounded text-xs font-semibold uppercase tracking-wide border-t border-border mt-2 pt-3",
+              effectiveSection === MEETING_NOTES ? "text-primary" : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <FileText className="h-3.5 w-3.5" /> Meeting Notes
+          </button>
         </div>
 
-        {/* Right: notes */}
-        <div className="min-h-0 overflow-y-auto p-4 space-y-4">
-          {selected ? (
-            <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Notes · {selected.title}
-              </p>
-              <Textarea
-                value={selected.notes ?? ""}
-                onChange={(e) => patchItem(selected.id, { notes: e.target.value || undefined })}
-                placeholder="Discussion, decisions, follow-ups for this item…"
-                rows={8}
-              />
-              <div className="flex items-center gap-1.5">
-                <Button
-                  variant={selected.outcome === "completed" ? "default" : "outline"}
-                  size="sm"
-                  className="h-8 gap-1.5 text-xs"
-                  onClick={() => setOutcome(selected, "completed")}
-                >
-                  <CheckCircle2 className="h-3.5 w-3.5" /> Complete
-                </Button>
-                <Button
-                  variant={selected.outcome === "carried" ? "default" : "outline"}
-                  size="sm"
-                  className="h-8 gap-1.5 text-xs"
-                  onClick={() => setOutcome(selected, "carried")}
-                >
-                  <ArrowRightCircle className="h-3.5 w-3.5" /> Carry forward
+        {/* Right: document */}
+        <div className="min-h-0 overflow-y-auto">
+          <div className="mx-auto max-w-2xl px-5 py-6">
+            {effectiveSection === MEETING_NOTES ? (
+              <div className="space-y-3">
+                <h2 className="text-lg font-semibold">Meeting Notes</h2>
+                <NotesDoc
+                  value={meeting.notes ?? ""}
+                  placeholder="General notes for the whole meeting…"
+                  onCommit={(v) => meetings.update(meeting.id, { notes: v || undefined })}
+                />
+              </div>
+            ) : (
+              <div className="space-y-5">
+                <h2 className="text-lg font-semibold">{effectiveSection}</h2>
+                {activeGroup && activeGroup.items.length > 0 ? (
+                  activeGroup.items.map((item) => (
+                    <ItemDoc
+                      key={item.id}
+                      item={item}
+                      autoFocus={item.id === focusId}
+                      onCommit={patchItem}
+                      onOutcome={setOutcome}
+                      onDelete={deleteItem}
+                    />
+                  ))
+                ) : (
+                  <p className="text-sm text-muted-foreground">No items in this section yet.</p>
+                )}
+                <Button variant="outline" size="sm" className="gap-1.5" onClick={addItem}>
+                  <Plus className="h-4 w-4" /> Add item
                 </Button>
               </div>
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground py-8 text-center">
-              Select an agenda item to take notes.
-            </p>
-          )}
-
-          <div className="space-y-2 border-t border-border pt-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Meeting notes</p>
-            <Textarea
-              value={meeting.notes ?? ""}
-              onChange={(e) => meetings.update(meeting.id, { notes: e.target.value })}
-              placeholder="General notes for the whole meeting…"
-              rows={4}
-            />
+            )}
           </div>
         </div>
       </div>
     </div>
+  );
+}
+
+// ── Document-style editors ───────────────────────────────────────────────────
+
+/** A borderless textarea that grows to fit its content (document feel). */
+function AutoGrowTextarea({
+  value, onChange, onBlur, placeholder, className,
+}: {
+  value: string;
+  onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
+  onBlur?: () => void;
+  placeholder?: string;
+  className?: string;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [value]);
+  return (
+    <textarea
+      ref={ref}
+      rows={1}
+      value={value}
+      onChange={onChange}
+      onBlur={onBlur}
+      placeholder={placeholder}
+      className={cn(
+        "w-full resize-none bg-transparent outline-none placeholder:text-muted-foreground/50",
+        className,
+      )}
+    />
+  );
+}
+
+/**
+ * One item rendered as a document block: an editable title (heading), inline
+ * complete/carry/delete controls, and flowing notes. Keeps its own draft state
+ * so typing in a long list never re-renders its siblings; persists on blur.
+ */
+function ItemDoc({
+  item, autoFocus, onCommit, onOutcome, onDelete,
+}: {
+  item: AgendaItem;
+  autoFocus: boolean;
+  onCommit: (id: string, patch: Partial<AgendaItem>) => void;
+  onOutcome: (item: AgendaItem, outcome: "completed" | "carried") => void;
+  onDelete: (id: string) => void;
+}) {
+  // Draft state initialized from props; the parent keys each ItemDoc by item id
+  // so a different item always remounts fresh, and there's a single editor, so
+  // we never need to sync prop → state after mount. Persisted on blur.
+  const [title, setTitle] = useState(item.title);
+  const [notes, setNotes] = useState(item.notes ?? "");
+
+  const completed = item.outcome === "completed";
+  const carried = item.outcome === "carried";
+  const hasMeta = item.presenter || item.durationMins || item.source || carried;
+
+  return (
+    <article className="group border-b border-border/60 pb-4">
+      <div className="flex items-start gap-2">
+        <input
+          value={title}
+          autoFocus={autoFocus}
+          onChange={(e) => setTitle(e.target.value)}
+          onBlur={() => { if (title !== item.title) onCommit(item.id, { title }); }}
+          placeholder="Untitled item"
+          className={cn(
+            "flex-1 min-w-0 bg-transparent outline-none text-base font-semibold placeholder:text-muted-foreground/50",
+            completed && "line-through text-muted-foreground",
+          )}
+        />
+        <div className="flex items-center gap-0.5 shrink-0 opacity-50 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+          <button
+            title="Complete"
+            onClick={() => onOutcome(item, "completed")}
+            className={cn("p-1 rounded hover:bg-accent", completed ? "text-green-600" : "text-muted-foreground")}
+          >
+            <CheckCircle2 className="h-4 w-4" />
+          </button>
+          <button
+            title="Carry forward"
+            onClick={() => onOutcome(item, "carried")}
+            className={cn("p-1 rounded hover:bg-accent", carried ? "text-amber-600" : "text-muted-foreground")}
+          >
+            <ArrowRightCircle className="h-4 w-4" />
+          </button>
+          <button
+            title="Remove item"
+            onClick={() => onDelete(item.id)}
+            className="p-1 rounded hover:bg-accent text-muted-foreground/50 hover:text-red-600"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+
+      {hasMeta && (
+        <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5 mb-1">
+          {item.presenter && (
+            <span className="flex items-center gap-1 text-xs text-muted-foreground">
+              <User className="h-3 w-3" /> {item.presenter}
+            </span>
+          )}
+          {item.durationMins ? (
+            <span className="flex items-center gap-1 text-xs text-muted-foreground">
+              <Clock className="h-3 w-3" /> {item.durationMins}m
+            </span>
+          ) : null}
+          {item.source && <span className="text-xs text-muted-foreground italic">from {item.source}</span>}
+          {carried && <span className="text-xs text-amber-700 dark:text-amber-300">carrying forward</span>}
+        </div>
+      )}
+
+      <AutoGrowTextarea
+        value={notes}
+        onChange={(e) => setNotes(e.target.value)}
+        onBlur={() => { const v = notes || undefined; if (v !== item.notes) onCommit(item.id, { notes: v }); }}
+        placeholder="Add notes…"
+        className="mt-1 text-sm leading-relaxed text-foreground/90"
+      />
+    </article>
+  );
+}
+
+/** Whole-meeting notes as a flowing document; persists on blur. */
+function NotesDoc({
+  value, placeholder, onCommit,
+}: {
+  value: string;
+  placeholder?: string;
+  onCommit: (value: string) => void;
+}) {
+  const [v, setV] = useState(value);
+  return (
+    <AutoGrowTextarea
+      value={v}
+      onChange={(e) => setV(e.target.value)}
+      onBlur={() => { if (v !== value) onCommit(v); }}
+      placeholder={placeholder}
+      className="text-sm leading-relaxed text-foreground/90 min-h-[12rem]"
+    />
   );
 }
