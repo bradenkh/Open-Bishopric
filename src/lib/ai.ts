@@ -90,13 +90,41 @@ export async function getAIModel(): Promise<LanguageModel> {
   // Strip any trailing slash so the SDK doesn't build a "…/v1//chat/completions"
   // URL, which some OpenAI-compatible gateways reject.
   const baseURL = baseUrl.replace(/\/+$/, "");
+  const isOpenRouter = baseURL.includes("openrouter.ai");
   // OpenRouter likes an app identifier for its usage rankings; it's optional and
   // ignored by other OpenAI-compatible gateways, so only send it to OpenRouter.
-  const headers = baseURL.includes("openrouter.ai")
-    ? { "X-Title": "Open Bishopric" }
-    : undefined;
+  const headers = isOpenRouter ? { "X-Title": "Open Bishopric" } : undefined;
   // Use `.chat(...)` explicitly: the default `openai(model)` targets OpenAI's
   // newer Responses API (`/responses`), which OpenRouter and most OpenAI-compatible
   // gateways don't implement — they only serve `/chat/completions`.
-  return createOpenAI({ apiKey, baseURL, headers }).chat(model);
+  return createOpenAI({
+    apiKey,
+    baseURL,
+    headers,
+    // OpenRouter may route one model to several upstream providers, some of which
+    // don't accept the `tool_choice` parameter the SDK sends with our tools — that
+    // surfaces as a 404 "No endpoints found that support the provided 'tool_choice'
+    // value". Ask OpenRouter to route only to providers that support every
+    // parameter we send. It's an OpenRouter-only body field (not part of the OpenAI
+    // schema), so we splice it in via a fetch wrapper.
+    fetch: isOpenRouter ? openRouterFetch : undefined,
+  }).chat(model);
 }
+
+/**
+ * Wraps fetch to add OpenRouter's `provider.require_parameters` routing hint to
+ * each chat request, so it never lands on a provider that can't honor our tool
+ * calls. Leaves the request untouched if the body isn't JSON we can parse.
+ */
+const openRouterFetch: typeof fetch = (input, init) => {
+  if (typeof init?.body === "string") {
+    try {
+      const body = JSON.parse(init.body);
+      body.provider = { ...body.provider, require_parameters: true };
+      init = { ...init, body: JSON.stringify(body) };
+    } catch {
+      // Not JSON (or unexpected shape) — send it as-is.
+    }
+  }
+  return fetch(input, init);
+};

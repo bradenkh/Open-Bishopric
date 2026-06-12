@@ -85,6 +85,9 @@ export async function POST(request: Request) {
       if (isTransient(error)) {
         return "The AI service is briefly rate-limited or overloaded. Please wait a few seconds and try again.";
       }
+      if (lacksToolSupport(error)) {
+        return "The selected model can't make tool calls, which this assistant needs. Pick a tool-capable model under Settings → AI assistant (e.g. openai/gpt-4o-mini on OpenRouter).";
+      }
       // Surface the provider's actual error (e.g. bad model id, auth, base URL)
       // so it's diagnosable from the chat instead of a generic message.
       return `Assistant error: ${describeError(error)}`;
@@ -109,6 +112,17 @@ function isTransient(error: unknown): boolean {
     "rate limit", "concurren", "429", "overload", "temporarily",
     "try again", "timeout", "timed out", "unavailable", "503", "502", "500",
   ].some((k) => message.includes(k));
+}
+
+/**
+ * The configured model (or every upstream provider OpenRouter could route it to)
+ * doesn't support tool calling, which the agent relies on. OpenRouter signals
+ * this as a 404 about the `tool_choice` parameter / no matching endpoints.
+ */
+function lacksToolSupport(error: unknown): boolean {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return message.includes("tool_choice")
+    || (message.includes("no endpoints found") && message.includes("support"));
 }
 
 /** Best-effort human-readable description of a provider/SDK error. */
