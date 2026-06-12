@@ -4,9 +4,11 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "prebuild": "node scripts/migrate.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "db:migrate": "node scripts/migrate.mjs",
     "db:reset": "node scripts/db-reset.mjs",
     "db:seed:gen": "node scripts/gen-seed.mjs"
   },
