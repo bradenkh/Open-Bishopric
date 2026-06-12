@@ -96,6 +96,8 @@ interface DataContextValue {
   /** The bishopric roster, derived from `profiles` (people with leadership roles). */
   bishopric: BishopricMember[];
   roster: RosterGroup[];
+  /** Edit a roster group (rename callings, toggle chart visibility, add/remove positions). */
+  updateRosterGroup: (id: string, patch: Partial<RosterGroup>) => Promise<void>;
 
   wardInfo: WardInfo | null;
   updateWardInfo: (patch: Partial<WardInfo>) => Promise<void>;
@@ -353,6 +355,19 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     [db, tasks],
   );
 
+  const updateRosterGroup = useCallback(
+    async (id: string, patch: Partial<RosterGroup>) => {
+      setRoster((prev) => prev.map((g) => (g.id === id ? { ...g, ...patch } : g)));
+      try {
+        await rosterRepo.update(db, id, patch);
+      } catch (err) {
+        console.error("Update roster group failed", err);
+        setRoster(await rosterRepo.list(db));
+      }
+    },
+    [db],
+  );
+
   const updateWardInfo = useCallback(
     async (patch: Partial<WardInfo>) => {
       setWardInfo((prev) => (prev ? { ...prev, ...patch } : prev));
@@ -381,6 +396,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       reloadAll,
       bishopric,
       roster,
+      updateRosterGroup,
       wardInfo,
       updateWardInfo,
       tasks,
@@ -404,6 +420,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       reloadAll,
       bishopric,
       roster,
+      updateRosterGroup,
       wardInfo,
       updateWardInfo,
       tasks,
