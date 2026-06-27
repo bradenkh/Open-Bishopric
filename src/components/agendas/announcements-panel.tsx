@@ -14,6 +14,7 @@ import {
 import type { Announcement } from "@/types";
 import { isAnnouncementActive, sortAnnouncements } from "@/lib/announcements";
 import { formatDate, cn } from "@/lib/utils";
+import { formatText } from "@/lib/format-text";
 
 export type AnnouncementDraft = {
   title: string; description: string; date: string; time: string; location: string;
@@ -101,7 +102,7 @@ export function AnnouncementsPanel({ announcements, onSave, onArchiveToggle, onD
                     )}
                   </div>
                   {a.description && (
-                    <p className="mt-0.5 text-xs text-muted-foreground">{a.description}</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">{formatText(a.description)}</p>
                   )}
                   {(a.date || a.location) && (
                     <span className="mt-1 flex items-center gap-1 text-[11px] text-muted-foreground">
