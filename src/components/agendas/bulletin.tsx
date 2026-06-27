@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/dialog";
 import type { Announcement, Meeting, WardInfo } from "@/types";
 import { downloadNodeAsPdf } from "@/lib/print";
+import { formatText } from "@/lib/format-text";
 
 // Self-contained styles travel with the bulletin markup so the exact same DOM
 // renders identically in the on-screen preview and the print iframe.
@@ -170,7 +171,8 @@ export function BulletinDialog({ open, onOpenChange, meeting, ward, announcement
                   const meta = announcementMeta(a);
                   return (
                     <p key={a.id} className="ann">
-                      <span className="t">{a.title}:</span> {a.description}
+                      <span className="t">{a.title}:</span>{" "}
+                      {a.description && formatText(a.description)}
                       {meta && <span className="meta"> ({meta})</span>}
                     </p>
                   );

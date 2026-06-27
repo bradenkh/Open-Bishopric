@@ -622,10 +622,10 @@ export const getAnnouncements = tool({
 
 export const createAnnouncement = tool({
   description:
-    "Create a ward announcement. It is automatically included on the sacrament meeting bulletin until its event date passes (announcements with no date are standing until archived).",
+    "Create a ward announcement. It is automatically included on the sacrament meeting bulletin until its event date passes (announcements with no date are standing until archived). The description supports simple formatting: **bold**, *italic*, and newlines for line breaks. These render in the printed PDF bulletin.",
   inputSchema: z.object({
     title: z.string().describe("Short headline"),
-    description: z.string().optional(),
+    description: z.string().optional().describe("Body text. Supports formatting: **bold**, *italic*, and newlines for line breaks"),
     date: z.string().optional().describe("Event date YYYY-MM-DD (optional; omit for a standing announcement)"),
     time: z.string().optional().describe("Event time HH:MM"),
     location: z.string().optional(),
@@ -652,11 +652,11 @@ export const createAnnouncement = tool({
 
 export const updateAnnouncement = tool({
   description:
-    "Update an existing announcement (get its id from getAnnouncements). Provide only the fields to change. Set archived=true to retire it from the bulletin, or archived=false to restore it.",
+    "Update an existing announcement (get its id from getAnnouncements). Provide only the fields to change. Set archived=true to retire it from the bulletin, or archived=false to restore it. The description supports simple formatting: **bold**, *italic*, and newlines for line breaks.",
   inputSchema: z.object({
     id: z.string(),
     title: z.string().optional(),
-    description: z.string().optional(),
+    description: z.string().optional().describe("Body text. Supports formatting: **bold**, *italic*, and newlines for line breaks"),
     date: z.string().optional().describe("Event date YYYY-MM-DD (use an empty string to clear it)"),
     time: z.string().optional().describe("Event time HH:MM (empty string to clear)"),
     location: z.string().optional(),
