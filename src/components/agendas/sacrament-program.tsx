@@ -134,7 +134,7 @@ export function BulletinEditor({ program, onChange }: Props) {
                 className="h-8 flex-1"
               />
               <button
-                className="shrink-0 text-muted-foreground/40 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                className="shrink-0 text-muted-foreground/40 hover:text-red-600"
                 onClick={() => deleteRow(row.id)}
                 title="Remove row"
               >
