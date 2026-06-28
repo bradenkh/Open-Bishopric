@@ -1,6 +1,6 @@
 "use client";
 
-import { Plus, Trash2, ChevronUp, ChevronDown, Lock } from "lucide-react";
+import { Plus, Trash2, ChevronUp, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -103,7 +103,6 @@ export function BulletinEditor({ program, onChange }: Props) {
                     <ChevronDown className="h-3.5 w-3.5" />
                   </button>
                 </div>
-                <Lock className="h-3 w-3 text-muted-foreground/60" />
                 <span className="text-sm font-medium">{row.label}</span>
               </li>
             );
