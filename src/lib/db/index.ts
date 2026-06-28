@@ -83,6 +83,16 @@ export const rosterRepo = {
     if (error) throw error;
     return (data ?? []).map((r) => fromRow<RosterGroup>(r as Record<string, unknown>));
   },
+  /** Create an organization group. `position` orders it on the chart/settings. */
+  async create(db: DB, model: RosterGroup & { position?: number }): Promise<RosterGroup> {
+    const { data, error } = await db
+      .from("roster_groups")
+      .insert(toRow(model as unknown as Record<string, unknown>))
+      .select()
+      .single();
+    if (error) throw error;
+    return fromRow<RosterGroup>(data as Record<string, unknown>);
+  },
   async update(db: DB, id: string, patch: Partial<RosterGroup>): Promise<RosterGroup> {
     const { data, error } = await db
       .from("roster_groups")
@@ -92,6 +102,10 @@ export const rosterRepo = {
       .single();
     if (error) throw error;
     return fromRow<RosterGroup>(data as Record<string, unknown>);
+  },
+  async remove(db: DB, id: string): Promise<void> {
+    const { error } = await db.from("roster_groups").delete().eq("id", id);
+    if (error) throw error;
   },
 };
 

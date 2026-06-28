@@ -1340,12 +1340,27 @@ function SettingsEntryRow({ entry, disabled, onRename, onToggleHidden, onRemove 
 interface SettingsGroupCardProps {
   group: RosterGroup;
   onUpdate: (id: string, patch: Partial<RosterGroup>) => void;
+  onRemove: (group: RosterGroup) => void;
 }
 
-function SettingsGroupCard({ group, onUpdate }: SettingsGroupCardProps) {
+function SettingsGroupCard({ group, onUpdate, onRemove }: SettingsGroupCardProps) {
   const canEdit   = !!group.id;
   const hiddenCt  = group.entries.filter((e) => e.hidden).length;
   const setEntries = (entries: RosterEntry[]) => { if (group.id) onUpdate(group.id, { entries }); };
+
+  // Editable org / sub-org names (committed on blur).
+  const [orgName, setOrgName]       = useState(group.org);
+  const [subOrgName, setSubOrgName] = useState(group.subOrg ?? "");
+
+  const commitOrg = () => {
+    const v = orgName.trim();
+    if (!v) { setOrgName(group.org); return; }     // never allow an empty org name
+    if (group.id && v !== group.org) onUpdate(group.id, { org: v });
+  };
+  const commitSubOrg = () => {
+    const v = subOrgName.trim();
+    if (group.id && v !== (group.subOrg ?? "")) onUpdate(group.id, { subOrg: v || undefined });
+  };
 
   const renameEntry = (i: number, position: string) =>
     setEntries(group.entries.map((e, idx) => (idx === i ? { ...e, position } : e)));
@@ -1358,14 +1373,48 @@ function SettingsGroupCard({ group, onUpdate }: SettingsGroupCardProps) {
 
   return (
     <div className="rounded-xl border border-border bg-card overflow-hidden inline-block w-full align-top">
-      <div className="flex items-center gap-2 px-4 py-3 bg-muted/40 border-b border-border">
-        <div className="min-w-0 flex-1">
-          <p className="font-semibold truncate">{group.org}</p>
-          {group.subOrg && <p className="text-[11px] text-muted-foreground truncate">{group.subOrg}</p>}
+      <div className="flex items-start gap-2 px-3 py-3 bg-muted/40 border-b border-border">
+        <div className="min-w-0 flex-1 space-y-1">
+          <Input
+            value={orgName}
+            disabled={!canEdit}
+            onChange={(e) => setOrgName(e.target.value)}
+            onBlur={commitOrg}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLInputElement).blur(); }
+              if (e.key === "Escape") { setOrgName(group.org); (e.target as HTMLInputElement).blur(); }
+            }}
+            placeholder="Organization name"
+            className="h-8 text-sm font-semibold"
+          />
+          <Input
+            value={subOrgName}
+            disabled={!canEdit}
+            onChange={(e) => setSubOrgName(e.target.value)}
+            onBlur={commitSubOrg}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLInputElement).blur(); }
+              if (e.key === "Escape") { setSubOrgName(group.subOrg ?? ""); (e.target as HTMLInputElement).blur(); }
+            }}
+            placeholder="Sub-section (optional)"
+            className="h-7 text-[11px] text-muted-foreground"
+          />
         </div>
-        {hiddenCt > 0 && (
-          <span className="text-[10px] text-muted-foreground tabular-nums shrink-0">{hiddenCt} hidden</span>
-        )}
+        <div className="flex items-center gap-1 shrink-0">
+          {hiddenCt > 0 && (
+            <span className="text-[10px] text-muted-foreground tabular-nums">{hiddenCt} hidden</span>
+          )}
+          <button
+            type="button"
+            disabled={!canEdit}
+            onClick={() => onRemove(group)}
+            title="Delete this organization"
+            aria-label="Delete this organization"
+            className="inline-flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground/60 hover:bg-muted hover:text-red-600 dark:hover:text-red-400 transition-colors disabled:opacity-40"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        </div>
       </div>
       <div className="p-1.5 space-y-0.5">
         {group.entries.map((entry, i) => (
@@ -1393,33 +1442,81 @@ function SettingsGroupCard({ group, onUpdate }: SettingsGroupCardProps) {
 
 interface SettingsViewProps {
   roster: RosterGroup[];
+  onCreateGroup: (group: Omit<RosterGroup, "id">) => void;
   onUpdateGroup: (id: string, patch: Partial<RosterGroup>) => void;
+  onRemoveGroup: (group: RosterGroup) => void;
 }
 
-function SettingsView({ roster, onUpdateGroup }: SettingsViewProps) {
+function SettingsView({ roster, onCreateGroup, onUpdateGroup, onRemoveGroup }: SettingsViewProps) {
   const hiddenTotal = useMemo(
     () => roster.reduce((n, g) => n + g.entries.filter((e) => e.hidden).length, 0),
     [roster],
   );
 
+  const [newOrg, setNewOrg]       = useState("");
+  const [newSubOrg, setNewSubOrg] = useState("");
+
+  const addOrg = () => {
+    const org = newOrg.trim();
+    if (!org) return;
+    onCreateGroup({ org, subOrg: newSubOrg.trim() || undefined, entries: [] });
+    setNewOrg("");
+    setNewSubOrg("");
+  };
+
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-border bg-muted/30 p-4 text-sm text-muted-foreground">
-        Edit the standing list of callings that drives the <strong className="text-foreground">Chart</strong>.
-        Rename a calling, add or remove positions, or hide callings you don&apos;t want on the chart.
-        Hidden callings stay in your records but won&apos;t appear there.
+        Edit the standing list of organizations and callings that drives the{" "}
+        <strong className="text-foreground">Chart</strong> and the{" "}
+        <strong className="text-foreground">New Calling</strong> dropdowns.
+        Add or rename an organization, rename a calling, add or remove positions, or hide
+        callings you don&apos;t want on the chart. Hidden callings stay in your records but
+        won&apos;t appear there.
         {hiddenTotal > 0 && (
           <span className="block mt-1 text-foreground/80">
             {hiddenTotal} calling{hiddenTotal !== 1 ? "s" : ""} currently hidden from the chart.
           </span>
         )}
       </div>
+
+      {/* Add a new organization */}
+      <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+        <p className="text-sm font-semibold">Add an organization</p>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+          <div className="flex-1 space-y-1.5">
+            <Label htmlFor="newOrgName">Organization *</Label>
+            <Input
+              id="newOrgName"
+              value={newOrg}
+              onChange={(e) => setNewOrg(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addOrg(); } }}
+              placeholder="e.g. Primary"
+            />
+          </div>
+          <div className="flex-1 space-y-1.5">
+            <Label htmlFor="newSubOrgName">Sub-section (optional)</Label>
+            <Input
+              id="newSubOrgName"
+              value={newSubOrg}
+              onChange={(e) => setNewSubOrg(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addOrg(); } }}
+              placeholder="e.g. Presidency"
+            />
+          </div>
+          <Button type="button" onClick={addOrg} disabled={!newOrg.trim()} className="gap-1.5">
+            <Plus className="h-4 w-4" /> Add
+          </Button>
+        </div>
+      </div>
+
       <div className="gap-3 columns-1 md:columns-2 xl:columns-3 [&>*]:mb-3 [&>*]:break-inside-avoid">
         {roster.map((group) => (
           <SettingsGroupCard
             key={group.id ?? `${group.org}-${group.subOrg ?? ""}`}
             group={group}
             onUpdate={onUpdateGroup}
+            onRemove={onRemoveGroup}
           />
         ))}
       </div>
@@ -1527,7 +1624,7 @@ const EMPTY_FORM = {
 export default function CallingsPage() {
   const { user } = useAuth();
   const callingsCollection = useData().callings;
-  const { roster, updateRosterGroup } = useData();
+  const { roster, createRosterGroup, updateRosterGroup, removeRosterGroup } = useData();
   // Items come from the DB already valid; normalizeStage is a cheap defensive
   // map to coerce any legacy stage values to the current enum.
   const callings = useMemo(
@@ -1540,6 +1637,35 @@ export default function CallingsPage() {
   const [saving,   setSaving]   = useState(false);
   const [view,     setView]     = useState<PageView>("pipeline");
   const [confirmDelete, setConfirmDelete] = useState<Calling | null>(null);
+  const [confirmDeleteOrg, setConfirmDeleteOrg] = useState<RosterGroup | null>(null);
+
+  // ── Org / calling options for the New Calling dropdowns ─────────────────────
+  // Sourced from the standing roster (managed under Settings). Org first, then
+  // the callings within the chosen org.
+  const orgOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const orgs: string[] = [];
+    for (const g of roster) {
+      if (g.org && !seen.has(g.org)) { seen.add(g.org); orgs.push(g.org); }
+    }
+    return orgs;
+  }, [roster]);
+
+  const positionsByOrg = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const g of roster) {
+      if (!g.org) continue;
+      const list = map.get(g.org) ?? [];
+      for (const e of g.entries) {
+        if (e.hidden) continue;
+        if (!list.includes(e.position)) list.push(e.position);
+      }
+      map.set(g.org, list);
+    }
+    return map;
+  }, [roster]);
+
+  const positionOptions = form.organization ? positionsByOrg.get(form.organization) ?? [] : [];
 
   // ── Handlers ──────────────────────────────────────────────────────────────
 
@@ -1559,6 +1685,11 @@ export default function CallingsPage() {
     void callingsCollection.remove(id);
     if (selected?.id === id) setSelected(null);
     setConfirmDelete(null);
+  }
+
+  function handleDeleteOrg(group: RosterGroup) {
+    if (group.id) void removeRosterGroup(group.id);
+    setConfirmDeleteOrg(null);
   }
 
   async function handleCreate() {
@@ -1753,7 +1884,12 @@ export default function CallingsPage() {
       )}
 
       {view === "settings" && (
-        <SettingsView roster={roster} onUpdateGroup={updateRosterGroup} />
+        <SettingsView
+          roster={roster}
+          onCreateGroup={createRosterGroup}
+          onUpdateGroup={updateRosterGroup}
+          onRemoveGroup={setConfirmDeleteOrg}
+        />
       )}
 
       {/* ── Detail dialog ── */}
@@ -1885,39 +2021,83 @@ export default function CallingsPage() {
                   placeholder="Full name"
                   autoFocus
                 />
+                <p className="text-xs text-muted-foreground">
+                  You&apos;ll choose which calling to extend later, once they&apos;re in the pipeline.
+                </p>
               </div>
             ) : (
-              <>
-                <div className="space-y-1.5">
-                  <Label htmlFor="newPosition">Position *</Label>
-                  <Input
-                    id="newPosition"
-                    value={form.position}
-                    onChange={(e) => setForm((f) => ({ ...f, position: e.target.value }))}
-                    placeholder="e.g. Sunday School Teacher"
-                    autoFocus
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="newCandidate">Candidate in mind (optional)</Label>
-                  <Input
-                    id="newCandidate"
-                    value={form.memberName}
-                    onChange={(e) => setForm((f) => ({ ...f, memberName: e.target.value }))}
-                    placeholder="Seeds the suggestion list"
-                  />
-                </div>
-              </>
+              <div className="space-y-1.5">
+                <Label htmlFor="newCandidate">Candidate in mind (optional)</Label>
+                <Input
+                  id="newCandidate"
+                  value={form.memberName}
+                  onChange={(e) => setForm((f) => ({ ...f, memberName: e.target.value }))}
+                  placeholder="Seeds the suggestion list"
+                />
+              </div>
             )}
+
+            {/* Organization → Calling dropdowns. Org first, then the callings in
+                that org. Sourced from the roster managed under Settings. */}
             <div className="space-y-1.5">
-              <Label htmlFor="newOrg">Organization</Label>
-              <Input
-                id="newOrg"
-                value={form.organization}
-                onChange={(e) => setForm((f) => ({ ...f, organization: e.target.value }))}
-                placeholder="e.g. Sunday School"
-              />
+              <Label htmlFor="newOrg">Organization{form.kind === "vacant" ? " *" : ""}</Label>
+              {orgOptions.length === 0 ? (
+                <p className="text-sm text-muted-foreground rounded-lg border border-dashed border-border p-3">
+                  No organizations yet. Add one under the <strong className="text-foreground">Settings</strong> tab first.
+                </p>
+              ) : (
+                <Select
+                  value={form.organization || undefined}
+                  onValueChange={(org) =>
+                    // Changing the org clears the chosen calling (it may not exist there).
+                    setForm((f) => ({ ...f, organization: org, position: "" }))
+                  }
+                >
+                  <SelectTrigger id="newOrg">
+                    <SelectValue placeholder="Select an organization…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {orgOptions.map((org) => (
+                      <SelectItem key={org} value={org}>{org}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
             </div>
+
+            {form.kind === "vacant" && (
+              <div className="space-y-1.5">
+                <Label htmlFor="newPosition">Calling *</Label>
+                <Select
+                  value={form.position || undefined}
+                  onValueChange={(position) => setForm((f) => ({ ...f, position }))}
+                  disabled={!form.organization || positionOptions.length === 0}
+                >
+                  <SelectTrigger id="newPosition">
+                    <SelectValue
+                      placeholder={
+                        !form.organization
+                          ? "Choose an organization first…"
+                          : positionOptions.length === 0
+                            ? "No callings in this organization yet"
+                            : "Select a calling…"
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {positionOptions.map((pos) => (
+                      <SelectItem key={pos} value={pos}>{pos}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {form.organization && positionOptions.length === 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    Add callings to this organization under the <strong>Settings</strong> tab.
+                  </p>
+                )}
+              </div>
+            )}
+
             <div className="space-y-1.5">
               <Label htmlFor="newNotes">Notes</Label>
               <Input
@@ -1955,6 +2135,30 @@ export default function CallingsPage() {
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setConfirmDelete(null)}>Cancel</Button>
             <Button variant="destructive" onClick={() => confirmDelete && handleDelete(confirmDelete.id)}>
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Delete organization confirmation ── */}
+      <Dialog open={!!confirmDeleteOrg} onOpenChange={(open) => !open && setConfirmDeleteOrg(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete this organization?</DialogTitle>
+          </DialogHeader>
+          {confirmDeleteOrg && (
+            <p className="text-sm text-muted-foreground">
+              This permanently removes <strong className="text-foreground">{confirmDeleteOrg.org}</strong>
+              {confirmDeleteOrg.subOrg ? <> ({confirmDeleteOrg.subOrg})</> : null}
+              {" "}and its {confirmDeleteOrg.entries.length} calling{confirmDeleteOrg.entries.length !== 1 ? "s" : ""}{" "}
+              from the roster, the Chart, and the New Calling dropdowns. This can&apos;t be undone.
+              Callings already in the pipeline stay as they are.
+            </p>
+          )}
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setConfirmDeleteOrg(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={() => confirmDeleteOrg && handleDeleteOrg(confirmDeleteOrg)}>
               Delete
             </Button>
           </DialogFooter>
