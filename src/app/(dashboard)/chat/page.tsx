@@ -40,7 +40,7 @@ export default function ChatPage() {
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       handleSubmit();
     }
@@ -247,7 +247,7 @@ export default function ChatPage() {
           )}
         </form>
         <p className="mt-1.5 text-center text-xs text-muted-foreground">
-          Enter to send &middot; Shift+Enter for new line
+          Ctrl+Enter to send &middot; Enter for new line
         </p>
       </div>
     </div>
