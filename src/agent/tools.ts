@@ -752,6 +752,156 @@ export const scheduleInterview = tool({
   },
 });
 
+const INTERVIEW_STAGES_LIST = [
+  "schedule_any", "schedule_bishop", "pending_confirmation",
+  "scheduled", "date_passed", "completed",
+] as const;
+
+const INTERVIEW_ADVANCE_ACTIONS = [
+  "confirm_attendee", "confirm_interviewer", "confirm_both",
+  "mark_completed", "reschedule", "move_to_stage",
+] as const;
+
+export const updateInterview = tool({
+  description:
+    "Update fields on an existing interview without changing its stage. Use to edit member name, type, duration, interviewer, or notes. To advance through the pipeline (confirm, complete, reschedule), use advanceInterview instead.",
+  inputSchema: z.object({
+    id: z.string().describe("The interview's id (from getInterviews)"),
+    memberName: z.string().optional(),
+    type: z.enum(INTERVIEW_TYPES).optional(),
+    durationMins: z.number().optional(),
+    interviewer: z.string().optional(),
+    notes: z.string().optional().describe("Updated notes (empty string to clear)"),
+    requiresBishop: z.boolean().optional(),
+  }),
+  execute: async ({ id, memberName, type, durationMins, interviewer, notes, requiresBishop }) => {
+    const patch: Record<string, unknown> = {};
+    if (memberName !== undefined) patch.member_name = memberName;
+    if (type !== undefined) patch.type = type;
+    if (durationMins !== undefined) patch.duration_mins = durationMins;
+    if (interviewer !== undefined) patch.interviewer = interviewer || null;
+    if (notes !== undefined) patch.notes = notes || null;
+    if (requiresBishop !== undefined) patch.requires_bishop = requiresBishop;
+    if (Object.keys(patch).length === 0) return { error: "No fields to update were provided." };
+    const { data, error } = await db()
+      .from("interviews")
+      .update(patch)
+      .eq("id", id)
+      .select()
+      .single();
+    if (error) throw error;
+    return fromRow<Interview>(data);
+  },
+});
+
+export const advanceInterview = tool({
+  description:
+    "Advance an interview through the pipeline. Use getInterviews to find the interview's id and current stage first.\n\nActions:\n- confirm_attendee: mark the attendee as confirmed (auto-advances to scheduled if both confirmed)\n- confirm_interviewer: mark the interviewer as confirmed (auto-advances to scheduled if both confirmed)\n- confirm_both: confirm both sides at once → scheduled\n- mark_completed: scheduled or date_passed → completed\n- reschedule: clear the booking and send back to the original schedule column\n- move_to_stage: manual override to any stage",
+  inputSchema: z.object({
+    id: z.string().describe("The interview's id"),
+    action: z.enum(INTERVIEW_ADVANCE_ACTIONS),
+    toStage: z.enum(INTERVIEW_STAGES_LIST).optional().describe("Target stage (only for move_to_stage)"),
+  }),
+  execute: async ({ id, action, toStage }) => {
+    const { data: row, error: fetchErr } = await db().from("interviews").select("*").eq("id", id).maybeSingle();
+    if (fetchErr) throw fetchErr;
+    if (!row) return { error: "No interview found with that id." };
+    const interview = fromRow<Interview>(row);
+    const patch: Record<string, unknown> = {};
+
+    switch (action) {
+      case "confirm_attendee": {
+        if (interview.stage !== "pending_confirmation") return { error: `Expected stage 'pending_confirmation', got '${interview.stage}'.` };
+        patch.attendee_confirmed = true;
+        if (interview.interviewerConfirmed) {
+          patch.stage = "scheduled";
+          patch.interviewer_confirmed = true;
+        }
+        break;
+      }
+      case "confirm_interviewer": {
+        if (interview.stage !== "pending_confirmation") return { error: `Expected stage 'pending_confirmation', got '${interview.stage}'.` };
+        patch.interviewer_confirmed = true;
+        if (interview.attendeeConfirmed) {
+          patch.stage = "scheduled";
+          patch.attendee_confirmed = true;
+        }
+        break;
+      }
+      case "confirm_both": {
+        if (interview.stage !== "pending_confirmation") return { error: `Expected stage 'pending_confirmation', got '${interview.stage}'.` };
+        patch.stage = "scheduled";
+        patch.attendee_confirmed = true;
+        patch.interviewer_confirmed = true;
+        break;
+      }
+      case "mark_completed": {
+        if (interview.stage !== "scheduled" && interview.stage !== "date_passed") {
+          return { error: `Expected stage 'scheduled' or 'date_passed', got '${interview.stage}'.` };
+        }
+        patch.stage = "completed";
+        break;
+      }
+      case "reschedule": {
+        if (!["pending_confirmation", "scheduled", "date_passed"].includes(interview.stage)) {
+          return { error: `Cannot reschedule from stage '${interview.stage}'. Must be pending_confirmation, scheduled, or date_passed.` };
+        }
+        patch.stage = interview.requiresBishop ? "schedule_bishop" : "schedule_any";
+        patch.scheduled_date = null;
+        patch.scheduled_time = null;
+        patch.attendee_confirmed = false;
+        patch.interviewer_confirmed = false;
+        break;
+      }
+      case "move_to_stage": {
+        if (!toStage) return { error: "toStage is required for move_to_stage." };
+        patch.stage = toStage;
+        if (toStage === "schedule_any") {
+          patch.requires_bishop = false;
+          patch.scheduled_date = null;
+          patch.scheduled_time = null;
+          patch.attendee_confirmed = false;
+          patch.interviewer_confirmed = false;
+        } else if (toStage === "schedule_bishop") {
+          patch.requires_bishop = true;
+          patch.scheduled_date = null;
+          patch.scheduled_time = null;
+          patch.attendee_confirmed = false;
+          patch.interviewer_confirmed = false;
+        } else if (toStage === "scheduled") {
+          patch.attendee_confirmed = true;
+          patch.interviewer_confirmed = true;
+        }
+        break;
+      }
+    }
+
+    const { data: updated, error: updErr } = await db()
+      .from("interviews")
+      .update(patch)
+      .eq("id", id)
+      .select()
+      .single();
+    if (updErr) throw updErr;
+    return fromRow<Interview>(updated);
+  },
+});
+
+export const deleteInterview = tool({
+  description: "Delete an interview from the pipeline. Use getInterviews to find the interview's id first.",
+  inputSchema: z.object({
+    id: z.string().describe("The interview's id to delete"),
+  }),
+  execute: async ({ id }) => {
+    const { data: row, error: fetchErr } = await db().from("interviews").select("id, member_name, type, stage").eq("id", id).maybeSingle();
+    if (fetchErr) throw fetchErr;
+    if (!row) return { error: "No interview found with that id." };
+    const { error } = await db().from("interviews").delete().eq("id", id);
+    if (error) throw error;
+    return { ok: true, deleted: { id: row.id, memberName: row.member_name, type: row.type, stage: row.stage } };
+  },
+});
+
 // ── Sacrament meeting bulletins ──────────────────────────────────────────────
 
 const bulletinRowSchema = z.object({
@@ -1149,6 +1299,9 @@ export const agentTools = {
   createInterview,
   findInterviewSlots,
   scheduleInterview,
+  updateInterview,
+  advanceInterview,
+  deleteInterview,
   // Sacrament meeting bulletins
   getSacramentBulletin,
   updateSacramentBulletin,
