@@ -100,8 +100,12 @@ interface DataContextValue {
   /** The bishopric roster, derived from `profiles` (people with leadership roles). */
   bishopric: BishopricMember[];
   roster: RosterGroup[];
-  /** Edit a roster group (rename callings, toggle chart visibility, add/remove positions). */
+  /** Create a new organization group (and its callings) on the roster. */
+  createRosterGroup: (group: Omit<RosterGroup, "id">) => Promise<void>;
+  /** Edit a roster group (rename the org/callings, toggle chart visibility, add/remove positions). */
   updateRosterGroup: (id: string, patch: Partial<RosterGroup>) => Promise<void>;
+  /** Remove an organization group from the roster entirely. */
+  removeRosterGroup: (id: string) => Promise<void>;
 
   wardInfo: WardInfo | null;
   updateWardInfo: (patch: Partial<WardInfo>) => Promise<void>;
@@ -363,6 +367,22 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     [db, tasks],
   );
 
+  const createRosterGroup = useCallback(
+    async (group: Omit<RosterGroup, "id">) => {
+      const created: RosterGroup = { ...group, id: newId() };
+      // New orgs sort to the end of the chart/settings list.
+      const position = roster.length;
+      setRoster((prev) => [...prev, created]);
+      try {
+        await rosterRepo.create(db, { ...created, position });
+      } catch (err) {
+        console.error("Create roster group failed", err);
+        setRoster(await rosterRepo.list(db));
+      }
+    },
+    [db, roster.length],
+  );
+
   const updateRosterGroup = useCallback(
     async (id: string, patch: Partial<RosterGroup>) => {
       setRoster((prev) => prev.map((g) => (g.id === id ? { ...g, ...patch } : g)));
@@ -370,6 +390,19 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         await rosterRepo.update(db, id, patch);
       } catch (err) {
         console.error("Update roster group failed", err);
+        setRoster(await rosterRepo.list(db));
+      }
+    },
+    [db],
+  );
+
+  const removeRosterGroup = useCallback(
+    async (id: string) => {
+      setRoster((prev) => prev.filter((g) => g.id !== id));
+      try {
+        await rosterRepo.remove(db, id);
+      } catch (err) {
+        console.error("Remove roster group failed", err);
         setRoster(await rosterRepo.list(db));
       }
     },
@@ -405,7 +438,9 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       reloadAll,
       bishopric,
       roster,
+      createRosterGroup,
       updateRosterGroup,
+      removeRosterGroup,
       wardInfo,
       updateWardInfo,
       tasks,
@@ -430,7 +465,9 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       reloadAll,
       bishopric,
       roster,
+      createRosterGroup,
       updateRosterGroup,
+      removeRosterGroup,
       wardInfo,
       updateWardInfo,
       tasks,
