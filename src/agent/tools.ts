@@ -789,6 +789,135 @@ export const recordSolicitationReply = tool({
   },
 });
 
+// ── Quote of the day ──────────────────────────────────────────────────────────
+
+export const getQuoteOfTheDay = tool({
+  description:
+    "Fetch today's inspirational quote from the Church of Jesus Christ website (churchofjesuschrist.org). Returns the quote text and attribution. Use when the user asks for a quote, spiritual thought, or quote of the day.",
+  inputSchema: z.object({}),
+  execute: async () => {
+    const url = "https://www.churchofjesuschrist.org/my-home?lang=eng";
+    try {
+      const res = await fetch(url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (compatible; OpenBishopric/1.0)",
+          Accept: "text/html",
+        },
+      });
+      if (!res.ok) {
+        return { error: `Failed to fetch page (HTTP ${res.status}). Try again later.` };
+      }
+      const html = await res.text();
+
+      let quote: string | undefined;
+      let attribution: string | undefined;
+
+      // Strategy 1: look for JSON data embedded in the page (common in React SSR)
+      const jsonMatches = html.matchAll(/<script[^>]*>\s*(\{[\s\S]*?"quote[\s\S]*?\})\s*<\/script>/gi);
+      for (const m of jsonMatches) {
+        try {
+          const data = JSON.parse(m[1]);
+          const found = findQuoteInObject(data);
+          if (found) {
+            quote = found.quote;
+            attribution = found.attribution;
+            break;
+          }
+        } catch { /* not valid JSON, skip */ }
+      }
+
+      // Strategy 2: look for __NEXT_DATA__ or similar embedded state
+      if (!quote) {
+        const stateMatch = html.match(/<script[^>]*id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/i)
+          ?? html.match(/<script[^>]*>\s*window\.__(?:INITIAL_STATE|APP_STATE|DATA)__\s*=\s*([\s\S]*?);\s*<\/script>/i);
+        if (stateMatch) {
+          try {
+            const data = JSON.parse(stateMatch[1]);
+            const found = findQuoteInObject(data);
+            if (found) {
+              quote = found.quote;
+              attribution = found.attribution;
+            }
+          } catch { /* skip */ }
+        }
+      }
+
+      // Strategy 3: scrape from HTML structure
+      if (!quote) {
+        const quotePatterns = [
+          /class="[^"]*quote[^"]*"[^>]*>[\s\S]*?<(?:p|blockquote|span|div)[^>]*>([\s\S]*?)<\/(?:p|blockquote|span|div)>/i,
+          /<blockquote[^>]*>([\s\S]*?)<\/blockquote>/i,
+          /data-testid="[^"]*quote[^"]*"[^>]*>([\s\S]*?)<\//i,
+        ];
+        for (const pattern of quotePatterns) {
+          const m = html.match(pattern);
+          if (m) {
+            quote = stripHtml(m[1]).trim();
+            break;
+          }
+        }
+        if (quote) {
+          const attrMatch = html.match(/class="[^"]*(?:attribution|author|cite)[^"]*"[^>]*>([\s\S]*?)<\//i);
+          if (attrMatch) attribution = stripHtml(attrMatch[1]).trim();
+        }
+      }
+
+      if (!quote) {
+        return { error: "Could not extract the quote from the page. The page structure may have changed." };
+      }
+
+      return {
+        quote: stripHtml(quote).trim(),
+        ...(attribution ? { attribution: stripHtml(attribution).trim() } : {}),
+        source: url,
+      };
+    } catch (err) {
+      return { error: `Failed to fetch quote: ${err instanceof Error ? err.message : String(err)}` };
+    }
+  },
+});
+
+function stripHtml(s: string): string {
+  return s.replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, " ").replace(/\s+/g, " ");
+}
+
+function findQuoteInObject(obj: unknown): { quote: string; attribution?: string } | null {
+  if (!obj || typeof obj !== "object") return null;
+  const record = obj as Record<string, unknown>;
+
+  if (typeof record.quote === "string" && record.quote.length > 10) {
+    return {
+      quote: record.quote,
+      attribution: typeof record.attribution === "string" ? record.attribution
+        : typeof record.quoteBy === "string" ? record.quoteBy
+        : typeof record.author === "string" ? record.author
+        : undefined,
+    };
+  }
+  if (typeof record.quoteText === "string" && record.quoteText.length > 10) {
+    return {
+      quote: record.quoteText,
+      attribution: typeof record.quoteAuthor === "string" ? record.quoteAuthor
+        : typeof record.author === "string" ? record.author
+        : undefined,
+    };
+  }
+
+  for (const val of Object.values(record)) {
+    if (Array.isArray(val)) {
+      for (const item of val) {
+        const found = findQuoteInObject(item);
+        if (found) return found;
+      }
+    } else if (val && typeof val === "object") {
+      const found = findQuoteInObject(val);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
 // ── Memory: standing preferences the assistant remembers across conversations ──
 
 export const rememberPreference = tool({
@@ -857,6 +986,8 @@ export const agentTools = {
   getMeetingAgenda,
   addAgendaItems,
   recordSolicitationReply,
+  // Quote of the day
+  getQuoteOfTheDay,
   // Memory
   rememberPreference,
   getRememberedPreferences,

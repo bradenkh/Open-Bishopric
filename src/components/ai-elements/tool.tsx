@@ -24,6 +24,7 @@ const TOOL_LABELS: Record<string, string> = {
   getAnnouncements: "Reading announcements",
   createAnnouncement: "Adding an announcement",
   updateAnnouncement: "Updating an announcement",
+  getQuoteOfTheDay: "Fetching quote of the day",
   rememberPreference: "Saving a preference",
   getRememberedPreferences: "Recalling preferences",
   forgetPreference: "Forgetting a preference",
