@@ -131,6 +131,278 @@ export const getCallings = tool({
   },
 });
 
+const CALLING_STAGES = [
+  "needs_calling", "vacant", "needs_release", "extending",
+  "sustaining", "set_apart", "lcr_update", "recorded",
+] as const;
+
+const ADVANCE_ACTIONS = [
+  "assign_and_extend", "choose_and_extend", "release_and_extend",
+  "record_accepted", "record_declined",
+  "confirm_sustained", "confirm_set_apart", "confirm_lcr_updated",
+  "move_to_stage",
+] as const;
+
+export const createCalling = tool({
+  description:
+    "Create a new calling pipeline entry. Use kind='member' for a person who needs a calling (starts at needs_calling), kind='vacant' for an open position to fill (starts at vacant), or kind='release' for a current holder who needs to be released (starts at needs_release).",
+  inputSchema: z.object({
+    kind: z.enum(["member", "vacant", "release"]),
+    memberName: z.string().optional().describe("Person's name (required for 'member' and 'release')"),
+    position: z.string().optional().describe("Position/calling name (required for 'vacant' and 'release')"),
+    organization: z.string().optional().describe("Organization, e.g. 'Sunday School'"),
+    notes: z.string().optional(),
+  }),
+  execute: async ({ kind, memberName, position, organization, notes }) => {
+    if (kind === "member" && !memberName) return { error: "memberName is required when kind is 'member'." };
+    if (kind === "vacant" && !position) return { error: "position is required when kind is 'vacant'." };
+    if (kind === "release" && (!memberName || !position)) return { error: "memberName and position are both required when kind is 'release'." };
+    const stage = kind === "member" ? "needs_calling" : kind === "vacant" ? "vacant" : "needs_release";
+    const { data, error } = await db()
+      .from("callings")
+      .insert({
+        id: crypto.randomUUID(),
+        stage,
+        member_name: memberName ?? "",
+        position: position ?? "",
+        organization: organization ?? null,
+        notes: notes ?? null,
+        created_by: "ai-agent",
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    return fromRow<Calling>(data);
+  },
+});
+
+export const updateCalling = tool({
+  description:
+    "Update fields on an existing calling without changing its stage. Use to edit notes, organization, position, or manage the suggested candidates list. To advance through the pipeline, use advanceCalling instead.",
+  inputSchema: z.object({
+    id: z.string().describe("The calling's id (from getCallings)"),
+    memberName: z.string().optional(),
+    position: z.string().optional(),
+    organization: z.string().optional(),
+    notes: z.string().optional().describe("Updated notes (empty string to clear)"),
+    suggestedReplacements: z.array(z.string()).optional().describe("Replace the full list of suggested candidates"),
+  }),
+  execute: async ({ id, memberName, position, organization, notes, suggestedReplacements }) => {
+    const patch: Record<string, unknown> = {};
+    if (memberName !== undefined) patch.member_name = memberName;
+    if (position !== undefined) patch.position = position;
+    if (organization !== undefined) patch.organization = organization || null;
+    if (notes !== undefined) patch.notes = notes || null;
+    if (suggestedReplacements !== undefined) patch.suggested_replacements = suggestedReplacements;
+    if (Object.keys(patch).length === 0) return { error: "No fields to update were provided." };
+    const { data, error } = await db()
+      .from("callings")
+      .update(patch)
+      .eq("id", id)
+      .select()
+      .single();
+    if (error) throw error;
+    return fromRow<Calling>(data);
+  },
+});
+
+export const advanceCalling = tool({
+  description:
+    "Advance a calling through the pipeline. Each action moves it to the appropriate next stage and creates any necessary tasks. Use getCallings to find the calling's id and current stage first.\n\nActions:\n- assign_and_extend: needs_calling → extending (assign position + counselor to extend)\n- choose_and_extend: vacant → extending (choose candidate + counselor to extend)\n- release_and_extend: needs_release → extending (release current holder + extend to replacement)\n- record_accepted: extending → sustaining (person accepted)\n- record_declined: extending → needs_calling (person declined)\n- confirm_sustained: sustaining → set_apart\n- confirm_set_apart: set_apart → lcr_update (record who set apart)\n- confirm_lcr_updated: lcr_update → recorded\n- move_to_stage: any → toStage (manual override)",
+  inputSchema: z.object({
+    id: z.string().describe("The calling's id"),
+    action: z.enum(ADVANCE_ACTIONS),
+    position: z.string().optional().describe("Calling to assign (for assign_and_extend)"),
+    organization: z.string().optional().describe("Organization for the assigned calling"),
+    replacementName: z.string().optional().describe("Chosen candidate (for choose_and_extend, release_and_extend)"),
+    extendedBy: z.string().optional().describe("Bishopric member who will extend the calling"),
+    releasedBy: z.string().optional().describe("Bishopric member who will inform the outgoing holder"),
+    declineReason: z.string().optional().describe("Reason for declining (for record_declined)"),
+    setApartBy: z.string().optional().describe("Who set them apart (for confirm_set_apart)"),
+    setApartDate: z.string().optional().describe("ISO date YYYY-MM-DD (for confirm_set_apart, defaults to today)"),
+    lcrUpdatedBy: z.string().optional().describe("Who updated LCR (for confirm_lcr_updated, defaults to ward clerk)"),
+    toStage: z.enum(CALLING_STAGES).optional().describe("Target stage (only for move_to_stage)"),
+  }),
+  execute: async ({ id, action, ...params }) => {
+    const { data: row, error: fetchErr } = await db().from("callings").select("*").eq("id", id).maybeSingle();
+    if (fetchErr) throw fetchErr;
+    if (!row) return { error: "No calling found with that id." };
+    const calling = fromRow<Calling>(row);
+    const now = new Date().toISOString();
+    const today = now.slice(0, 10);
+    const patch: Record<string, unknown> = {};
+    const tasksToCreate: Record<string, unknown>[] = [];
+
+    switch (action) {
+      case "assign_and_extend": {
+        if (calling.stage !== "needs_calling") return { error: `Expected stage 'needs_calling', got '${calling.stage}'.` };
+        if (!params.position || !params.extendedBy) return { error: "position and extendedBy are required for assign_and_extend." };
+        patch.stage = "extending";
+        patch.position = params.position;
+        if (params.organization !== undefined) patch.organization = params.organization;
+        patch.extended_by = params.extendedBy;
+        patch.extended_at = now;
+        tasksToCreate.push({
+          id: crypto.randomUUID(),
+          title: `Extend calling — ${params.position} → ${calling.memberName}`,
+          type: "calling",
+          status: "active",
+          member_name: calling.memberName || null,
+          assignee_name: params.extendedBy,
+          context: { callingId: id, taskType: "extend", position: params.position },
+          created_by: "ai-agent",
+        });
+        break;
+      }
+      case "choose_and_extend": {
+        if (calling.stage !== "vacant") return { error: `Expected stage 'vacant', got '${calling.stage}'.` };
+        if (!params.replacementName || !params.extendedBy) return { error: "replacementName and extendedBy are required for choose_and_extend." };
+        patch.stage = "extending";
+        patch.member_name = params.replacementName;
+        patch.replacement_name = params.replacementName;
+        patch.extended_by = params.extendedBy;
+        patch.extended_at = now;
+        tasksToCreate.push({
+          id: crypto.randomUUID(),
+          title: `Extend calling — ${calling.position} → ${params.replacementName}`,
+          type: "calling",
+          status: "active",
+          member_name: params.replacementName,
+          assignee_name: params.extendedBy,
+          context: { callingId: id, taskType: "extend", position: calling.position },
+          created_by: "ai-agent",
+        });
+        break;
+      }
+      case "release_and_extend": {
+        if (calling.stage !== "needs_release") return { error: `Expected stage 'needs_release', got '${calling.stage}'.` };
+        if (!params.replacementName || !params.extendedBy) return { error: "replacementName and extendedBy are required for release_and_extend." };
+        patch.stage = "extending";
+        patch.released_name = calling.memberName;
+        patch.released_by = params.releasedBy ?? params.extendedBy;
+        patch.member_name = params.replacementName;
+        patch.replacement_name = params.replacementName;
+        patch.extended_by = params.extendedBy;
+        patch.extended_at = now;
+        if (params.releasedBy) {
+          tasksToCreate.push({
+            id: crypto.randomUUID(),
+            title: `Inform of release — ${calling.position} (${calling.memberName})`,
+            type: "calling",
+            status: "active",
+            member_name: calling.memberName || null,
+            assignee_name: params.releasedBy,
+            context: { callingId: id, taskType: "release_inform", position: calling.position },
+            created_by: "ai-agent",
+          });
+        }
+        tasksToCreate.push({
+          id: crypto.randomUUID(),
+          title: `Extend calling — ${calling.position} → ${params.replacementName}`,
+          type: "calling",
+          status: "active",
+          member_name: params.replacementName,
+          assignee_name: params.extendedBy,
+          context: { callingId: id, taskType: "extend", position: calling.position },
+          created_by: "ai-agent",
+        });
+        break;
+      }
+      case "record_accepted": {
+        if (calling.stage !== "extending") return { error: `Expected stage 'extending', got '${calling.stage}'.` };
+        await completeCallingTasksServer(id);
+        patch.stage = "sustaining";
+        patch.sustained_in = "sacrament_meeting";
+        patch.sustained_date = upcomingSundayISO();
+        patch.business_item_added = true;
+        break;
+      }
+      case "record_declined": {
+        if (calling.stage !== "extending") return { error: `Expected stage 'extending', got '${calling.stage}'.` };
+        await completeCallingTasksServer(id);
+        patch.stage = "needs_calling";
+        patch.decline_reason = params.declineReason ?? null;
+        patch.declined_at = now;
+        patch.member_name = "";
+        break;
+      }
+      case "confirm_sustained": {
+        if (calling.stage !== "sustaining") return { error: `Expected stage 'sustaining', got '${calling.stage}'.` };
+        patch.stage = "set_apart";
+        break;
+      }
+      case "confirm_set_apart": {
+        if (calling.stage !== "set_apart") return { error: `Expected stage 'set_apart', got '${calling.stage}'.` };
+        if (!params.setApartBy) return { error: "setApartBy is required for confirm_set_apart." };
+        patch.stage = "lcr_update";
+        patch.set_apart_by = params.setApartBy;
+        patch.set_apart_date = params.setApartDate ?? today;
+        await completeCallingTasksServer(id);
+        const clerk = await clerkName();
+        tasksToCreate.push({
+          id: crypto.randomUUID(),
+          title: `Update LCR — ${calling.memberName}${calling.position ? ` / ${calling.position}` : ""}`,
+          description: `${calling.memberName} was set apart${params.setApartDate ? ` on ${params.setApartDate}` : ""} by ${params.setApartBy}. Please record the calling in LCR and mark them as set apart.`,
+          type: "calling",
+          status: "active",
+          member_name: calling.memberName || null,
+          assignee_name: clerk ?? "Ward Clerk",
+          context: { callingId: id, taskType: "lcr_update", position: calling.position },
+          created_by: "ai-agent",
+        });
+        break;
+      }
+      case "confirm_lcr_updated": {
+        if (calling.stage !== "lcr_update") return { error: `Expected stage 'lcr_update', got '${calling.stage}'.` };
+        await completeCallingTasksServer(id);
+        patch.stage = "recorded";
+        patch.lcr_updated = true;
+        patch.lcr_updated_by = params.lcrUpdatedBy ?? (await clerkName()) ?? "Ward Clerk";
+        patch.lcr_updated_at = now;
+        break;
+      }
+      case "move_to_stage": {
+        if (!params.toStage) return { error: "toStage is required for move_to_stage." };
+        patch.stage = params.toStage;
+        break;
+      }
+    }
+
+    const { data: updated, error: updErr } = await db()
+      .from("callings")
+      .update(patch)
+      .eq("id", id)
+      .select()
+      .single();
+    if (updErr) throw updErr;
+
+    if (tasksToCreate.length > 0) {
+      const { error: taskErr } = await db().from("tasks").insert(tasksToCreate);
+      if (taskErr) throw taskErr;
+    }
+
+    return {
+      calling: fromRow<Calling>(updated),
+      tasksCreated: tasksToCreate.length,
+    };
+  },
+});
+
+export const deleteCalling = tool({
+  description: "Delete a calling from the pipeline. Use getCallings to find the calling's id first.",
+  inputSchema: z.object({
+    id: z.string().describe("The calling's id to delete"),
+  }),
+  execute: async ({ id }) => {
+    const { data: row, error: fetchErr } = await db().from("callings").select("id, member_name, position, stage").eq("id", id).maybeSingle();
+    if (fetchErr) throw fetchErr;
+    if (!row) return { error: "No calling found with that id." };
+    const { error } = await db().from("callings").delete().eq("id", id);
+    if (error) throw error;
+    return { ok: true, deleted: { id: row.id, memberName: row.member_name, position: row.position, stage: row.stage } };
+  },
+});
+
 // ── Roster / organization chart (the Chart tab) ──────────────────────────────
 // The standing org chart of every position and who holds it — what an LCR
 // "Organizations and Callings" report shows. Distinct from the calling pipeline
@@ -264,6 +536,33 @@ async function loadInterviewers(): Promise<{ name: string; role: string }[]> {
 async function bishopName(): Promise<string | undefined> {
   const { data } = await db().from("profiles").select("display_name").eq("role", "bishop").maybeSingle();
   return (data?.display_name as string | undefined) ?? undefined;
+}
+
+async function clerkName(): Promise<string | undefined> {
+  const { data } = await db().from("profiles").select("display_name").eq("role", "clerk").maybeSingle();
+  return (data?.display_name as string | undefined) ?? undefined;
+}
+
+async function completeCallingTasksServer(callingId: string): Promise<void> {
+  const { data: tasks } = await db()
+    .from("tasks")
+    .select("id, context")
+    .in("status", ["active", "in_progress", "waiting"]);
+  const toComplete = (tasks ?? [])
+    .filter((t) => (t.context as Record<string, unknown> | null)?.callingId === callingId);
+  if (toComplete.length > 0) {
+    await db()
+      .from("tasks")
+      .update({ status: "completed" })
+      .in("id", toComplete.map((t) => t.id as string));
+  }
+}
+
+function upcomingSundayISO(): string {
+  const d = new Date();
+  const offset = (7 - d.getDay()) % 7;
+  d.setDate(d.getDate() + offset);
+  return d.toISOString().slice(0, 10);
 }
 
 export const getInterviews = tool({
@@ -837,6 +1136,10 @@ export const agentTools = {
   createTask,
   updateTaskStatus,
   getCallings,
+  createCalling,
+  updateCalling,
+  advanceCalling,
+  deleteCalling,
   // Roster / org chart (Chart tab)
   getRoster,
   importRoster,
