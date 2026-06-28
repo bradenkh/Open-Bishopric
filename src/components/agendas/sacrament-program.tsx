@@ -1,11 +1,11 @@
 "use client";
 
-import { Plus, Trash2, ChevronUp, ChevronDown, Lock } from "lucide-react";
+import { Plus, Trash2, ChevronUp, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import type { BulletinRow, SacramentProgram } from "@/types";
-import { anchorIndex, makeRow } from "@/lib/bulletin";
+import { makeRow } from "@/lib/bulletin";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -14,13 +14,11 @@ interface Props {
 }
 
 /**
- * Table editor for the bulletin's order of service. The "Administration of the
- * Sacrament" anchor is fixed in the middle; rows can be added above or below it
- * and edited inline. The whole thing is just the bulletin JSON (program.rows).
+ * Table editor for the bulletin's order of service. All rows — including the
+ * sacrament anchor — can be freely reordered. New rows are appended at the bottom.
  */
 export function BulletinEditor({ program, onChange }: Props) {
   const rows = program.rows;
-  const anchor = anchorIndex(rows);
 
   function setField<K extends keyof SacramentProgram>(key: K, value: string) {
     onChange({ ...program, [key]: value || undefined });
@@ -38,22 +36,13 @@ export function BulletinEditor({ program, onChange }: Props) {
     setRows(rows.filter((r) => r.id !== id));
   }
 
-  /** Insert a blank row just above the anchor (bottom of the pre-sacrament section). */
-  function addAbove() {
-    const i = anchor < 0 ? rows.length : anchor;
-    setRows([...rows.slice(0, i), makeRow(), ...rows.slice(i)]);
-  }
-
-  /** Insert a blank row at the very end (bottom of the post-sacrament section). */
-  function addBelow() {
+  function addRow() {
     setRows([...rows, makeRow()]);
   }
 
-  /** Move a row up/down within its section — never crossing the anchor. */
   function move(idx: number, dir: -1 | 1) {
     const target = idx + dir;
     if (target < 0 || target >= rows.length) return;
-    if (rows[idx].anchor || rows[target].anchor) return;
     const next = [...rows];
     [next[idx], next[target]] = [next[target], next[idx]];
     setRows(next);
@@ -101,16 +90,23 @@ export function BulletinEditor({ program, onChange }: Props) {
 
       <ul className="space-y-1">
         {rows.map((row, idx) => {
+          const upDisabled  = idx === 0;
+          const downDisabled = idx === rows.length - 1;
           if (row.anchor) {
             return (
-              <li key={row.id} className="flex items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-muted/40 px-3 py-2">
-                <Lock className="h-3 w-3 text-muted-foreground/60" />
-                <span className="text-sm font-medium text-center">{row.label}</span>
+              <li key={row.id} className="flex items-center gap-2 rounded-lg border border-dashed border-border bg-muted/40 px-2 py-1.5">
+                <div className="flex flex-col">
+                  <button className="text-muted-foreground/50 hover:text-foreground disabled:opacity-20" onClick={() => move(idx, -1)} disabled={upDisabled} title="Move up">
+                    <ChevronUp className="h-3.5 w-3.5" />
+                  </button>
+                  <button className="text-muted-foreground/50 hover:text-foreground disabled:opacity-20" onClick={() => move(idx, 1)} disabled={downDisabled} title="Move down">
+                    <ChevronDown className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                <span className="text-sm font-medium">{row.label}</span>
               </li>
             );
           }
-          const upDisabled  = idx === 0 || rows[idx - 1]?.anchor;
-          const downDisabled = idx === rows.length - 1 || rows[idx + 1]?.anchor;
           return (
             <li key={row.id} className="group flex items-center gap-2 rounded-lg bg-card border border-border px-2 py-1.5">
               <div className="flex flex-col">
@@ -146,11 +142,8 @@ export function BulletinEditor({ program, onChange }: Props) {
       </ul>
 
       <div className={cn("flex flex-wrap gap-2 pt-1")}>
-        <Button variant="outline" size="sm" className="gap-1.5 h-7 text-xs" onClick={addAbove}>
-          <Plus className="h-3 w-3" /> Add row above sacrament
-        </Button>
-        <Button variant="outline" size="sm" className="gap-1.5 h-7 text-xs" onClick={addBelow}>
-          <Plus className="h-3 w-3" /> Add row below sacrament
+        <Button variant="outline" size="sm" className="gap-1.5 h-7 text-xs" onClick={addRow}>
+          <Plus className="h-3 w-3" /> Add row
         </Button>
       </div>
     </div>
