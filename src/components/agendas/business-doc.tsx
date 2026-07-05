@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import type { WardInfo } from "@/types";
+import type { WardInfo, WardBusiness } from "@/types";
+import { WARD_BUSINESS_CATEGORIES } from "@/lib/ward";
 import { downloadNodeAsPdf } from "@/lib/print";
 
 const DOC_CSS = `
@@ -41,14 +42,17 @@ interface Props {
   date: string;
   /** Who is presiding — printed on the business document only. */
   presiding?: string;
-  /** Sustaining / release lines, derived from callings. */
-  items: string[];
+  /** Ward business keyed by category (edited inline; this is a read-only preview). */
+  business: WardBusiness;
   ward: WardInfo;
 }
 
-export function BusinessDialog({ open, onOpenChange, date, presiding, items, ward }: Props) {
+export function BusinessDialog({ open, onOpenChange, date, presiding, business, ward }: Props) {
   const ref = useRef<HTMLDivElement>(null);
-  const lines = items;
+  // Categories in fixed order that actually have lines to read.
+  const sections = WARD_BUSINESS_CATEGORIES
+    .map((category) => ({ category, entries: business[category] ?? [] }))
+    .filter((s) => s.entries.length > 0);
   const [downloading, setDownloading] = useState(false);
 
   async function download() {
@@ -77,13 +81,17 @@ export function BusinessDialog({ open, onOpenChange, date, presiding, items, war
               {presiding ? ` · Presiding: ${presiding}` : ""}
             </p>
 
-            <h2>Proposed to be sustained</h2>
-            {lines.length === 0 ? (
+            {sections.length === 0 ? (
               <p className="none">No ward business this week.</p>
             ) : (
-              <ol>
-                {lines.map((l, i) => <li key={i}>{l}</li>)}
-              </ol>
+              sections.map(({ category, entries }) => (
+                <section key={category}>
+                  <h2>{category}</h2>
+                  <ol>
+                    {entries.map((e) => <li key={e.id}>{e.text}</li>)}
+                  </ol>
+                </section>
+              ))
             )}
 
             <p className="note">

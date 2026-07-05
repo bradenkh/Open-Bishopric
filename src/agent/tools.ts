@@ -6,6 +6,7 @@ import { generateSlots } from "@/lib/availability";
 import { parseBulletin, defaultBulletin, upcomingSunday } from "@/lib/bulletin";
 import { isAnnouncementActive } from "@/lib/announcements";
 import { listAgentNotes } from "@/lib/agent-notes";
+import { WARD_BUSINESS_CATEGORIES, makeEntry, seedBusiness } from "@/lib/ward";
 import { INTERVIEW_DURATION_MINS } from "@/types";
 import type {
   AgendaItem,
@@ -21,6 +22,7 @@ import type {
   RosterGroup,
   SacramentProgram,
   Task,
+  WardBusiness,
 } from "@/types";
 
 // The agent runs server-side after the Route Handler has verified the session,
@@ -1040,6 +1042,86 @@ export const updateSacramentBulletin = tool({
   },
 });
 
+// ── Ward business (sacrament meeting) ────────────────────────────────────────
+
+/** All callings — used to seed the auto-derived business categories server-side. */
+async function fetchAllCallings(): Promise<Calling[]> {
+  const { data, error } = await db().from("callings").select("*");
+  if (error) throw error;
+  return (data ?? []).map((r) => fromRow<Calling>(r));
+}
+
+const businessCategoryEnum = z.enum(WARD_BUSINESS_CATEGORIES);
+const businessEditSchema = z.object({
+  category: businessCategoryEnum,
+  lines: z.array(z.string()).describe("Lines to place under the category, e.g. \"John Smith — Elders Quorum President\""),
+});
+
+export const getWardBusiness = tool({
+  description:
+    "Get the ward business read during a Sunday's sacrament meeting, grouped into the fixed categories: Stake Visitors, Announcements, Release, Sustainings, Callings to Announce, New Members, 8-Year Olds, Convert Confirmations, Ordinations, Baby Blessings, Other, Stake Business, Setting Aparts. Release, Sustainings and Setting Aparts are auto-derived from the callings pipeline. Read this before editing with updateWardBusiness. If the date isn't a Sunday it's rolled forward to the next one.",
+  inputSchema: z.object({
+    date: z.string().optional().describe("ISO date YYYY-MM-DD; defaults to the upcoming Sunday"),
+  }),
+  execute: async ({ date }) => {
+    const { row, sunday } = await findSacramentMeeting(date ?? new Date().toISOString().slice(0, 10));
+    const meeting = row ? fromRow<Meeting>(row) : null;
+    const business = meeting?.business ?? seedBusiness(await fetchAllCallings());
+    const byCategory: Record<string, string[]> = {};
+    for (const category of WARD_BUSINESS_CATEGORIES) {
+      byCategory[category] = (business[category] ?? []).map((e) => e.text);
+    }
+    return { exists: !!meeting, date: sunday, meetingId: meeting?.id, business: byCategory };
+  },
+});
+
+export const updateWardBusiness = tool({
+  description:
+    "Create or update the ward business for a Sunday. Use `set` to replace a category's lines entirely, and/or `add` to append lines to a category (duplicate lines with identical text are skipped). Categories you don't mention are left unchanged. Read the current business first with getWardBusiness. Valid categories: Stake Visitors, Announcements, Release, Sustainings, Callings to Announce, New Members, 8-Year Olds, Convert Confirmations, Ordinations, Baby Blessings, Other, Stake Business, Setting Aparts.",
+  inputSchema: z.object({
+    date: z.string().describe("ISO date YYYY-MM-DD (rolled forward to the next Sunday if needed)"),
+    set: z.array(businessEditSchema).optional().describe("Replace the entire list of lines for each listed category."),
+    add: z.array(businessEditSchema).optional().describe("Append lines to each listed category (dedupe by exact text)."),
+  }),
+  execute: async ({ date, set, add }) => {
+    const { row, sunday } = await findSacramentMeeting(date);
+    const existing = row ? fromRow<Meeting>(row) : null;
+    // Start from the stored business, or a fresh callings-seeded doc if untouched.
+    const business: WardBusiness = existing?.business ?? seedBusiness(await fetchAllCallings());
+
+    for (const { category, lines } of set ?? []) {
+      business[category] = lines.map(makeEntry);
+    }
+    for (const { category, lines } of add ?? []) {
+      const present = new Set((business[category] ?? []).map((e) => e.text));
+      const additions = lines.filter((t) => !present.has(t)).map(makeEntry);
+      business[category] = [...(business[category] ?? []), ...additions];
+    }
+
+    if (existing) {
+      const { error } = await db().from("meetings").update({ business }).eq("id", existing.id);
+      if (error) throw error;
+      return { ok: true, action: "updated", date: sunday, meetingId: existing.id };
+    }
+
+    const id = crypto.randomUUID();
+    const { error } = await db()
+      .from("meetings")
+      .insert({
+        id,
+        title: "Sacrament Meeting",
+        type: "sacrament_meeting",
+        date: sunday,
+        status: "upcoming",
+        agenda: [],
+        business,
+        created_by: "ai-agent",
+      });
+    if (error) throw error;
+    return { ok: true, action: "created", date: sunday, meetingId: id };
+  },
+});
+
 /** "HH:MM" → minutes since midnight. */
 function toMins(time: string): number {
   const [h, m] = time.split(":").map(Number);
@@ -1305,6 +1387,9 @@ export const agentTools = {
   // Sacrament meeting bulletins
   getSacramentBulletin,
   updateSacramentBulletin,
+  // Ward business
+  getWardBusiness,
+  updateWardBusiness,
   // Announcements
   getAnnouncements,
   createAnnouncement,
