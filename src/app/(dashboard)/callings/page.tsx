@@ -1529,9 +1529,10 @@ function SettingsView({ roster, onCreateGroup, onUpdateGroup, onRemoveGroup }: S
 interface CompleteViewProps {
   callings: Calling[];
   onSelect: (c: Calling) => void;
+  onClear: () => void;
 }
 
-function CompleteView({ callings, onSelect }: CompleteViewProps) {
+function CompleteView({ callings, onSelect, onClear }: CompleteViewProps) {
   if (callings.length === 0) {
     return (
       <div className="flex flex-col items-center gap-3 py-16 text-center">
@@ -1542,6 +1543,20 @@ function CompleteView({ callings, onSelect }: CompleteViewProps) {
   }
   return (
     <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm text-muted-foreground">
+          {callings.length} completed calling{callings.length !== 1 ? "s" : ""}
+        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onClear}
+          className="gap-1.5 text-muted-foreground hover:text-red-600 dark:hover:text-red-400"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+          Clear completed
+        </Button>
+      </div>
       {callings.map((calling) => (
         <div
           key={calling.id}
@@ -1638,6 +1653,7 @@ export default function CallingsPage() {
   const [view,     setView]     = useState<PageView>("pipeline");
   const [confirmDelete, setConfirmDelete] = useState<Calling | null>(null);
   const [confirmDeleteOrg, setConfirmDeleteOrg] = useState<RosterGroup | null>(null);
+  const [confirmClearComplete, setConfirmClearComplete] = useState(false);
 
   // ── Org / calling options for the New Calling dropdowns ─────────────────────
   // Sourced from the standing roster (managed under Settings). Org first, then
@@ -1690,6 +1706,13 @@ export default function CallingsPage() {
   function handleDeleteOrg(group: RosterGroup) {
     if (group.id) void removeRosterGroup(group.id);
     setConfirmDeleteOrg(null);
+  }
+
+  function handleClearComplete() {
+    for (const c of completeCallings) {
+      void callingsCollection.remove(c.id);
+    }
+    setConfirmClearComplete(false);
   }
 
   async function handleCreate() {
@@ -1880,6 +1903,7 @@ export default function CallingsPage() {
         <CompleteView
           callings={completeCallings}
           onSelect={setSelected}
+          onClear={() => setConfirmClearComplete(true)}
         />
       )}
 
@@ -2136,6 +2160,27 @@ export default function CallingsPage() {
             <Button variant="outline" onClick={() => setConfirmDelete(null)}>Cancel</Button>
             <Button variant="destructive" onClick={() => confirmDelete && handleDelete(confirmDelete.id)}>
               Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Clear completed confirmation ── */}
+      <Dialog open={confirmClearComplete} onOpenChange={setConfirmClearComplete}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Clear completed callings?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            This permanently removes all{" "}
+            <strong className="text-foreground">{completeCallings.length}</strong>{" "}
+            completed calling{completeCallings.length !== 1 ? "s" : ""} from the Complete list.
+            This can&apos;t be undone, and any tasks already created stay as they are.
+          </p>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setConfirmClearComplete(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleClearComplete}>
+              Clear {completeCallings.length} calling{completeCallings.length !== 1 ? "s" : ""}
             </Button>
           </DialogFooter>
         </DialogContent>
