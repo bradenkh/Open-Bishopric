@@ -962,7 +962,6 @@ export const getSacramentBulletin = tool({
       location: meeting.location,
       status: meeting.status,
       program: {
-        presiding: program.presiding,
         conducting: program.conducting,
         chorister: program.chorister,
         organist: program.organist,
@@ -980,7 +979,6 @@ export const updateSacramentBulletin = tool({
     "Create or update the sacrament meeting bulletin for a Sunday. Provide only the header fields you want to change; existing ones are kept. Provide `rows` to replace the full order of service (read it first with getSacramentBulletin, then send back the modified list) — omit `rows` to leave the order of service unchanged. The 'Administration of the Sacrament' anchor row is always preserved.",
   inputSchema: z.object({
     date: z.string().describe("ISO date YYYY-MM-DD (rolled forward to the next Sunday if needed)"),
-    presiding: z.string().optional(),
     conducting: z.string().optional(),
     chorister: z.string().optional(),
     organist: z.string().optional(),
@@ -998,10 +996,11 @@ export const updateSacramentBulletin = tool({
     const base = existing?.program ?? defaultBulletin({});
 
     // Keep existing header fields unless the caller overrides them; replace rows
-    // only when provided. parseBulletin normalizes the result and guarantees the
-    // single sacrament anchor row exists.
+    // only when provided. Presiding is managed via the ward-business tools, so it's
+    // preserved untouched here. parseBulletin normalizes the result and guarantees
+    // the single sacrament anchor row exists.
     const merged = {
-      presiding: header.presiding ?? base.presiding,
+      presiding: base.presiding,
       conducting: header.conducting ?? base.conducting,
       chorister: header.chorister ?? base.chorister,
       organist: header.organist ?? base.organist,
@@ -1059,7 +1058,7 @@ const businessEditSchema = z.object({
 
 export const getWardBusiness = tool({
   description:
-    "Get the ward business read during a Sunday's sacrament meeting, grouped into the fixed categories: Stake Visitors, Announcements, Release, Sustainings, Callings to Announce, New Members, 8-Year Olds, Convert Confirmations, Ordinations, Baby Blessings, Other, Stake Business, Setting Aparts. Release, Sustainings and Setting Aparts are auto-derived from the callings pipeline. Read this before editing with updateWardBusiness. If the date isn't a Sunday it's rolled forward to the next one.",
+    "Get the ward business read during a Sunday's sacrament meeting, including who is presiding and the fixed categories: Stake Visitors, Announcements, Release, Sustainings, Callings to Announce, New Members, 8-Year Olds, Convert Confirmations, Ordinations, Baby Blessings, Other, Stake Business, Setting Aparts. Release, Sustainings and Setting Aparts are auto-derived from the callings pipeline. Read this before editing with updateWardBusiness. If the date isn't a Sunday it's rolled forward to the next one.",
   inputSchema: z.object({
     date: z.string().optional().describe("ISO date YYYY-MM-DD; defaults to the upcoming Sunday"),
   }),
@@ -1071,19 +1070,26 @@ export const getWardBusiness = tool({
     for (const category of WARD_BUSINESS_CATEGORIES) {
       byCategory[category] = (business[category] ?? []).map((e) => e.text);
     }
-    return { exists: !!meeting, date: sunday, meetingId: meeting?.id, business: byCategory };
+    return {
+      exists: !!meeting,
+      date: sunday,
+      meetingId: meeting?.id,
+      presiding: meeting?.program?.presiding,
+      business: byCategory,
+    };
   },
 });
 
 export const updateWardBusiness = tool({
   description:
-    "Create or update the ward business for a Sunday. Use `set` to replace a category's lines entirely, and/or `add` to append lines to a category (duplicate lines with identical text are skipped). Categories you don't mention are left unchanged. Read the current business first with getWardBusiness. Valid categories: Stake Visitors, Announcements, Release, Sustainings, Callings to Announce, New Members, 8-Year Olds, Convert Confirmations, Ordinations, Baby Blessings, Other, Stake Business, Setting Aparts.",
+    "Create or update the ward business for a Sunday. Set `presiding` to record who is presiding. Use `set` to replace a category's lines entirely, and/or `add` to append lines to a category (duplicate lines with identical text are skipped). Categories you don't mention are left unchanged. Read the current business first with getWardBusiness. Valid categories: Stake Visitors, Announcements, Release, Sustainings, Callings to Announce, New Members, 8-Year Olds, Convert Confirmations, Ordinations, Baby Blessings, Other, Stake Business, Setting Aparts.",
   inputSchema: z.object({
     date: z.string().describe("ISO date YYYY-MM-DD (rolled forward to the next Sunday if needed)"),
+    presiding: z.string().optional().describe("Who is presiding at the meeting."),
     set: z.array(businessEditSchema).optional().describe("Replace the entire list of lines for each listed category."),
     add: z.array(businessEditSchema).optional().describe("Append lines to each listed category (dedupe by exact text)."),
   }),
-  execute: async ({ date, set, add }) => {
+  execute: async ({ date, presiding, set, add }) => {
     const { row, sunday } = await findSacramentMeeting(date);
     const existing = row ? fromRow<Meeting>(row) : null;
     // Start from the stored business, or a fresh callings-seeded doc if untouched.
@@ -1099,7 +1105,12 @@ export const updateWardBusiness = tool({
     }
 
     if (existing) {
-      const { error } = await db().from("meetings").update({ business }).eq("id", existing.id);
+      // Presiding lives on the program; merge it in only when provided.
+      const patch: Record<string, unknown> = { business };
+      if (presiding !== undefined) {
+        patch.program = { ...(existing.program ?? defaultBulletin({})), presiding };
+      }
+      const { error } = await db().from("meetings").update(patch).eq("id", existing.id);
       if (error) throw error;
       return { ok: true, action: "updated", date: sunday, meetingId: existing.id };
     }
@@ -1115,6 +1126,7 @@ export const updateWardBusiness = tool({
         status: "upcoming",
         agenda: [],
         business,
+        program: defaultBulletin(presiding !== undefined ? { presiding } : {}),
         created_by: "ai-agent",
       });
     if (error) throw error;

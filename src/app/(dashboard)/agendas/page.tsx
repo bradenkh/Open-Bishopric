@@ -531,6 +531,13 @@ export default function AgendasPage() {
                   <BusinessEditor
                     business={sacramentMeeting.business ?? seedBusiness(callingsCol.items)}
                     callings={callingsCol.items}
+                    presiding={sacramentMeeting.program?.presiding ?? ""}
+                    onPresidingChange={(name) =>
+                      updateProgram(sacramentMeeting.id, {
+                        ...(sacramentMeeting.program ?? defaultBulletin({})),
+                        presiding: name || undefined,
+                      })
+                    }
                     onChange={(b) => updateBusiness(sacramentMeeting.id, b)}
                   />
                 )}
@@ -756,7 +763,7 @@ export default function AgendasPage() {
             </div>
             {form.type === "sacrament_meeting" && !editing && (
               <p className="text-xs text-muted-foreground">
-                A standard order of service will be added — edit the program, presiding, conducting, chorister, organist and second hour on the bulletin after creating.
+                A standard order of service will be added — edit the program, conducting, chorister, organist and second hour on the bulletin after creating. Presiding is set on the Business items.
               </p>
             )}
             <div className="space-y-1.5">

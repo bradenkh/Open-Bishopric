@@ -13,6 +13,9 @@ import {
 interface Props {
   business: WardBusiness;
   callings: Calling[];
+  /** Who is presiding — printed on the business document. */
+  presiding: string;
+  onPresidingChange: (value: string) => void;
   onChange: (next: WardBusiness) => void;
 }
 
@@ -24,7 +27,7 @@ interface Props {
  * Mirrors BulletinEditor: mutations bubble a whole new object up via onChange and
  * the parent persists.
  */
-export function BusinessEditor({ business, callings, onChange }: Props) {
+export function BusinessEditor({ business, callings, presiding, onPresidingChange, onChange }: Props) {
   function setEntries(category: string, entries: WardBusiness[string]) {
     onChange({ ...business, [category]: entries });
   }
@@ -59,6 +62,17 @@ export function BusinessEditor({ business, callings, onChange }: Props) {
 
   return (
     <div className="space-y-3">
+      {/* Presiding — printed on the business document header */}
+      <div className="rounded-lg border border-border bg-card p-3 space-y-1">
+        <label className="text-[11px] font-medium text-muted-foreground">Presiding</label>
+        <Input
+          value={presiding}
+          onChange={(e) => onPresidingChange(e.target.value)}
+          placeholder="Who is presiding"
+          className="h-8"
+        />
+      </div>
+
       {WARD_BUSINESS_CATEGORIES.map((category) => {
         const entries = business[category] ?? [];
         const isAuto = category in AUTO_SEEDED_CATEGORIES;
