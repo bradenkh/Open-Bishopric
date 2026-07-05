@@ -3,7 +3,7 @@
 import { useState } from "react";
 import {
   Plus, Filter, CalendarDays, Clock, MapPin, Pencil, Trash2,
-  CheckCircle2, Circle, ChevronDown, ChevronRight, ChevronLeft, User, FileText, Settings, Gavel,
+  CheckCircle2, Circle, ChevronDown, ChevronRight, ChevronLeft, User, FileText, Settings,
   Play, Mail, ArrowRightCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -18,17 +18,18 @@ import {
 } from "@/components/ui/dialog";
 import { useAuth } from "@/contexts/AuthContext";
 import type {
-  Meeting, MeetingType, MeetingStatus, AgendaItem, SacramentProgram, WardInfo,
+  Meeting, MeetingType, MeetingStatus, AgendaItem, SacramentProgram, WardInfo, WardBusiness,
 } from "@/types";
 import { MEETING_TYPE_LABELS, MEETING_STATUS_COLORS } from "@/types";
 import { useData, newId } from "@/contexts/DataContext";
-import { deriveWardBusiness } from "@/lib/ward";
+import { seedBusiness } from "@/lib/ward";
 import { isAnnouncementActive } from "@/lib/announcements";
 import { defaultBulletin, addDays, upcomingSunday, todayISODate, formatSunday } from "@/lib/bulletin";
 import { formatDate } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import { AnnouncementsPanel, type AnnouncementDraft } from "@/components/agendas/announcements-panel";
 import { BulletinEditor } from "@/components/agendas/sacrament-program";
+import { BusinessEditor } from "@/components/agendas/business-editor";
 import { BulletinDialog } from "@/components/agendas/bulletin";
 import { BusinessDialog } from "@/components/agendas/business-doc";
 import { MeetingMode } from "@/components/agendas/meeting-mode";
@@ -102,14 +103,14 @@ export default function AgendasPage() {
   const [wardDialogOpen, setWardDialogOpen] = useState(false);
   const [wardForm, setWardForm]       = useState<WardInfo>(BLANK_WARD);
 
-  // Sacrament tab navigates one Sunday at a time.
+  // Sacrament tab navigates one Sunday at a time, toggling between the bulletin
+  // (order of service) and the ward business items.
   const [selectedSunday, setSelectedSunday] = useState<string>(() => upcomingSunday(todayISODate()));
+  const [sacramentPanel, setSacramentPanel] = useState<"bulletin" | "business">("bulletin");
   const sacramentMeeting = meetings.find(
     (m) => m.type === "sacrament_meeting" && m.date === selectedSunday,
   ) ?? null;
 
-  // Sustaining lines derived from callings (the separate Ward Business document).
-  const wardBusiness = deriveWardBusiness(callingsCol.items).map((b) => b.line);
   const activeAnnouncements = announcements.filter((a) => isAnnouncementActive(a));
 
   const inTab = meetings.filter((m) => m.type === activeTab);
@@ -249,6 +250,11 @@ export default function AgendasPage() {
   async function updateProgram(meetingId: string, program: SacramentProgram) {
     const now = new Date().toISOString();
     await meetingsCol.update(meetingId, { program, updatedAt: now });
+  }
+
+  async function updateBusiness(meetingId: string, business: WardBusiness) {
+    const now = new Date().toISOString();
+    await meetingsCol.update(meetingId, { business, updatedAt: now });
   }
 
   // ── Ward settings ──────────────────────────────────────────────────────────
@@ -480,21 +486,61 @@ export default function AgendasPage() {
                 <span className={cn("text-xs px-2 py-0.5 rounded-full shrink-0 capitalize", MEETING_STATUS_COLORS[sacramentMeeting.status])}>
                   {sacramentMeeting.status}
                 </span>
-                <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => setBusinessFor(sacramentMeeting)} title="Ward business document">
-                  <Gavel className="h-3.5 w-3.5" />
-                </Button>
-                <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => setBulletinFor(sacramentMeeting)} title="View bulletin">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 shrink-0"
+                  onClick={() =>
+                    sacramentPanel === "business"
+                      ? setBusinessFor(sacramentMeeting)
+                      : setBulletinFor(sacramentMeeting)
+                  }
+                  title={sacramentPanel === "business" ? "Preview ward business" : "View bulletin"}
+                >
                   <FileText className="h-3.5 w-3.5" />
                 </Button>
                 <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => openEdit(sacramentMeeting)} title="Edit details">
                   <Pencil className="h-3.5 w-3.5" />
                 </Button>
               </div>
-              <div className="border-t border-border bg-muted/30 px-4 py-3 space-y-2">
-                <BulletinEditor
-                  program={sacramentMeeting.program ?? defaultBulletin({})}
-                  onChange={(p) => updateProgram(sacramentMeeting.id, p)}
-                />
+              <div className="border-t border-border bg-muted/30 px-4 py-3 space-y-3">
+                {/* Bulletin / Business toggle */}
+                <div className="inline-flex rounded-lg border border-border bg-card p-0.5">
+                  {(["bulletin", "business"] as const).map((panel) => (
+                    <button
+                      key={panel}
+                      onClick={() => setSacramentPanel(panel)}
+                      className={cn(
+                        "px-3 py-1 text-xs font-medium rounded-md transition-colors capitalize",
+                        sacramentPanel === panel
+                          ? "bg-primary text-primary-foreground"
+                          : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      {panel === "bulletin" ? "Bulletin" : "Business"}
+                    </button>
+                  ))}
+                </div>
+
+                {sacramentPanel === "bulletin" ? (
+                  <BulletinEditor
+                    program={sacramentMeeting.program ?? defaultBulletin({})}
+                    onChange={(p) => updateProgram(sacramentMeeting.id, p)}
+                  />
+                ) : (
+                  <BusinessEditor
+                    business={sacramentMeeting.business ?? seedBusiness(callingsCol.items)}
+                    callings={callingsCol.items}
+                    presiding={sacramentMeeting.program?.presiding ?? ""}
+                    onPresidingChange={(name) =>
+                      updateProgram(sacramentMeeting.id, {
+                        ...(sacramentMeeting.program ?? defaultBulletin({})),
+                        presiding: name || undefined,
+                      })
+                    }
+                    onChange={(b) => updateBusiness(sacramentMeeting.id, b)}
+                  />
+                )}
                 {sacramentMeeting.notes && (
                   <p className="text-xs text-muted-foreground pt-1 italic">Notes: {sacramentMeeting.notes}</p>
                 )}
@@ -717,7 +763,7 @@ export default function AgendasPage() {
             </div>
             {form.type === "sacrament_meeting" && !editing && (
               <p className="text-xs text-muted-foreground">
-                A standard order of service will be added — edit the program, presiding, conducting, chorister, organist and second hour on the bulletin after creating.
+                A standard order of service will be added — edit the program, conducting, chorister, organist and second hour on the bulletin after creating. Presiding is set on the Business items.
               </p>
             )}
             <div className="space-y-1.5">
@@ -809,7 +855,7 @@ export default function AgendasPage() {
           onOpenChange={(o) => !o && setBusinessFor(null)}
           date={businessFor.date}
           presiding={businessFor.program?.presiding}
-          items={wardBusiness}
+          business={businessFor.business ?? seedBusiness(callingsCol.items)}
           ward={ward}
         />
       )}

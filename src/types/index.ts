@@ -246,6 +246,23 @@ export interface SacramentProgram {
   rows: BulletinRow[];
 }
 
+// ── Ward business (sacrament meeting) ─────────────────────────────────────────
+
+/** One editable line under a ward-business category. */
+export interface WardBusinessEntry {
+  id: string;
+  text: string;
+}
+
+/**
+ * The ward business conducted in a sacrament meeting, keyed by category name (see
+ * WARD_BUSINESS_CATEGORIES in `lib/ward.ts`). `undefined` on a Meeting means the
+ * doc has never been edited — the editor seeds it from callings on first open.
+ * Once the object exists (even with empty arrays) it is authoritative, so deleted
+ * auto-seeded lines do not reappear.
+ */
+export type WardBusiness = Record<string, WardBusinessEntry[]>;
+
 export interface Meeting {
   id: string;
   title: string;
@@ -266,6 +283,8 @@ export interface Meeting {
   sections?: string[];
   /** Structured order of service — used by sacrament meetings. */
   program?: SacramentProgram;
+  /** Editable ward-business doc for a sacrament meeting, keyed by category. */
+  business?: WardBusiness;
   notes?: string;
   createdBy: string;
   createdAt: string;
