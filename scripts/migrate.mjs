@@ -30,7 +30,14 @@ import { join } from "node:path";
 import pg from "pg";
 
 const ROOT = process.cwd();
-const connectionString = process.env.SUPABASE_DB_URL;
+
+// Dashboards happily store a value with surrounding whitespace or quotes, and
+// `pg` does not reject it — it silently falls back to the host "base" and fails
+// with a baffling `ENOTFOUND base`. Normalize, then insist on a real URI.
+const connectionString = (process.env.SUPABASE_DB_URL ?? "")
+  .trim()
+  .replace(/^(['"])(.*)\1$/s, "$2")
+  .trim();
 
 // Destructive initial-schema migrations that predate this runner. On an existing
 // database these are assumed already applied and are baselined, never re-run.
@@ -42,6 +49,22 @@ if (!connectionString) {
       "             Set it in your deploy environment to run migrations automatically.",
   );
   process.exit(0);
+}
+
+if (!/^postgres(ql)?:\/\//.test(connectionString)) {
+  console.error(
+    "[db:migrate] SUPABASE_DB_URL is set but is not a postgres:// URI.\n" +
+      `             Got: ${redact(connectionString)}\n` +
+      "             Expected: postgresql://USER:PASSWORD@HOST:5432/postgres\n" +
+      "             (Supabase → Settings → Database → Connection string → Session pooler.\n" +
+      "             Paste the URI alone — no quotes, no leading space, no `psql` prefix.)",
+  );
+  process.exit(1);
+}
+
+// Password-safe rendering of a connection string for logs.
+function redact(value) {
+  return value.replace(/(:)[^:@/]*(@)/, "$1****$2");
 }
 
 const isLocal = /@(localhost|127\.0\.0\.1)/.test(connectionString);
@@ -57,7 +80,7 @@ async function main() {
     ssl: isLocal ? undefined : { rejectUnauthorized: false },
   });
   await client.connect();
-  console.log("[db:migrate] Connected.");
+  console.log(`[db:migrate] Connected to ${client.host}:${client.port}/${client.database}.`);
 
   try {
     // Tracking table.
