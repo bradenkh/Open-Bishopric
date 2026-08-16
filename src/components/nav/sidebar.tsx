@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
@@ -17,7 +18,6 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { BishopricIcon } from "@/components/icons/bishopric-icon";
 
 const navItems = [
   { href: "/home", label: "Dashboard", icon: LayoutDashboard },
@@ -43,7 +43,14 @@ export function Sidebar() {
   return (
     <aside className="hidden lg:flex lg:fixed lg:inset-y-0 lg:left-0 lg:z-40 lg:w-60 lg:flex-col lg:border-r lg:border-border lg:bg-background">
       <div className="flex h-16 items-center gap-3 border-b border-border px-6">
-        <BishopricIcon className="h-6 w-6 text-primary shrink-0" />
+        <Image
+          src="/logo.png"
+          alt=""
+          width={28}
+          height={28}
+          priority
+          className="h-7 w-7 shrink-0 rounded-lg"
+        />
         <span className="font-semibold text-foreground truncate">Open Bishopric</span>
       </div>
 
