@@ -37,6 +37,9 @@ const ROOT = process.cwd();
 const connectionString = (process.env.SUPABASE_DB_URL ?? "")
   .trim()
   .replace(/^(['"])(.*)\1$/s, "$2")
+  .replace(/^SUPABASE_DB_URL\s*=\s*/, "") // whole `KEY=value` line pasted in
+  .trim()
+  .replace(/^(['"])(.*)\1$/s, "$2")
   .trim();
 
 // Destructive initial-schema migrations that predate this runner. On an existing
@@ -62,9 +65,24 @@ if (!/^postgres(ql)?:\/\//.test(connectionString)) {
   process.exit(1);
 }
 
-// Password-safe rendering of a connection string for logs.
+// `pg` splits userinfo from host at the LAST `@`, so a password containing a raw
+// `@` (or stray text spliced in from another connection string) silently shifts
+// the boundary and shows up as an auth failure. Flag it while it is still cheap.
+if ((connectionString.match(/@/g) ?? []).length > 1) {
+  console.warn(
+    "[db:migrate] Warning: SUPABASE_DB_URL contains more than one `@`.\n" +
+      `             ${redact(connectionString)}\n` +
+      "             The host is taken from after the LAST `@`. If your password\n" +
+      "             contains `@`, percent-encode it as %40; otherwise remove the\n" +
+      "             stray text before the host.",
+  );
+}
+
+// Password-safe rendering of a connection string for logs. Masks through the
+// LAST `@` — the one `pg` treats as the userinfo/host delimiter — so a password
+// containing `@` is not partially exposed.
 function redact(value) {
-  return value.replace(/(:)[^:@/]*(@)/, "$1****$2");
+  return value.replace(/(\/\/[^:/@]*:).*(@)/s, "$1****$2");
 }
 
 const isLocal = /@(localhost|127\.0\.0\.1)/.test(connectionString);
