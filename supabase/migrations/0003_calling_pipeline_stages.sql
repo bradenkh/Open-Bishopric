@@ -12,8 +12,8 @@
 -- existing `callings.stage` CHECK constraint in place and backfills any rows
 -- still carrying the old values. Safe to run against a populated database.
 --
--- Idempotent (re-applied by the manual `npm run db:reset`, never on deploy),
--- mirroring the conventions in 0001_initial_schema.sql.
+-- Idempotent (never re-run on deploy — migration runner baselines this on existing
+-- databases), mirroring the conventions in 0001_initial_schema.sql.
 -- ============================================================================
 
 -- 1. Drop the old constraint so the backfill can write the new values.

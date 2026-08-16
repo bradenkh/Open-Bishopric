@@ -17,8 +17,8 @@
 
 -- ── Idempotent teardown ─────────────────────────────────────────────────────
 -- This migration is destructive: it drops our objects first, then recreates
--- them, so re-applying it gives a clean schema. It is only run via the manual
--- `npm run db:reset` (never on deploy), so it will wipe data wherever you point
+-- them, so re-applying it gives a clean schema. It is only applied against a
+-- fresh/empty database (never on deploy), so it will wipe data wherever you point
 -- it. Note this only touches the `public` schema — auth.users is left intact,
 -- aside from our trigger on it.
 drop trigger if exists on_auth_user_created on auth.users;

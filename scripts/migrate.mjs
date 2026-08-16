@@ -1,26 +1,22 @@
 /**
  * Forward-only migration runner — tracks which migrations have been applied in a
- * `schema_migrations` table and runs only the pending ones, in order. Safe to
- * run on every deploy: already-applied migrations are skipped.
+ * `schema_migrations` table and runs only the pending ones, in order. Run it
+ * manually whenever you add a migration (it is not wired into builds/deploys):
  *
- *   SUPABASE_DB_URL=postgresql://... node scripts/migrate.mjs
- *   npm run db:migrate
+ *   SUPABASE_DB_URL=postgresql://... npm run db:migrate
  *
- * Unlike `db:reset`, this never drops data. It applies each new file in
+ * This never drops data — it applies each new file in
  * `supabase/migrations` exactly once (each inside a transaction) and records it.
  *
- * Safe by omission: if SUPABASE_DB_URL is not set it logs a notice and exits 0,
- * so builds/deploys without a database configured are a no-op. Wire it into a
- * deploy by setting SUPABASE_DB_URL in the (production) environment — see the
- * `prebuild` script in package.json.
+ * Safe by omission: if SUPABASE_DB_URL is not set it logs a notice and exits 0.
  *
  * SUPABASE_DB_URL is the project's Postgres connection string (Settings →
  * Database → Connection string; use the Session pooler URI on IPv4-only hosts).
  *
  * ── Adopting an existing database ────────────────────────────────────────────
  * The two original schema migrations (0001, 0002) build the initial schema with
- * destructive `drop ... / create ...` statements and were applied via
- * `db:reset` before this runner existed. When the runner first sees a database
+ * destructive `drop ... / create ...` statements and were applied via the
+ * predecessor schema-reset flow before this runner existed. When this runner
  * that already HAS the app schema but no `schema_migrations` table, it records
  * those baseline migrations as applied WITHOUT re-running them (which would wipe
  * data). A brand-new empty database instead runs every migration from scratch.

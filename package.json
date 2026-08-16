@@ -4,12 +4,10 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "prebuild": "node scripts/migrate.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
     "db:migrate": "node scripts/migrate.mjs",
-    "db:reset": "node scripts/db-reset.mjs",
     "db:seed:gen": "node scripts/gen-seed.mjs"
   },
   "dependencies": {
@@ -37,6 +35,7 @@
     "clsx": "^2.1.1",
     "html2canvas-pro": "^2.0.4",
     "jspdf": "^4.2.1",
+    "lightningcss-win32-x64-msvc": "^1.32.0",
     "lucide-react": "^1.16.0",
     "next": "16.2.6",
     "react": "19.2.4",

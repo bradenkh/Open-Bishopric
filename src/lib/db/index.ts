@@ -154,12 +154,17 @@ function rowToAppUser(row: ProfileRow): AppUser {
 }
 
 export async function getProfile(db: DB, userId: string): Promise<AppUser | null> {
+  console.log("[db] getProfile query for", userId);
   const { data, error } = await db
     .from("profiles")
     .select("id, email, display_name, role, photo_url")
     .eq("id", userId)
     .maybeSingle();
-  if (error) throw error;
+  if (error) {
+    console.error("[db] getProfile error", { code: error.code, message: error.message, details: error.details, hint: error.hint });
+    throw error;
+  }
+  console.log("[db] getProfile row:", data ? `id=${data.id} role=${data.role}` : "null");
   return data ? rowToAppUser(data as ProfileRow) : null;
 }
 

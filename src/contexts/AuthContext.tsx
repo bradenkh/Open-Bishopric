@@ -39,8 +39,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Load the signed-in user's profile (identity + role) from the DB.
   const loadProfile = useCallback(
     async (userId: string) => {
+      console.log("[auth] loadProfile called for userId:", userId);
       try {
         const profile = await getProfile(supabase, userId);
+        console.log("[auth] loadProfile result:", profile ? `found (role=${profile.role})` : "null — no profile row");
         setAppUser(profile);
         if (!profile) {
           setAuthError(
@@ -66,9 +68,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let active = true;
+    console.log("[auth] useEffect mount — checking for existing session");
 
-    supabase.auth.getSession().then(async ({ data }) => {
+    supabase.auth.getSession().then(async ({ data, error }) => {
+      if (error) console.error("[auth] getSession error", { code: error?.code, message: error?.message });
       if (!active) return;
+      console.log("[auth] getSession result:", data.session ? `session found, user=${data.session.user.email}` : "no session");
       setSession(data.session);
       if (data.session) await loadProfile(data.session.user.id);
       setLoading(false);
@@ -76,7 +81,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, nextSession) => {
+    } = supabase.auth.onAuthStateChange(async (event, nextSession) => {
+      console.log("[auth] onAuthStateChange event:", event, nextSession ? `user=${nextSession.user.email}` : "no session");
       setSession(nextSession);
       if (nextSession) {
         await loadProfile(nextSession.user.id);
@@ -94,8 +100,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signIn = useCallback(
     async (email: string, password: string) => {
       setAuthError(null);
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) throw error;
+      console.log("[auth] signIn attempt for", email);
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) {
+        console.error("[auth] signIn failed", { code: error.code, message: error.message, status: error.status });
+        throw error;
+      }
+      console.log("[auth] signIn OK, user id:", data.session?.user?.id);
       // onAuthStateChange will populate the session and profile.
     },
     [supabase],

@@ -74,11 +74,11 @@ export async function getAIModel(): Promise<LanguageModel> {
   if (!apiKey) {
     // No key AND the settings read failed → the most common cause is that the
     // app_settings table hasn't been created yet (the schema is applied by the
-    // manual `npm run db:reset`). Surface that instead of a misleading "no key".
+    // migrations). Surface that instead of a misleading "no key".
     if (readError) {
       throw new AINotConfiguredError(
         `Couldn't read AI settings from the database (${readError}). ` +
-          "Make sure the app_settings table exists — apply the schema with `npm run db:reset` — then set the API key under Settings → AI assistant.",
+          "Make sure the app_settings table exists — apply the schema with `npm run db:migrate` — then set the API key under Settings → AI assistant.",
       );
     }
     throw new AINotConfiguredError();

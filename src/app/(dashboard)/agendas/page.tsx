@@ -3,7 +3,7 @@
 import { useState } from "react";
 import {
   Plus, Filter, CalendarDays, Clock, MapPin, Pencil, Trash2,
-  CheckCircle2, Circle, ChevronDown, ChevronRight, ChevronLeft, User, FileText, Settings,
+  CheckCircle2, Circle, ChevronDown, ChevronRight, User,
   Play, Mail, ArrowRightCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -18,37 +18,24 @@ import {
 } from "@/components/ui/dialog";
 import { useAuth } from "@/contexts/AuthContext";
 import type {
-  Meeting, MeetingType, MeetingStatus, AgendaItem, SacramentProgram, WardInfo, WardBusiness,
+  Meeting, MeetingType, MeetingStatus, AgendaItem,
 } from "@/types";
 import { MEETING_TYPE_LABELS, MEETING_STATUS_COLORS } from "@/types";
 import { useData, newId } from "@/contexts/DataContext";
-import { seedBusiness } from "@/lib/ward";
-import { isAnnouncementActive } from "@/lib/announcements";
-import { defaultBulletin, addDays, upcomingSunday, todayISODate, formatSunday } from "@/lib/bulletin";
 import { formatDate } from "@/lib/utils";
 import { cn } from "@/lib/utils";
-import { AnnouncementsPanel, type AnnouncementDraft } from "@/components/agendas/announcements-panel";
-import { BulletinEditor } from "@/components/agendas/sacrament-program";
-import { BusinessEditor } from "@/components/agendas/business-editor";
-import { BulletinDialog } from "@/components/agendas/bulletin";
-import { BusinessDialog } from "@/components/agendas/business-doc";
 import { MeetingMode } from "@/components/agendas/meeting-mode";
 import { CollectItemsDialog } from "@/components/agendas/collect-items";
 import { templateSections, groupBySection, seedCarriedItems } from "@/lib/agenda";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const TYPES: MeetingType[] = ["bishopric", "sacrament_meeting", "ward_council"];
+const TYPES: MeetingType[] = ["bishopric", "ward_council"];
 const STATUSES: MeetingStatus[] = ["upcoming", "completed", "cancelled"];
 
 const EMPTY_FORM = {
   title: "", type: "bishopric" as MeetingType, status: "upcoming" as MeetingStatus,
   date: "", time: "", location: "", notes: "",
-};
-
-const BLANK_WARD: WardInfo = {
-  wardName: "", churchName: "", stake: "", address: "",
-  meetingTitle: "", meetingTime: "", leadership: [], submissionNote: "",
 };
 
 const DEFAULT_TITLE: Record<MeetingType, string> = {
@@ -73,11 +60,8 @@ function totalMinutes(agenda: AgendaItem[]) {
 
 export default function AgendasPage() {
   const { user } = useAuth();
-  const { wardInfo, updateWardInfo, callings: callingsCol } = useData();
   const meetingsCol = useData().meetings;
   const meetings = meetingsCol.items;
-  const announcementsCol = useData().announcements;
-  const announcements = announcementsCol.items;
   const [activeTab,  setActiveTab]  = useState<MeetingType>("bishopric");
   const [filterStatus, setFilterStatus] = useState<MeetingStatus | "all">("upcoming");
   const [expanded,   setExpanded]   = useState<Set<string>>(new Set());
@@ -95,23 +79,6 @@ export default function AgendasPage() {
   // Meeting mode + pre-meeting collection
   const [meetingModeFor, setMeetingModeFor] = useState<string | null>(null);
   const [collectFor, setCollectFor] = useState<Meeting | null>(null);
-
-  // Bulletin + ward settings
-  const ward = wardInfo ?? BLANK_WARD;
-  const [bulletinFor, setBulletinFor] = useState<Meeting | null>(null);
-  const [businessFor, setBusinessFor] = useState<Meeting | null>(null);
-  const [wardDialogOpen, setWardDialogOpen] = useState(false);
-  const [wardForm, setWardForm]       = useState<WardInfo>(BLANK_WARD);
-
-  // Sacrament tab navigates one Sunday at a time, toggling between the bulletin
-  // (order of service) and the ward business items.
-  const [selectedSunday, setSelectedSunday] = useState<string>(() => upcomingSunday(todayISODate()));
-  const [sacramentPanel, setSacramentPanel] = useState<"bulletin" | "business">("bulletin");
-  const sacramentMeeting = meetings.find(
-    (m) => m.type === "sacrament_meeting" && m.date === selectedSunday,
-  ) ?? null;
-
-  const activeAnnouncements = announcements.filter((a) => isAnnouncementActive(a));
 
   const inTab = meetings.filter((m) => m.type === activeTab);
   const filtered =
@@ -144,8 +111,6 @@ export default function AgendasPage() {
   function openNew() {
     setEditing(null);
     const base = { ...EMPTY_FORM, type: activeTab, title: DEFAULT_TITLE[activeTab] };
-    // On the sacrament tab, prefill the currently selected Sunday.
-    if (activeTab === "sacrament_meeting") base.date = selectedSunday;
     setForm(base);
     setDialogOpen(true);
   }
@@ -169,27 +134,23 @@ export default function AgendasPage() {
       await meetingsCol.update(editing.id, { ...form, updatedAt: now });
     } else {
       const newMeetingId = newId();
-      const sectioned = form.type === "bishopric" || form.type === "ward_council";
 
       // Carry-forward intake: pull items the most recent completed meeting of
       // this type marked "carried" (and hasn't yet carried elsewhere), then mark
       // the source so they aren't carried twice.
       let carried: AgendaItem[] = [];
       let source: Meeting | undefined;
-      if (sectioned) {
-        source = meetings
-          .filter((m) => m.type === form.type && m.status === "completed")
-          .filter((m) => m.agenda.some((a) => a.outcome === "carried" && !a.carriedInto))
-          .sort((a, b) => b.date.localeCompare(a.date))[0];
-        if (source) carried = seedCarriedItems(source);
-      }
+      source = meetings
+        .filter((m) => m.type === form.type && m.status === "completed")
+        .filter((m) => m.agenda.some((a) => a.outcome === "carried" && !a.carriedInto))
+        .sort((a, b) => b.date.localeCompare(a.date))[0];
+      if (source) carried = seedCarriedItems(source);
 
       const newMeeting: Meeting = {
         id: newMeetingId,
         ...form,
         agenda: carried,
-        sections: sectioned ? templateSections(form.type) : undefined,
-        program: form.type === "sacrament_meeting" ? defaultBulletin({}) : undefined,
+        sections: templateSections(form.type),
         createdBy: user?.uid ?? "mock",
         createdAt: now,
         updatedAt: now,
@@ -203,7 +164,6 @@ export default function AgendasPage() {
       }
       setExpanded((prev) => new Set(prev).add(newMeeting.id));
       setActiveTab(newMeeting.type);
-      if (newMeeting.type === "sacrament_meeting") setSelectedSunday(newMeeting.date);
     }
     setDialogOpen(false);
     setSaving(false);
@@ -211,69 +171,6 @@ export default function AgendasPage() {
 
   async function deleteMeeting(id: string) {
     await meetingsCol.remove(id);
-  }
-
-  // ── Announcements ──────────────────────────────────────────────────────────
-
-  async function saveAnnouncement(draft: AnnouncementDraft, editingId: string | null) {
-    const now = new Date().toISOString();
-    const fields = {
-      title: draft.title.trim(),
-      description: draft.description.trim() || undefined,
-      date: draft.date || undefined,
-      time: draft.time || undefined,
-      location: draft.location.trim() || undefined,
-    };
-    if (editingId) {
-      await announcementsCol.update(editingId, { ...fields, updatedAt: now });
-    } else {
-      await announcementsCol.create({
-        id: newId(),
-        ...fields,
-        createdBy: user?.uid ?? "mock",
-        createdAt: now,
-        updatedAt: now,
-      });
-    }
-  }
-
-  async function toggleArchiveAnnouncement(id: string) {
-    const now = new Date().toISOString();
-    const current = announcements.find((a) => a.id === id);
-    await announcementsCol.update(id, { archived: !current?.archived, updatedAt: now });
-  }
-
-  async function deleteAnnouncement(id: string) {
-    await announcementsCol.remove(id);
-  }
-
-  async function updateProgram(meetingId: string, program: SacramentProgram) {
-    const now = new Date().toISOString();
-    await meetingsCol.update(meetingId, { program, updatedAt: now });
-  }
-
-  async function updateBusiness(meetingId: string, business: WardBusiness) {
-    const now = new Date().toISOString();
-    await meetingsCol.update(meetingId, { business, updatedAt: now });
-  }
-
-  // ── Ward settings ──────────────────────────────────────────────────────────
-
-  function openWardSettings() {
-    setWardForm(wardInfo ?? BLANK_WARD);
-    setWardDialogOpen(true);
-  }
-
-  async function saveWardSettings() {
-    await updateWardInfo(wardForm);
-    setWardDialogOpen(false);
-  }
-
-  function updateLeader(idx: number, patch: Partial<WardInfo["leadership"][number]>) {
-    setWardForm((w) => ({
-      ...w,
-      leadership: w.leadership.map((l, i) => (i === idx ? { ...l, ...patch } : l)),
-    }));
   }
 
   // ── Agenda-item CRUD ───────────────────────────────────────────────────────
@@ -438,139 +335,9 @@ export default function AgendasPage() {
         })}
       </div>
 
-      {activeTab === "sacrament_meeting" ? (
-        /* ── Sacrament Meeting: one Sunday at a time ── */
-        <div className="space-y-4">
-          {/* Ward settings */}
-          <div className="flex items-center justify-between">
-            <p className="text-xs text-muted-foreground">
-              Bulletins use <span className="font-medium">{ward.wardName}</span> details.
-            </p>
-            <Button variant="ghost" size="sm" className="gap-1.5 h-7 text-xs" onClick={openWardSettings}>
-              <Settings className="h-3.5 w-3.5" /> Ward settings
-            </Button>
-          </div>
-
-          {/* Sunday navigator */}
-          <div className="flex items-center justify-center gap-3">
-            <Button variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={() => setSelectedSunday(addDays(selectedSunday, -7))} title="Previous Sunday">
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <p className="min-w-[15rem] text-center text-sm font-semibold">{formatSunday(selectedSunday)}</p>
-            <Button variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={() => setSelectedSunday(addDays(selectedSunday, 7))} title="Next Sunday">
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-          </div>
-
-          {sacramentMeeting ? (
-            <div className="rounded-xl border border-border bg-card overflow-hidden">
-              <div className="flex items-start gap-3 p-4">
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold">{sacramentMeeting.title}</p>
-                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
-                    {sacramentMeeting.time && (
-                      <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                        <Clock className="h-3 w-3" /> {formatTime(sacramentMeeting.time)}
-                      </span>
-                    )}
-                    {sacramentMeeting.location && (
-                      <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                        <MapPin className="h-3 w-3" /> {sacramentMeeting.location}
-                      </span>
-                    )}
-                    <span className="text-xs text-muted-foreground">
-                      {sacramentMeeting.program?.rows.length ?? 0} rows
-                    </span>
-                  </div>
-                </div>
-                <span className={cn("text-xs px-2 py-0.5 rounded-full shrink-0 capitalize", MEETING_STATUS_COLORS[sacramentMeeting.status])}>
-                  {sacramentMeeting.status}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 shrink-0"
-                  onClick={() =>
-                    sacramentPanel === "business"
-                      ? setBusinessFor(sacramentMeeting)
-                      : setBulletinFor(sacramentMeeting)
-                  }
-                  title={sacramentPanel === "business" ? "Preview ward business" : "View bulletin"}
-                >
-                  <FileText className="h-3.5 w-3.5" />
-                </Button>
-                <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => openEdit(sacramentMeeting)} title="Edit details">
-                  <Pencil className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-              <div className="border-t border-border bg-muted/30 px-4 py-3 space-y-3">
-                {/* Bulletin / Business toggle */}
-                <div className="inline-flex rounded-lg border border-border bg-card p-0.5">
-                  {(["bulletin", "business"] as const).map((panel) => (
-                    <button
-                      key={panel}
-                      onClick={() => setSacramentPanel(panel)}
-                      className={cn(
-                        "px-3 py-1 text-xs font-medium rounded-md transition-colors capitalize",
-                        sacramentPanel === panel
-                          ? "bg-primary text-primary-foreground"
-                          : "text-muted-foreground hover:text-foreground"
-                      )}
-                    >
-                      {panel === "bulletin" ? "Bulletin" : "Business"}
-                    </button>
-                  ))}
-                </div>
-
-                {sacramentPanel === "bulletin" ? (
-                  <BulletinEditor
-                    program={sacramentMeeting.program ?? defaultBulletin({})}
-                    onChange={(p) => updateProgram(sacramentMeeting.id, p)}
-                  />
-                ) : (
-                  <BusinessEditor
-                    business={sacramentMeeting.business ?? seedBusiness(callingsCol.items)}
-                    callings={callingsCol.items}
-                    presiding={sacramentMeeting.program?.presiding ?? ""}
-                    onPresidingChange={(name) =>
-                      updateProgram(sacramentMeeting.id, {
-                        ...(sacramentMeeting.program ?? defaultBulletin({})),
-                        presiding: name || undefined,
-                      })
-                    }
-                    onChange={(b) => updateBusiness(sacramentMeeting.id, b)}
-                  />
-                )}
-                {sacramentMeeting.notes && (
-                  <p className="text-xs text-muted-foreground pt-1 italic">Notes: {sacramentMeeting.notes}</p>
-                )}
-                <div className="pt-1">
-                  <Button variant="ghost" size="sm" className="gap-1.5 h-7 text-xs text-muted-foreground hover:text-red-600" onClick={() => deleteMeeting(sacramentMeeting.id)}>
-                    <Trash2 className="h-3 w-3" /> Delete meeting
-                  </Button>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="flex flex-col items-center gap-3 py-16 text-center">
-              <CalendarDays className="h-12 w-12 text-muted-foreground/40" />
-              <p className="text-muted-foreground">No bulletin for this Sunday yet</p>
-              <Button onClick={openNew} variant="outline" size="sm">Create bulletin</Button>
-            </div>
-          )}
-
-          {/* Announcements pane beneath the bulletin */}
-          <AnnouncementsPanel
-            announcements={announcements}
-            onSave={saveAnnouncement}
-            onArchiveToggle={toggleArchiveAnnouncement}
-            onDelete={deleteAnnouncement}
-          />
-        </div>
-      ) : (
-        /* ── Bishopric / Ward Council: list view ── */
-        <>
-          {/* Status filter pills */}
+      {/* ── Bishopric / Ward Council: list view ── */}
+      <>
+        {/* Status filter pills */}
           <div className="flex items-center gap-2 overflow-x-auto pb-1">
             <Filter className="h-4 w-4 text-muted-foreground shrink-0" />
             {(["all", ...STATUSES] as (MeetingStatus | "all")[]).map((s) => (
@@ -705,8 +472,6 @@ export default function AgendasPage() {
             </ul>
           )}
         </>
-      )}
-
       {/* ── Meeting dialog ── */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
@@ -761,11 +526,6 @@ export default function AgendasPage() {
               <Label htmlFor="location">Location</Label>
               <Input id="location" value={form.location} onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))} placeholder="e.g. Bishop's Office" />
             </div>
-            {form.type === "sacrament_meeting" && !editing && (
-              <p className="text-xs text-muted-foreground">
-                A standard order of service will be added — edit the program, conducting, chorister, organist and second hour on the bulletin after creating. Presiding is set on the Business items.
-              </p>
-            )}
             <div className="space-y-1.5">
               <Label htmlFor="notes">Notes</Label>
               <Textarea id="notes" value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} placeholder="Optional notes" rows={2} />
@@ -833,90 +593,6 @@ export default function AgendasPage() {
             <Button onClick={handleSaveItem} disabled={!itemForm.title.trim()}>
               {itemDialog?.item ? "Save Changes" : "Add Item"}
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* ── Bulletin preview ── */}
-      {bulletinFor && (
-        <BulletinDialog
-          open={!!bulletinFor}
-          onOpenChange={(o) => !o && setBulletinFor(null)}
-          meeting={bulletinFor}
-          ward={ward}
-          announcements={activeAnnouncements}
-        />
-      )}
-
-      {/* ── Ward business document ── */}
-      {businessFor && (
-        <BusinessDialog
-          open={!!businessFor}
-          onOpenChange={(o) => !o && setBusinessFor(null)}
-          date={businessFor.date}
-          presiding={businessFor.program?.presiding}
-          business={businessFor.business ?? seedBusiness(callingsCol.items)}
-          ward={ward}
-        />
-      )}
-
-      {/* ── Ward settings dialog ── */}
-      <Dialog open={wardDialogOpen} onOpenChange={setWardDialogOpen}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Ward Settings</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <p className="text-xs text-muted-foreground">
-              These details appear on every sacrament meeting bulletin.
-            </p>
-            <div className="space-y-1.5">
-              <Label htmlFor="w-ward">Ward name</Label>
-              <Input id="w-ward" value={wardForm.wardName} onChange={(e) => setWardForm((w) => ({ ...w, wardName: e.target.value }))} />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="w-stake">Stake</Label>
-                <Input id="w-stake" value={wardForm.stake} onChange={(e) => setWardForm((w) => ({ ...w, stake: e.target.value }))} />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="w-church">Church name</Label>
-                <Input id="w-church" value={wardForm.churchName} onChange={(e) => setWardForm((w) => ({ ...w, churchName: e.target.value }))} />
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="w-addr">Address</Label>
-              <Input id="w-addr" value={wardForm.address} onChange={(e) => setWardForm((w) => ({ ...w, address: e.target.value }))} />
-            </div>
-            <div className="grid grid-cols-3 gap-3">
-              <div className="col-span-2 space-y-1.5">
-                <Label htmlFor="w-mtitle">Meeting heading</Label>
-                <Input id="w-mtitle" value={wardForm.meetingTitle} onChange={(e) => setWardForm((w) => ({ ...w, meetingTitle: e.target.value }))} />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="w-mtime">Time</Label>
-                <Input id="w-mtime" value={wardForm.meetingTime} onChange={(e) => setWardForm((w) => ({ ...w, meetingTime: e.target.value }))} placeholder="9 a.m." />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label>Leadership</Label>
-              {wardForm.leadership.map((l, i) => (
-                <div key={i} className="grid grid-cols-3 gap-2">
-                  <Input value={l.name} onChange={(e) => updateLeader(i, { name: e.target.value })} placeholder="Name" />
-                  <Input value={l.role} onChange={(e) => updateLeader(i, { role: e.target.value })} placeholder="Role" />
-                  <Input value={l.phone ?? ""} onChange={(e) => updateLeader(i, { phone: e.target.value })} placeholder="Phone" />
-                </div>
-              ))}
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="w-note">Submission note</Label>
-              <Textarea id="w-note" value={wardForm.submissionNote} onChange={(e) => setWardForm((w) => ({ ...w, submissionNote: e.target.value }))} rows={3} />
-            </div>
-          </div>
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setWardDialogOpen(false)}>Cancel</Button>
-            <Button onClick={saveWardSettings}>Save Settings</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
