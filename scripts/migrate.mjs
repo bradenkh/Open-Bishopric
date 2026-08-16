@@ -1,14 +1,18 @@
 /**
  * Forward-only migration runner — tracks which migrations have been applied in a
- * `schema_migrations` table and runs only the pending ones, in order. Run it
- * manually whenever you add a migration (it is not wired into builds/deploys):
+ * `schema_migrations` table and runs only the pending ones, in order. Safe to
+ * run on every deploy: already-applied migrations are skipped.
  *
- *   SUPABASE_DB_URL=postgresql://... npm run db:migrate
+ *   SUPABASE_DB_URL=postgresql://... node scripts/migrate.mjs
+ *   npm run db:migrate
  *
  * This never drops data — it applies each new file in
  * `supabase/migrations` exactly once (each inside a transaction) and records it.
  *
- * Safe by omission: if SUPABASE_DB_URL is not set it logs a notice and exits 0.
+ * Safe by omission: if SUPABASE_DB_URL is not set it logs a notice and exits 0,
+ * so builds/deploys without a database configured are a no-op. Wire it into a
+ * deploy by setting SUPABASE_DB_URL in the (production) environment — see the
+ * `prebuild` script in package.json.
  *
  * SUPABASE_DB_URL is the project's Postgres connection string (Settings →
  * Database → Connection string; use the Session pooler URI on IPv4-only hosts).

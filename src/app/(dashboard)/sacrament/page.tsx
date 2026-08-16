@@ -26,6 +26,7 @@ import { isAnnouncementActive } from "@/lib/announcements";
 import { defaultBulletin, addDays, upcomingSunday, todayISODate, formatSunday } from "@/lib/bulletin";
 import { cn } from "@/lib/utils";
 import { AnnouncementsPanel, type AnnouncementDraft } from "@/components/agendas/announcements-panel";
+import { AssignmentHistory } from "@/components/agendas/assignment-history";
 import { BulletinEditor } from "@/components/agendas/sacrament-program";
 import { BusinessEditor } from "@/components/agendas/business-editor";
 import { BulletinDialog } from "@/components/agendas/bulletin";
@@ -33,6 +34,14 @@ import { BusinessDialog } from "@/components/agendas/business-doc";
 
 const TYPES: MeetingType[] = ["bishopric", "sacrament_meeting", "ward_council"];
 const STATUSES: MeetingStatus[] = ["upcoming", "completed", "cancelled"];
+
+/** Top-level views. Bulletin and Business edit one Sunday; History is ward-wide. */
+type SacramentPanel = "bulletin" | "business" | "history";
+const PANELS: { key: SacramentPanel; label: string }[] = [
+  { key: "bulletin", label: "Bulletin" },
+  { key: "business", label: "Business" },
+  { key: "history", label: "History" },
+];
 
 const EMPTY_FORM = {
   title: "Sacrament Meeting", type: "sacrament_meeting" as MeetingType, status: "upcoming" as MeetingStatus,
@@ -61,7 +70,7 @@ export default function SacramentPage() {
   const announcements = announcementsCol.items;
 
   const [selectedSunday, setSelectedSunday] = useState<string>(() => upcomingSunday(todayISODate()));
-  const [sacramentPanel, setSacramentPanel] = useState<"bulletin" | "business">("bulletin");
+  const [sacramentPanel, setSacramentPanel] = useState<SacramentPanel>("bulletin");
 
   const sacramentMeeting = meetings.find(
     (m) => m.type === "sacrament_meeting" && m.date === selectedSunday,
@@ -192,132 +201,146 @@ export default function SacramentPage() {
             {meetings.filter((m) => m.type === "sacrament_meeting" && m.status === "upcoming").length} upcoming
           </p>
         </div>
-        <Button onClick={openNew} size="sm" className="gap-2">
-          <Plus className="h-4 w-4" /> New Bulletin
-        </Button>
+        {sacramentPanel !== "history" && (
+          <Button onClick={openNew} size="sm" className="gap-2">
+            <Plus className="h-4 w-4" /> New Bulletin
+          </Button>
+        )}
       </div>
 
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground">
-          Bulletins use <span className="font-medium">{ward.wardName}</span> details.
+          {sacramentPanel === "history" ? (
+            <>Taken from past <span className="font-medium">{ward.wardName}</span> bulletins.</>
+          ) : (
+            <>Bulletins use <span className="font-medium">{ward.wardName}</span> details.</>
+          )}
         </p>
         <Button variant="ghost" size="sm" className="gap-1.5 h-7 text-xs" onClick={openWardSettings}>
           <Settings className="h-3.5 w-3.5" /> Ward settings
         </Button>
       </div>
 
-      <div className="flex items-center justify-center gap-3">
-        <Button variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={() => setSelectedSunday(addDays(selectedSunday, -7))} title="Previous Sunday">
-          <ChevronLeft className="h-4 w-4" />
-        </Button>
-        <p className="min-w-[15rem] text-center text-sm font-semibold">{formatSunday(selectedSunday)}</p>
-        <Button variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={() => setSelectedSunday(addDays(selectedSunday, 7))} title="Next Sunday">
-          <ChevronRight className="h-4 w-4" />
-        </Button>
+      <div className="flex justify-center">
+        <div className="inline-flex rounded-lg border border-border bg-muted/30 p-0.5">
+          {PANELS.map(({ key, label }) => (
+            <button
+              key={key}
+              onClick={() => setSacramentPanel(key)}
+              className={cn(
+                "px-4 py-1.5 text-xs font-medium rounded-md transition-colors",
+                sacramentPanel === key
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {sacramentMeeting ? (
-        <div className="rounded-xl border border-border bg-card overflow-hidden">
-          <div className="flex items-start gap-3 p-4">
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold">{sacramentMeeting.title}</p>
-              <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
-                {sacramentMeeting.time && (
-                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <Clock className="h-3 w-3" /> {formatTime(sacramentMeeting.time)}
-                  </span>
-                )}
-                {sacramentMeeting.location && (
-                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <MapPin className="h-3 w-3" /> {sacramentMeeting.location}
-                  </span>
-                )}
-                <span className="text-xs text-muted-foreground">
-                  {sacramentMeeting.program?.rows.length ?? 0} rows
-                </span>
-              </div>
-            </div>
-            <span className={cn("text-xs px-2 py-0.5 rounded-full shrink-0 capitalize", MEETING_STATUS_COLORS[sacramentMeeting.status])}>
-              {sacramentMeeting.status}
-            </span>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 shrink-0"
-              onClick={() =>
-                sacramentPanel === "business"
-                  ? setBusinessFor(sacramentMeeting)
-                  : setBulletinFor(sacramentMeeting)
-              }
-              title={sacramentPanel === "business" ? "Preview ward business" : "View bulletin"}
-            >
-              <FileText className="h-3.5 w-3.5" />
-            </Button>
-            <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => openEdit(sacramentMeeting)} title="Edit details">
-              <Pencil className="h-3.5 w-3.5" />
-            </Button>
-          </div>
-          <div className="border-t border-border bg-muted/30 px-4 py-3 space-y-3">
-            <div className="inline-flex rounded-lg border border-border bg-card p-0.5">
-              {(["bulletin", "business"] as const).map((panel) => (
-                <button
-                  key={panel}
-                  onClick={() => setSacramentPanel(panel)}
-                  className={cn(
-                    "px-3 py-1 text-xs font-medium rounded-md transition-colors capitalize",
-                    sacramentPanel === panel
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  {panel === "bulletin" ? "Bulletin" : "Business"}
-                </button>
-              ))}
-            </div>
+      {sacramentPanel === "history" ? (
+        <AssignmentHistory meetings={meetings} />
+      ) : (
+        <>
+        <div className="flex items-center justify-center gap-3">
+          <Button variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={() => setSelectedSunday(addDays(selectedSunday, -7))} title="Previous Sunday">
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <p className="min-w-[15rem] text-center text-sm font-semibold">{formatSunday(selectedSunday)}</p>
+          <Button variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={() => setSelectedSunday(addDays(selectedSunday, 7))} title="Next Sunday">
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </div>
 
-            {sacramentPanel === "bulletin" ? (
-              <BulletinEditor
-                program={sacramentMeeting.program ?? defaultBulletin({})}
-                onChange={(p) => updateProgram(sacramentMeeting.id, p)}
-              />
-            ) : (
-              <BusinessEditor
-                business={sacramentMeeting.business ?? seedBusiness(callingsCol.items)}
-                callings={callingsCol.items}
-                presiding={sacramentMeeting.program?.presiding ?? ""}
-                onPresidingChange={(name) =>
-                  updateProgram(sacramentMeeting.id, {
-                    ...(sacramentMeeting.program ?? defaultBulletin({})),
-                    presiding: name || undefined,
-                  })
+        {sacramentMeeting ? (
+          <div className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="flex items-start gap-3 p-4">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold">{sacramentMeeting.title}</p>
+                <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
+                  {sacramentMeeting.time && (
+                    <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <Clock className="h-3 w-3" /> {formatTime(sacramentMeeting.time)}
+                    </span>
+                  )}
+                  {sacramentMeeting.location && (
+                    <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <MapPin className="h-3 w-3" /> {sacramentMeeting.location}
+                    </span>
+                  )}
+                  <span className="text-xs text-muted-foreground">
+                    {sacramentMeeting.program?.rows.length ?? 0} rows
+                  </span>
+                </div>
+              </div>
+              <span className={cn("text-xs px-2 py-0.5 rounded-full shrink-0 capitalize", MEETING_STATUS_COLORS[sacramentMeeting.status])}>
+                {sacramentMeeting.status}
+              </span>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 shrink-0"
+                onClick={() =>
+                  sacramentPanel === "business"
+                    ? setBusinessFor(sacramentMeeting)
+                    : setBulletinFor(sacramentMeeting)
                 }
-                onChange={(b) => updateBusiness(sacramentMeeting.id, b)}
-              />
-            )}
-            {sacramentMeeting.notes && (
-              <p className="text-xs text-muted-foreground pt-1 italic">Notes: {sacramentMeeting.notes}</p>
-            )}
-            <div className="pt-1">
-              <Button variant="ghost" size="sm" className="gap-1.5 h-7 text-xs text-muted-foreground hover:text-red-600" onClick={() => deleteMeeting(sacramentMeeting.id)}>
-                <Trash2 className="h-3 w-3" /> Delete meeting
+                title={sacramentPanel === "business" ? "Preview ward business" : "View bulletin"}
+              >
+                <FileText className="h-3.5 w-3.5" />
+              </Button>
+              <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => openEdit(sacramentMeeting)} title="Edit details">
+                <Pencil className="h-3.5 w-3.5" />
               </Button>
             </div>
+            <div className="border-t border-border bg-muted/30 px-4 py-3 space-y-3">
+              {sacramentPanel === "bulletin" ? (
+                <BulletinEditor
+                  program={sacramentMeeting.program ?? defaultBulletin({})}
+                  onChange={(p) => updateProgram(sacramentMeeting.id, p)}
+                />
+              ) : (
+                <BusinessEditor
+                  business={sacramentMeeting.business ?? seedBusiness(callingsCol.items)}
+                  callings={callingsCol.items}
+                  presiding={sacramentMeeting.program?.presiding ?? ""}
+                  onPresidingChange={(name) =>
+                    updateProgram(sacramentMeeting.id, {
+                      ...(sacramentMeeting.program ?? defaultBulletin({})),
+                      presiding: name || undefined,
+                    })
+                  }
+                  onChange={(b) => updateBusiness(sacramentMeeting.id, b)}
+                />
+              )}
+              {sacramentMeeting.notes && (
+                <p className="text-xs text-muted-foreground pt-1 italic">Notes: {sacramentMeeting.notes}</p>
+              )}
+              <div className="pt-1">
+                <Button variant="ghost" size="sm" className="gap-1.5 h-7 text-xs text-muted-foreground hover:text-red-600" onClick={() => deleteMeeting(sacramentMeeting.id)}>
+                  <Trash2 className="h-3 w-3" /> Delete meeting
+                </Button>
+              </div>
+            </div>
           </div>
-        </div>
-      ) : (
-        <div className="flex flex-col items-center gap-3 py-16 text-center">
-          <CalendarDays className="h-12 w-12 text-muted-foreground/40" />
-          <p className="text-muted-foreground">No bulletin for this Sunday yet</p>
-          <Button onClick={openNew} variant="outline" size="sm">Create bulletin</Button>
-        </div>
-      )}
+        ) : (
+          <div className="flex flex-col items-center gap-3 py-16 text-center">
+            <CalendarDays className="h-12 w-12 text-muted-foreground/40" />
+            <p className="text-muted-foreground">No bulletin for this Sunday yet</p>
+            <Button onClick={openNew} variant="outline" size="sm">Create bulletin</Button>
+          </div>
+        )}
 
-      <AnnouncementsPanel
-        announcements={announcements}
-        onSave={saveAnnouncement}
-        onArchiveToggle={toggleArchiveAnnouncement}
-        onDelete={deleteAnnouncement}
-      />
+        <AnnouncementsPanel
+          announcements={announcements}
+          onSave={saveAnnouncement}
+          onArchiveToggle={toggleArchiveAnnouncement}
+          onDelete={deleteAnnouncement}
+        />
+        </>
+      )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
