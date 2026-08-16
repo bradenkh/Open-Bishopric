@@ -97,8 +97,26 @@ async function main() {
     connectionString,
     ssl: isLocal ? undefined : { rejectUnauthorized: false },
   });
+
+  // Log the target BEFORE connecting: an auth failure otherwise leaves no record
+  // of which host/user was actually tried.
+  console.log(
+    `[db:migrate] Connecting to ${client.host}:${client.port}/${client.database} as "${client.user}"…`,
+  );
+
+  // Supabase's pooler routes by tenant, which it reads from the username suffix.
+  // A bare `postgres` there fails auth no matter how correct the password is.
+  if (/pooler\.supabase\.com$/.test(client.host ?? "") && !/^postgres\./.test(client.user ?? "")) {
+    console.warn(
+      `[db:migrate] Warning: pooler host with username "${client.user}".\n` +
+        "             The Session pooler needs the tenant-qualified username\n" +
+        "             postgres.<project-ref> — a bare `postgres` always fails auth.\n" +
+        "             Copy the Session pooler URI, not the Direct connection one.",
+    );
+  }
+
   await client.connect();
-  console.log(`[db:migrate] Connected to ${client.host}:${client.port}/${client.database}.`);
+  console.log("[db:migrate] Connected.");
 
   try {
     // Tracking table.
