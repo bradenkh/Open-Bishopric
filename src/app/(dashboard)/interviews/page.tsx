@@ -5,7 +5,7 @@ import {
   Plus, CalendarClock, Clock, User, GripVertical, CalendarPlus,
   CheckCircle2, AlertTriangle, Pencil, RotateCcw,
   CalendarDays, CalendarOff, Trash2, Check, Link2, Copy, Repeat, Search, Send,
-  ChevronLeft, ChevronRight,
+  ChevronLeft, ChevronRight, List, Columns3,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -593,6 +593,75 @@ function KanbanView({ interviews, onSelect, onMove }: KanbanViewProps) {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+// ── List View (compact alternative to the kanban board) ─────────────────────────
+
+interface ListViewProps {
+  interviews: Interview[];
+  onSelect: (i: Interview) => void;
+}
+
+/** A subtitle line for a list row: the booked slot, or the next action to take. */
+function listRowSubtitle(i: Interview): string {
+  const stage = deriveStage(i);
+  if (i.scheduledDate && (stage === "scheduled" || stage === "pending_confirmation" || stage === "date_passed" || stage === "completed")) {
+    const when = `${formatDate(i.scheduledDate)}${i.scheduledTime ? ` · ${formatTime(i.scheduledTime)}` : ""}`;
+    return i.interviewer ? `${when} · ${i.interviewer}` : when;
+  }
+  return NEXT_ACTION[stage];
+}
+
+function ListView({ interviews, onSelect }: ListViewProps) {
+  const groups = INTERVIEW_PIPELINE
+    .map((stage) => ({ stage, items: interviews.filter((i) => deriveStage(i) === stage) }))
+    .filter((g) => g.items.length > 0);
+
+  if (interviews.length === 0) {
+    return (
+      <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+        No interviews yet. Add one to get started.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {groups.map(({ stage, items }) => (
+        <div key={stage}>
+          <div className="mb-1.5 flex items-center gap-2 px-1">
+            <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{stageLabel(stage)}</p>
+            <span className={cn("rounded-full px-1.5 text-[10px] font-bold tabular-nums", INTERVIEW_STAGE_COLORS[stage])}>
+              {items.length}
+            </span>
+          </div>
+          <div className="rounded-xl border border-border bg-card divide-y divide-border overflow-hidden">
+            {items.map((i) => (
+              <button
+                key={i.id}
+                type="button"
+                onClick={() => onSelect(i)}
+                className="flex w-full items-center gap-3 p-3 text-left transition-colors hover:bg-accent"
+              >
+                <div className="h-8 w-8 rounded-full flex items-center justify-center text-[11px] font-semibold shrink-0 bg-primary/10 text-primary">
+                  {getInitials(i.memberName)}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium truncate">{i.memberName}</p>
+                  <p className="text-[11px] text-muted-foreground truncate">
+                    {INTERVIEW_TYPE_LABELS[i.type]} · {listRowSubtitle(i)}
+                  </p>
+                </div>
+                <Badge className={cn("text-[10px] shrink-0", INTERVIEW_STAGE_COLORS[stage])}>
+                  {stageLabel(stage)}
+                </Badge>
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -1541,6 +1610,7 @@ export default function InterviewsPage() {
   const BISHOP       = useMemo(() => deriveBishop(bishopric), [bishopric]);
 
   const [view,       setView]       = useState<PageView>("calendar");
+  const [boardMode,  setBoardMode]  = useState<"board" | "list">("board");
   const [selected,   setSelected]   = useState<Interview | null>(null);
   // Deep link from the dashboard: /interviews?new=1 opens the New dialog.
   const [dialogOpen, setDialogOpen] = useState(() =>
@@ -1883,7 +1953,30 @@ export default function InterviewsPage() {
       )}
 
       {view === "board" && (
-        <KanbanView interviews={interviews} onSelect={setSelected} onMove={handleMove} />
+        <div className="space-y-3">
+          <div className="flex justify-end">
+            <div className="inline-flex rounded-lg border border-border p-0.5">
+              {([["board", "Board", Columns3], ["list", "List", List]] as const).map(([mode, label, Icon]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setBoardMode(mode)}
+                  className={cn(
+                    "flex items-center gap-1.5 rounded-md px-3 py-1 text-xs font-medium transition-colors",
+                    boardMode === mode ? "bg-primary/10 text-primary" : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <Icon className="h-3.5 w-3.5" /> {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          {boardMode === "board" ? (
+            <KanbanView interviews={interviews} onSelect={setSelected} onMove={handleMove} />
+          ) : (
+            <ListView interviews={interviews} onSelect={setSelected} />
+          )}
+        </div>
       )}
 
       {view === "settlement" && (
