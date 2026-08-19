@@ -5,6 +5,7 @@ import {
   Plus, CalendarClock, Clock, User, GripVertical, CalendarPlus,
   CheckCircle2, AlertTriangle, Pencil, RotateCcw,
   CalendarDays, CalendarOff, Trash2, Check, Link2, Copy, Repeat, Search, Send,
+  ChevronLeft, ChevronRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,7 +33,8 @@ import {
 } from "@/types";
 import { formatDate, cn } from "@/lib/utils";
 import {
-  generateSlots, groupSlotsByDate, durationForType, parseDate, type Slot,
+  generateSlots, groupSlotsByDate, durationForType, parseDate,
+  toMinutes, fromMinutes, toDateStr, durationOf, blockAppliesOn, type Slot,
 } from "@/lib/availability";
 
 // ── Bishopric helpers ─────────────────────────────────────────────────────────
@@ -590,6 +592,229 @@ function KanbanView({ interviews, onSelect, onMove }: KanbanViewProps) {
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+// ── Calendar (week) View ────────────────────────────────────────────────────────
+
+const HOUR_PX = 44; // vertical pixels per hour in the week grid
+
+function startOfWeek(d: Date): Date {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  x.setDate(x.getDate() - x.getDay()); // back up to Sunday
+  return x;
+}
+function addDays(d: Date, n: number): Date {
+  const x = new Date(d);
+  x.setDate(x.getDate() + n);
+  return x;
+}
+
+interface CalItem {
+  interview: Interview;
+  startM: number;
+  endM: number;
+  lane: number;
+}
+
+/** Assign overlapping interviews to side-by-side lanes within a day column. */
+function layoutDay(interviews: Interview[]): { items: CalItem[]; lanes: number } {
+  const sorted = interviews
+    .map((i) => {
+      const startM = toMinutes(i.scheduledTime!);
+      return { interview: i, startM, endM: startM + durationOf(i), lane: 0 };
+    })
+    .sort((a, b) => a.startM - b.startM || a.endM - b.endM);
+
+  const laneEnds: number[] = [];
+  for (const it of sorted) {
+    let lane = laneEnds.findIndex((end) => end <= it.startM);
+    if (lane === -1) {
+      lane = laneEnds.length;
+      laneEnds.push(it.endM);
+    } else {
+      laneEnds[lane] = it.endM;
+    }
+    it.lane = lane;
+  }
+  return { items: sorted, lanes: Math.max(1, laneEnds.length) };
+}
+
+interface CalendarViewProps {
+  interviews: Interview[];
+  availability: AvailabilityBlock[];
+  exceptions: AvailabilityException[];
+  onSelect: (i: Interview) => void;
+}
+
+function CalendarView({ interviews, availability, exceptions, onSelect }: CalendarViewProps) {
+  const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
+  const todayStr = toDateStr(new Date());
+
+  const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
+
+  // Interviews that have a concrete date+time within the visible week.
+  const scheduledInterviews = useMemo(
+    () => interviews.filter((i) => i.scheduledDate && i.scheduledTime),
+    [interviews],
+  );
+
+  // Availability bands per day (union of interviewer windows honoring exceptions).
+  const bandsByDate = useMemo(() => {
+    const map = new Map<string, { start: number; end: number }[]>();
+    for (const day of days) {
+      const dateStr = toDateStr(day);
+      const bands = availability
+        .filter((b) => blockAppliesOn(b, day))
+        .filter((b) => !exceptions.some(
+          (e) => e.memberId === b.memberId && dateStr >= e.startDate && dateStr <= e.endDate,
+        ))
+        .map((b) => ({ start: toMinutes(b.startTime), end: toMinutes(b.endTime) }));
+      map.set(dateStr, bands);
+    }
+    return map;
+  }, [days, availability, exceptions]);
+
+  // Dynamic vertical bounds: fit availability + booked interviews, min 8am–8pm.
+  const [minM, maxM] = useMemo(() => {
+    let lo = 8 * 60;
+    let hi = 20 * 60;
+    for (const bands of bandsByDate.values()) {
+      for (const b of bands) { lo = Math.min(lo, b.start); hi = Math.max(hi, b.end); }
+    }
+    for (const i of scheduledInterviews) {
+      const inWeek = days.some((d) => toDateStr(d) === i.scheduledDate);
+      if (!inWeek) continue;
+      const s = toMinutes(i.scheduledTime!);
+      lo = Math.min(lo, s); hi = Math.max(hi, s + durationOf(i));
+    }
+    return [Math.floor(lo / 60) * 60, Math.ceil(hi / 60) * 60];
+  }, [bandsByDate, scheduledInterviews, days]);
+
+  const totalMin = Math.max(60, maxM - minM);
+  const gridHeight = (totalMin / 60) * HOUR_PX;
+  const hours = Array.from({ length: totalMin / 60 + 1 }, (_, i) => minM + i * 60);
+  const yFor = (m: number) => ((m - minM) / 60) * HOUR_PX;
+
+  const label = `${formatDate(toDateStr(weekStart))} – ${formatDate(toDateStr(addDays(weekStart, 6)))}`;
+
+  return (
+    <div className="space-y-3">
+      {/* Week nav */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1">
+          <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => setWeekStart((w) => addDays(w, -7))} aria-label="Previous week">
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <Button variant="outline" size="sm" className="h-8" onClick={() => setWeekStart(startOfWeek(new Date()))}>
+            Today
+          </Button>
+          <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => setWeekStart((w) => addDays(w, 7))} aria-label="Next week">
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </div>
+        <p className="text-sm font-medium text-muted-foreground">{label}</p>
+      </div>
+
+      {/* Grid */}
+      <div className="overflow-x-auto rounded-xl border border-border bg-card">
+        <div style={{ minWidth: 640 }}>
+          {/* Day headers */}
+          <div className="flex border-b border-border">
+            <div className="w-12 shrink-0" />
+            {days.map((d) => {
+              const dateStr = toDateStr(d);
+              const isToday = dateStr === todayStr;
+              return (
+                <div key={dateStr} className={cn("flex-1 py-2 text-center border-l border-border", isToday && "bg-primary/5")}>
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{WEEKDAY_LABELS[d.getDay()].slice(0, 3)}</p>
+                  <p className={cn("text-sm font-semibold", isToday ? "text-primary" : "text-foreground")}>{d.getDate()}</p>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Time grid */}
+          <div className="flex" style={{ height: gridHeight }}>
+            {/* Time gutter */}
+            <div className="relative w-12 shrink-0">
+              {hours.map((h) => (
+                <div key={h} className="absolute right-1 -translate-y-1/2 text-[10px] text-muted-foreground" style={{ top: yFor(h) }}>
+                  {formatTime(fromMinutes(h))}
+                </div>
+              ))}
+            </div>
+
+            {/* Day columns */}
+            {days.map((d) => {
+              const dateStr = toDateStr(d);
+              const isToday = dateStr === todayStr;
+              const bands = bandsByDate.get(dateStr) ?? [];
+              const dayInterviews = scheduledInterviews.filter((i) => i.scheduledDate === dateStr);
+              const { items, lanes } = layoutDay(dayInterviews);
+              return (
+                <div key={dateStr} className={cn("relative flex-1 border-l border-border", isToday && "bg-primary/5")}>
+                  {/* Hour lines */}
+                  {hours.map((h) => (
+                    <div key={h} className="absolute inset-x-0 border-t border-border/50" style={{ top: yFor(h) }} />
+                  ))}
+                  {/* Availability bands */}
+                  {bands.map((b, idx) => (
+                    <div
+                      key={idx}
+                      className="absolute inset-x-0.5 rounded bg-green-500/10 border border-green-500/20"
+                      style={{ top: yFor(b.start), height: Math.max(4, yFor(b.end) - yFor(b.start)) }}
+                    />
+                  ))}
+                  {/* Interview blocks */}
+                  {items.map(({ interview: i, startM, endM, lane }) => {
+                    const stage = deriveStage(i);
+                    return (
+                      <button
+                        key={i.id}
+                        type="button"
+                        onClick={() => onSelect(i)}
+                        className={cn(
+                          "absolute rounded-md border px-1 py-0.5 text-left overflow-hidden transition-shadow hover:shadow-md hover:z-10",
+                          INTERVIEW_STAGE_COLORS[stage],
+                        )}
+                        style={{
+                          top: yFor(startM),
+                          height: Math.max(16, yFor(endM) - yFor(startM) - 1),
+                          left: `${(lane / lanes) * 100}%`,
+                          width: `${(1 / lanes) * 100}%`,
+                        }}
+                        title={`${i.memberName} · ${INTERVIEW_TYPE_LABELS[i.type]}`}
+                      >
+                        <p className="text-[10px] font-semibold leading-tight truncate">{i.memberName}</p>
+                        <p className="text-[9px] leading-tight truncate opacity-80">{formatTime(i.scheduledTime!)}</p>
+                      </button>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Legend */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+        <span className="flex items-center gap-1.5">
+          <span className="h-2.5 w-3 rounded-sm bg-green-500/20 border border-green-500/30" /> Open availability
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className={cn("h-2.5 w-3 rounded-sm", INTERVIEW_STAGE_COLORS.scheduled)} /> Scheduled
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className={cn("h-2.5 w-3 rounded-sm", INTERVIEW_STAGE_COLORS.pending_confirmation)} /> Confirming
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className={cn("h-2.5 w-3 rounded-sm", INTERVIEW_STAGE_COLORS.completed)} /> Completed
+        </span>
       </div>
     </div>
   );
@@ -1271,7 +1496,7 @@ function StageAdvancePanel({
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
-type PageView = "board" | "settlement" | "availability";
+type PageView = "calendar" | "board" | "settlement" | "availability";
 
 const EMPTY_FORM = {
   memberName: "",
@@ -1315,7 +1540,7 @@ export default function InterviewsPage() {
   const INTERVIEWERS = useMemo(() => deriveInterviewers(bishopric), [bishopric]);
   const BISHOP       = useMemo(() => deriveBishop(bishopric), [bishopric]);
 
-  const [view,       setView]       = useState<PageView>("board");
+  const [view,       setView]       = useState<PageView>("calendar");
   const [selected,   setSelected]   = useState<Interview | null>(null);
   // Deep link from the dashboard: /interviews?new=1 opens the New dialog.
   const [dialogOpen, setDialogOpen] = useState(() =>
@@ -1578,6 +1803,7 @@ export default function InterviewsPage() {
   const settlementRemaining = activeMemberCount - settlementDone;
 
   const TAB_CONFIG: { view: PageView; label: string; count?: number }[] = [
+    { view: "calendar",     label: "Calendar" },
     { view: "board",        label: "Board",              count: needsScheduling + toReview },
     { view: "settlement",   label: "Tithing Settlement", count: settlementRemaining },
     { view: "availability", label: "Availability",       count: availability.length },
@@ -1647,6 +1873,15 @@ export default function InterviewsPage() {
       </div>
 
       {/* ── Views ── */}
+      {view === "calendar" && (
+        <CalendarView
+          interviews={interviews}
+          availability={availability}
+          exceptions={exceptions}
+          onSelect={setSelected}
+        />
+      )}
+
       {view === "board" && (
         <KanbanView interviews={interviews} onSelect={setSelected} onMove={handleMove} />
       )}
