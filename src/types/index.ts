@@ -504,9 +504,41 @@ export const WEEKDAY_LABELS = [
 ] as const;
 
 /**
- * A recurring weekly window when a bishopric member can hold interviews —
+ * How a weekly availability window repeats.
+ *   weekly        — every matching weekday (the original behavior; default).
+ *   biweekly      — every other matching weekday (shorthand for every_n_weeks=2).
+ *   every_n_weeks — every `intervalWeeks` weeks, phased from `anchorDate`.
+ *   nth_weekday   — the `nth` occurrence of the weekday each month
+ *                   (1–5, or -1 for the last), e.g. "first Sunday of the month".
+ */
+export type AvailabilityRecurrence =
+  | "weekly"
+  | "biweekly"
+  | "nth_weekday"
+  | "every_n_weeks";
+
+export const RECURRENCE_LABELS: Record<AvailabilityRecurrence, string> = {
+  weekly:        "Every week",
+  biweekly:      "Every other week",
+  nth_weekday:   "Monthly (nth weekday)",
+  every_n_weeks: "Every N weeks",
+};
+
+/** Labels for the nth-weekday selector (1-indexed; -1 = last). */
+export const NTH_LABELS: Record<number, string> = {
+  1: "First",
+  2: "Second",
+  3: "Third",
+  4: "Fourth",
+  5: "Fifth",
+  [-1]: "Last",
+};
+
+/**
+ * A recurring window when a bishopric member can hold interviews —
  * e.g. "Bishop Anderson, Tuesdays 18:00–19:00". Sliced into bookable slots
- * sized to each interview's length.
+ * sized to each interview's length. The recurrence fields let a window repeat
+ * less often than weekly (biweekly, every N weeks, or a monthly nth-weekday).
  */
 export interface AvailabilityBlock {
   id: string;
@@ -517,6 +549,14 @@ export interface AvailabilityBlock {
   /** 24-hour "HH:MM". */
   startTime: string;
   endTime: string;
+  /** How the window repeats. Defaults to "weekly" (existing rows). */
+  recurrence?: AvailabilityRecurrence;
+  /** For biweekly / every_n_weeks: the week interval (biweekly ⇒ 2). */
+  intervalWeeks?: number;
+  /** For nth_weekday: which occurrence in the month (1–5, or -1 for last). */
+  nth?: number;
+  /** YYYY-MM-DD phase anchor for interval math (defaults to a fixed epoch). */
+  anchorDate?: string;
 }
 
 /**
@@ -530,6 +570,82 @@ export interface AvailabilityException {
   startDate: string;
   endDate: string;
   reason?: string;
+}
+
+// ── Tithing settlement ─────────────────────────────────────────────────────────
+
+/**
+ * Where a member stands in the year's tithing settlement. Every active ward
+ * member gets a record; the bishopric works the ward toward all-completed.
+ *   not_started → invited (link generated) → scheduled (slot booked) → completed
+ *   declined / exempt are terminal outcomes recorded by the bishopric.
+ */
+export type SettlementStatus =
+  | "not_started"
+  | "invited"
+  | "scheduled"
+  | "completed"
+  | "declined"
+  | "exempt";
+
+export const SETTLEMENT_STATUS_LABELS: Record<SettlementStatus, string> = {
+  not_started: "Not started",
+  invited:     "Invited",
+  scheduled:   "Scheduled",
+  completed:   "Completed",
+  declined:    "Declined",
+  exempt:      "Exempt",
+};
+
+/** The member's self-declared tithing status, recorded at/after the interview. */
+export type DeclaredTithingStatus = "full" | "partial" | "non" | "exempt";
+
+export const DECLARED_STATUS_LABELS: Record<DeclaredTithingStatus, string> = {
+  full:    "Full tithe",
+  partial: "Partial tithe",
+  non:     "Non-tithe payer",
+  exempt:  "Exempt",
+};
+
+/** One member's tithing-settlement record for a given year. */
+export interface SettlementRecord {
+  id: string;
+  memberId?: string;
+  memberName: string;
+  year: number;
+  status: SettlementStatus;
+  /** The booked interview (once scheduled). */
+  interviewId?: string;
+  declaredStatus?: DeclaredTithingStatus;
+  notes?: string;
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * A personalized, unguessable self-signup link. The `token` is the credential:
+ * a member follows /book/<token> and the service-role booking API validates it,
+ * lists open slots, and books — no login required, RLS untouched.
+ */
+export interface BookingToken {
+  id: string;
+  token: string;
+  memberId?: string;
+  memberName: string;
+  /** What the link books. v1 always "tithing_settlement". */
+  purpose: string;
+  year?: number;
+  settlementRecordId?: string;
+  /** ISO timestamp; the link is dead after this (optional). */
+  expiresAt?: string;
+  /** ISO timestamp set once the link has been used to book. */
+  usedAt?: string;
+  /** The interview created when the link was used. */
+  interviewId?: string;
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 // ── Calling roster (full org chart) ───────────────────────────────────────────

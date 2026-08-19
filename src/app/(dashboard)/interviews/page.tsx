@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import {
   Plus, CalendarClock, Clock, User, GripVertical, CalendarPlus,
   CheckCircle2, AlertTriangle, Pencil, RotateCcw,
-  CalendarDays, CalendarOff, Trash2, Check,
+  CalendarDays, CalendarOff, Trash2, Check, Link2, Copy, Repeat,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,10 +22,13 @@ import { useData, newId } from "@/contexts/DataContext";
 import type {
   Interview, InterviewType, InterviewStage,
   AvailabilityBlock, AvailabilityException, BishopricMember,
+  SettlementRecord, SettlementStatus, DeclaredTithingStatus,
+  BookingToken, Member, AvailabilityRecurrence,
 } from "@/types";
 import {
   INTERVIEW_TYPE_LABELS, INTERVIEW_STAGES, INTERVIEW_PIPELINE, INTERVIEW_STAGE_COLORS,
   INTERVIEW_DURATION_MINS, WEEKDAY_LABELS,
+  SETTLEMENT_STATUS_LABELS, DECLARED_STATUS_LABELS, RECURRENCE_LABELS, NTH_LABELS,
 } from "@/types";
 import { formatDate, cn } from "@/lib/utils";
 import {
@@ -71,6 +74,39 @@ function stageLabel(stage: InterviewStage): string {
 }
 
 const TODAY = new Date().toISOString().slice(0, 10);
+const SETTLEMENT_YEAR = new Date().getFullYear();
+
+/** An unguessable token for a personalized booking link (~32 bytes, base64url). */
+function generateToken(): string {
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/** Human-readable recurrence for an availability block's list row. */
+function recurrenceLabel(b: AvailabilityBlock): string {
+  const rec = b.recurrence ?? "weekly";
+  const day = WEEKDAY_LABELS[b.weekday];
+  if (rec === "weekly") return `Every ${day}`;
+  if (rec === "biweekly") return `Every other ${day}`;
+  if (rec === "every_n_weeks") return `Every ${b.intervalWeeks ?? 2} weeks · ${day}`;
+  if (rec === "nth_weekday") return `${NTH_LABELS[b.nth ?? 1] ?? "First"} ${day} of the month`;
+  return day;
+}
+
+const SETTLEMENT_STATUS_COLORS: Record<SettlementStatus, string> = {
+  not_started: "bg-muted text-muted-foreground",
+  invited:     "bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200",
+  scheduled:   "bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-200",
+  completed:   "bg-green-100 text-green-800 dark:bg-green-900/60 dark:text-green-200",
+  declined:    "bg-red-100 text-red-800 dark:bg-red-900/60 dark:text-red-200",
+  exempt:      "bg-slate-100 text-slate-700 dark:bg-slate-800/60 dark:text-slate-300",
+};
+
+const SETTLEMENT_STATUSES: SettlementStatus[] = [
+  "not_started", "invited", "scheduled", "completed", "declined", "exempt",
+];
+const DECLARED_STATUSES: DeclaredTithingStatus[] = ["full", "partial", "non", "exempt"];
 
 /**
  * The column an interview belongs in. A `scheduled` interview whose date has
@@ -617,9 +653,12 @@ function AvailabilityView({
                   <ul className="space-y-1">
                     {blocks.map((b) => (
                       <li key={b.id} className="group flex items-center justify-between gap-2 rounded-md border border-border px-2.5 py-1.5 text-sm">
-                        <span>
-                          <span className="font-medium">{WEEKDAY_LABELS[b.weekday]}</span>
-                          <span className="text-muted-foreground"> · {formatTime(b.startTime)}–{formatTime(b.endTime)}</span>
+                        <span className="min-w-0">
+                          <span className="font-medium flex items-center gap-1">
+                            {(b.recurrence ?? "weekly") !== "weekly" && <Repeat className="h-3 w-3 text-muted-foreground shrink-0" />}
+                            {recurrenceLabel(b)}
+                          </span>
+                          <span className="text-muted-foreground text-xs"> {formatTime(b.startTime)}–{formatTime(b.endTime)}</span>
                         </span>
                         <button
                           onClick={() => onDeleteBlock(b.id)}
@@ -672,6 +711,165 @@ function AvailabilityView({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// ── Tithing Settlement View ─────────────────────────────────────────────────────
+
+interface SettlementRowState {
+  member: Member;
+  name: string;
+  record?: SettlementRecord;
+  token?: BookingToken;
+  status: SettlementStatus;
+}
+
+interface SettlementViewProps {
+  members: Member[];
+  settlements: SettlementRecord[];
+  bookingTokens: BookingToken[];
+  onGenerate: (member: Member) => void;
+  onGenerateAll: (members: Member[]) => void;
+  onSetStatus: (member: Member, record: SettlementRecord | undefined, status: SettlementStatus) => void;
+  onSetDeclared: (member: Member, record: SettlementRecord | undefined, declared: DeclaredTithingStatus) => void;
+}
+
+function bookingUrl(token: string): string {
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  return `${origin}/book/${token}`;
+}
+
+function SettlementView({
+  members, settlements, bookingTokens, onGenerate, onGenerateAll, onSetStatus, onSetDeclared,
+}: SettlementViewProps) {
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const rows: SettlementRowState[] = useMemo(() => {
+    const active = members.filter((m) => m.isActive);
+    return active.map((m) => {
+      const name = `${m.firstName} ${m.lastName}`;
+      const record = settlements.find((s) => s.memberId === m.id && s.year === SETTLEMENT_YEAR);
+      const token = bookingTokens
+        .filter((t) => t.memberId === m.id && t.year === SETTLEMENT_YEAR && !t.usedAt)
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+      return { member: m, name, record, token, status: record?.status ?? "not_started" };
+    });
+  }, [members, settlements, bookingTokens]);
+
+  const total = rows.length;
+  const completed = rows.filter((r) => r.status === "completed" || r.status === "exempt").length;
+  const scheduled = rows.filter((r) => r.status === "scheduled").length;
+  const remaining = rows.filter((r) => r.status === "not_started" || r.status === "invited");
+  const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+  async function copy(token: BookingToken) {
+    try {
+      await navigator.clipboard.writeText(bookingUrl(token.token));
+      setCopiedId(token.id);
+      setTimeout(() => setCopiedId((c) => (c === token.id ? null : c)), 1800);
+    } catch {
+      // Clipboard may be blocked; ignore.
+    }
+  }
+
+  if (total === 0) {
+    return (
+      <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+        No active ward members yet. Add members to track tithing settlement.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Progress header */}
+      <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold">{SETTLEMENT_YEAR} Tithing Settlement</p>
+            <p className="text-xs text-muted-foreground">
+              {completed} of {total} done · {scheduled} scheduled · {remaining.length} to go
+            </p>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1.5"
+            disabled={remaining.length === 0}
+            onClick={() => onGenerateAll(remaining.map((r) => r.member))}
+          >
+            <Link2 className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Generate all remaining</span>
+            <span className="sm:hidden">All links</span>
+          </Button>
+        </div>
+        <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+          <div className="h-full rounded-full bg-green-500 transition-all" style={{ width: `${pct}%` }} />
+        </div>
+      </div>
+
+      {/* Roster */}
+      <div className="rounded-xl border border-border bg-card divide-y divide-border overflow-hidden">
+        {rows.map((r) => (
+          <div key={r.member.id} className="flex flex-wrap items-center gap-3 p-3">
+            <div className="h-8 w-8 rounded-full flex items-center justify-center text-xs font-semibold shrink-0 bg-primary/10 text-primary">
+              {getInitials(r.name)}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium truncate">{r.name}</p>
+              {r.record?.declaredStatus && (
+                <p className="text-[11px] text-muted-foreground truncate">
+                  Declared: {DECLARED_STATUS_LABELS[r.record.declaredStatus]}
+                </p>
+              )}
+            </div>
+
+            <Badge className={cn("text-[10px] shrink-0", SETTLEMENT_STATUS_COLORS[r.status])}>
+              {SETTLEMENT_STATUS_LABELS[r.status]}
+            </Badge>
+
+            {/* Link actions */}
+            {r.token ? (
+              <Button size="sm" variant="ghost" className="h-8 gap-1 text-xs" onClick={() => copy(r.token!)}>
+                {copiedId === r.token.id ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+                {copiedId === r.token.id ? "Copied" : "Copy link"}
+              </Button>
+            ) : (
+              <Button size="sm" variant="ghost" className="h-8 gap-1 text-xs" onClick={() => onGenerate(r.member)}>
+                <Link2 className="h-3.5 w-3.5" /> Generate link
+              </Button>
+            )}
+
+            {/* Status control */}
+            <Select value={r.status} onValueChange={(v) => onSetStatus(r.member, r.record, v as SettlementStatus)}>
+              <SelectTrigger className="h-8 w-[130px] text-xs shrink-0"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {SETTLEMENT_STATUSES.map((s) => (
+                  <SelectItem key={s} value={s}>{SETTLEMENT_STATUS_LABELS[s]}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {/* Declared status, once completed */}
+            {r.status === "completed" && (
+              <Select
+                value={r.record?.declaredStatus ?? ""}
+                onValueChange={(v) => onSetDeclared(r.member, r.record, v as DeclaredTithingStatus)}
+              >
+                <SelectTrigger className="h-8 w-[130px] text-xs shrink-0">
+                  <SelectValue placeholder="Declared…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {DECLARED_STATUSES.map((s) => (
+                    <SelectItem key={s} value={s}>{DECLARED_STATUS_LABELS[s]}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -919,7 +1117,7 @@ function StageAdvancePanel({
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
-type PageView = "board" | "availability";
+type PageView = "board" | "settlement" | "availability";
 
 const EMPTY_FORM = {
   memberName: "",
@@ -932,7 +1130,16 @@ const EMPTY_FORM = {
   notes: "",
 };
 
-const EMPTY_BLOCK = { open: false, member: null as BishopricMember | null, weekday: 2, startTime: "18:00", endTime: "19:00" };
+const EMPTY_BLOCK = {
+  open: false,
+  member: null as BishopricMember | null,
+  weekday: 2,
+  startTime: "18:00",
+  endTime: "19:00",
+  recurrence: "weekly" as AvailabilityRecurrence,
+  intervalWeeks: 2,
+  nth: 1,
+};
 const EMPTY_EXCEPTION = { open: false, member: null as BishopricMember | null, startDate: "", endDate: "", reason: "" };
 
 export default function InterviewsPage() {
@@ -941,9 +1148,14 @@ export default function InterviewsPage() {
   const interviewsCol  = data.interviews;
   const availabilityCol = data.availability;
   const exceptionsCol  = data.exceptions;
+  const settlementsCol = data.settlements;
+  const bookingTokensCol = data.bookingTokens;
   const interviews   = interviewsCol.items;
   const availability = availabilityCol.items;
   const exceptions   = exceptionsCol.items;
+  const settlements  = settlementsCol.items;
+  const bookingTokens = bookingTokensCol.items;
+  const members      = data.members;
   const bishopric    = data.bishopric;
 
   const INTERVIEWERS = useMemo(() => deriveInterviewers(bishopric), [bishopric]);
@@ -1092,6 +1304,8 @@ export default function InterviewsPage() {
   async function saveBlock() {
     if (!blockForm.member || blockForm.startTime >= blockForm.endTime) return;
     const m = blockForm.member;
+    const rec = blockForm.recurrence;
+    const usesInterval = rec === "biweekly" || rec === "every_n_weeks";
     await availabilityCol.create({
       id: newId(),
       memberId: m.id,
@@ -1099,6 +1313,12 @@ export default function InterviewsPage() {
       weekday: blockForm.weekday,
       startTime: blockForm.startTime,
       endTime: blockForm.endTime,
+      recurrence: rec,
+      // every_n_weeks carries the interval; biweekly is implicitly 2.
+      intervalWeeks: rec === "every_n_weeks" ? blockForm.intervalWeeks : undefined,
+      nth: rec === "nth_weekday" ? blockForm.nth : undefined,
+      // Phase interval recurrences from today (this week counts as "on").
+      anchorDate: usesInterval ? TODAY : undefined,
     });
     setBlockForm(EMPTY_BLOCK);
   }
@@ -1119,9 +1339,94 @@ export default function InterviewsPage() {
     setExceptionForm(EMPTY_EXCEPTION);
   }
 
+  // ── Settlement handlers ────────────────────────────────────────────────────
+
+  const memberName = (m: Member) => `${m.firstName} ${m.lastName}`;
+
+  /** Create (or reuse) this year's settlement record + a personalized booking link. */
+  async function generateLink(m: Member) {
+    const now = new Date().toISOString();
+    let record = settlements.find((s) => s.memberId === m.id && s.year === SETTLEMENT_YEAR);
+    if (!record) {
+      record = {
+        id: newId(),
+        memberId: m.id,
+        memberName: memberName(m),
+        year: SETTLEMENT_YEAR,
+        status: "invited",
+        createdBy: user?.uid ?? "mock",
+        createdAt: now,
+        updatedAt: now,
+      };
+      await settlementsCol.create(record);
+    } else if (record.status === "not_started") {
+      await settlementsCol.update(record.id, { status: "invited" });
+    }
+    const token: BookingToken = {
+      id: newId(),
+      token: generateToken(),
+      memberId: m.id,
+      memberName: memberName(m),
+      purpose: "tithing_settlement",
+      year: SETTLEMENT_YEAR,
+      settlementRecordId: record.id,
+      createdBy: user?.uid ?? "mock",
+      createdAt: now,
+      updatedAt: now,
+    };
+    await bookingTokensCol.create(token);
+  }
+
+  async function generateAll(ms: Member[]) {
+    for (const m of ms) {
+      const hasToken = bookingTokens.some(
+        (t) => t.memberId === m.id && t.year === SETTLEMENT_YEAR && !t.usedAt,
+      );
+      if (!hasToken) await generateLink(m);
+    }
+  }
+
+  async function setSettlementStatus(
+    m: Member, record: SettlementRecord | undefined, status: SettlementStatus,
+  ) {
+    const now = new Date().toISOString();
+    if (record) {
+      await settlementsCol.update(record.id, { status });
+    } else {
+      await settlementsCol.create({
+        id: newId(), memberId: m.id, memberName: memberName(m), year: SETTLEMENT_YEAR,
+        status, createdBy: user?.uid ?? "mock", createdAt: now, updatedAt: now,
+      });
+    }
+  }
+
+  async function setDeclared(
+    m: Member, record: SettlementRecord | undefined, declared: DeclaredTithingStatus,
+  ) {
+    const now = new Date().toISOString();
+    if (record) {
+      await settlementsCol.update(record.id, { declaredStatus: declared });
+    } else {
+      await settlementsCol.create({
+        id: newId(), memberId: m.id, memberName: memberName(m), year: SETTLEMENT_YEAR,
+        status: "completed", declaredStatus: declared,
+        createdBy: user?.uid ?? "mock", createdAt: now, updatedAt: now,
+      });
+    }
+  }
+
+  // ── Settlement counts (for the tab badge / header) ──────────────────────────
+  const activeMemberCount = members.filter((m) => m.isActive).length;
+  const settlementDone = members.filter((m) => {
+    const r = settlements.find((s) => s.memberId === m.id && s.year === SETTLEMENT_YEAR);
+    return m.isActive && (r?.status === "completed" || r?.status === "exempt");
+  }).length;
+  const settlementRemaining = activeMemberCount - settlementDone;
+
   const TAB_CONFIG: { view: PageView; label: string; count?: number }[] = [
-    { view: "board",        label: "Board",        count: needsScheduling + toReview },
-    { view: "availability", label: "Availability", count: availability.length },
+    { view: "board",        label: "Board",              count: needsScheduling + toReview },
+    { view: "settlement",   label: "Tithing Settlement", count: settlementRemaining },
+    { view: "availability", label: "Availability",       count: availability.length },
   ];
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -1132,7 +1437,7 @@ export default function InterviewsPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Interviews</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Scheduling</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             {needsScheduling} to schedule
             {pending > 0 && (
@@ -1190,6 +1495,18 @@ export default function InterviewsPage() {
       {/* ── Views ── */}
       {view === "board" && (
         <KanbanView interviews={interviews} onSelect={setSelected} onMove={handleMove} />
+      )}
+
+      {view === "settlement" && (
+        <SettlementView
+          members={members}
+          settlements={settlements}
+          bookingTokens={bookingTokens}
+          onGenerate={(m) => { void generateLink(m); }}
+          onGenerateAll={(ms) => { void generateAll(ms); }}
+          onSetStatus={(m, r, s) => { void setSettlementStatus(m, r, s); }}
+          onSetDeclared={(m, r, d) => { void setDeclared(m, r, d); }}
+        />
       )}
 
       {view === "availability" && (
@@ -1395,6 +1712,50 @@ export default function InterviewsPage() {
                 </SelectContent>
               </Select>
             </div>
+            <div className="space-y-1.5">
+              <Label>Repeats</Label>
+              <Select
+                value={blockForm.recurrence}
+                onValueChange={(v) => setBlockForm((f) => ({ ...f, recurrence: v as AvailabilityRecurrence }))}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {(Object.keys(RECURRENCE_LABELS) as AvailabilityRecurrence[]).map((r) => (
+                    <SelectItem key={r} value={r}>{RECURRENCE_LABELS[r]}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {blockForm.recurrence === "every_n_weeks" && (
+              <div className="space-y-1.5">
+                <Label htmlFor="intWeeks">Every how many weeks?</Label>
+                <Input
+                  id="intWeeks" type="number" min={2} max={12}
+                  value={blockForm.intervalWeeks}
+                  onChange={(e) => setBlockForm((f) => ({ ...f, intervalWeeks: Math.max(2, Number(e.target.value) || 2) }))}
+                />
+                <p className="text-xs text-muted-foreground">Counting from this week.</p>
+              </div>
+            )}
+
+            {blockForm.recurrence === "nth_weekday" && (
+              <div className="space-y-1.5">
+                <Label>Which {WEEKDAY_LABELS[blockForm.weekday]} of the month?</Label>
+                <Select
+                  value={String(blockForm.nth)}
+                  onValueChange={(v) => setBlockForm((f) => ({ ...f, nth: Number(v) }))}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {[1, 2, 3, 4, 5, -1].map((n) => (
+                      <SelectItem key={n} value={String(n)}>{NTH_LABELS[n]} {WEEKDAY_LABELS[blockForm.weekday]}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label htmlFor="blkStart">From</Label>

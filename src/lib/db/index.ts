@@ -10,6 +10,8 @@ import type {
   Meeting,
   Member,
   RosterGroup,
+  SettlementRecord,
+  BookingToken,
   Task,
   UserRole,
   WardInfo,
@@ -75,6 +77,8 @@ export const availabilityRepo = repo<AvailabilityBlock>("availability_blocks", {
 export const availabilityExceptionsRepo = repo<AvailabilityException>("availability_exceptions", { column: "start_date" });
 export const tasksRepo = repo<Task>("tasks", { column: "created_at", ascending: false });
 export const solicitationsRepo = repo<AgendaSolicitation>("agenda_solicitations", { column: "created_at", ascending: false });
+export const settlementRepo = repo<SettlementRecord>("settlement_records", { column: "member_name" });
+export const bookingTokensRepo = repo<BookingToken>("booking_tokens", { column: "created_at", ascending: false });
 
 // ── Roster groups: ordered org chart. Rows carry id/position the model omits. ──
 export const rosterRepo = {

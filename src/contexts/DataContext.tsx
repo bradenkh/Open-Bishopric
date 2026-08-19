@@ -30,12 +30,14 @@ import {
   announcementsRepo,
   availabilityExceptionsRepo,
   availabilityRepo,
+  bookingTokensRepo,
   callingsRepo,
   interviewsRepo,
   listProfiles,
   meetingsRepo,
   membersRepo,
   rosterRepo,
+  settlementRepo,
   solicitationsRepo,
   tasksRepo,
   wardInfoRepo,
@@ -48,11 +50,13 @@ import type {
   AvailabilityException,
   BishopricMember,
   BishopricRole,
+  BookingToken,
   Calling,
   Interview,
   Meeting,
   Member,
   RosterGroup,
+  SettlementRecord,
   Task,
   WardInfo,
 } from "@/types";
@@ -89,6 +93,10 @@ interface DataContextValue {
   solicitations: Collection<AgendaSolicitation>;
   availability: Collection<AvailabilityBlock>;
   exceptions: Collection<AvailabilityException>;
+  /** Ward-wide tithing-settlement records (one per member per year). */
+  settlements: Collection<SettlementRecord>;
+  /** Personalized self-signup booking links. */
+  bookingTokens: Collection<BookingToken>;
 
   members: Member[];
   /** Everyone with a login. The settings screen manages these. */
@@ -179,6 +187,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const [solicitations, setSolicitations] = useState<AgendaSolicitation[]>([]);
   const [availability, setAvailability] = useState<AvailabilityBlock[]>([]);
   const [exceptions, setExceptions] = useState<AvailabilityException[]>([]);
+  const [settlements, setSettlements] = useState<SettlementRecord[]>([]);
+  const [bookingTokens, setBookingTokens] = useState<BookingToken[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [profiles, setProfiles] = useState<AppUser[]>([]);
@@ -218,6 +228,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       solicitationsData,
       availabilityData,
       exceptionsData,
+      settlementsData,
+      bookingTokensData,
       tasksData,
       membersData,
       profilesData,
@@ -231,6 +243,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       solicitationsRepo.list(db),
       availabilityRepo.list(db),
       availabilityExceptionsRepo.list(db),
+      settlementRepo.list(db),
+      bookingTokensRepo.list(db),
       tasksRepo.list(db),
       membersRepo.list(db),
       listProfiles(db),
@@ -244,6 +258,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     setSolicitations(solicitationsData);
     setAvailability(availabilityData);
     setExceptions(exceptionsData);
+    setSettlements(settlementsData);
+    setBookingTokens(bookingTokensData);
     setTasks(tasksData);
     setMembers(membersData);
     setProfiles(profilesData);
@@ -432,6 +448,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       solicitations: makeCollection(db, solicitationsRepo, solicitations, setSolicitations),
       availability: makeCollection(db, availabilityRepo, availability, setAvailability),
       exceptions: makeCollection(db, availabilityExceptionsRepo, exceptions, setExceptions),
+      settlements: makeCollection(db, settlementRepo, settlements, setSettlements),
+      bookingTokens: makeCollection(db, bookingTokensRepo, bookingTokens, setBookingTokens),
       members,
       profiles,
       reloadProfiles,
@@ -459,6 +477,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       solicitations,
       availability,
       exceptions,
+      settlements,
+      bookingTokens,
       members,
       profiles,
       reloadProfiles,

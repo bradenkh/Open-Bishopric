@@ -24,7 +24,7 @@ const navItems = [
   { href: "/chat", label: "AI Assistant", icon: MessageSquare },
   { href: "/agendas", label: "Agendas", icon: ClipboardList },
   { href: "/sacrament", label: "Sacrament", icon: Lectern },
-  { href: "/interviews", label: "Interviews", icon: CalendarClock },
+  { href: "/interviews", label: "Scheduling", icon: CalendarClock },
   { href: "/callings", label: "Callings", icon: Church },
   { href: "/settings", label: "Settings", icon: Settings },
 ];

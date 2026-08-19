@@ -29,6 +29,51 @@ export function parseDate(dateStr: string): Date {
   return new Date(y, m - 1, d);
 }
 
+// ── Recurrence ───────────────────────────────────────────────────────────────
+
+/** A fixed Sunday epoch used to phase interval recurrences when no anchor is set. */
+const RECURRENCE_EPOCH = "2020-01-05"; // Sunday
+
+/** Whole weeks between two local dates (a ≤ b assumed for a non-negative result). */
+function weeksBetween(a: Date, b: Date): number {
+  const ms = b.getTime() - a.getTime();
+  return Math.floor(ms / (7 * 24 * 60 * 60 * 1000));
+}
+
+/**
+ * The 1-indexed occurrence of `date`'s weekday within its month (e.g. the 2nd
+ * Tuesday → 2), and whether it is the last such weekday in the month.
+ */
+function weekdayOccurrence(date: Date): { nth: number; isLast: boolean } {
+  const nth = Math.floor((date.getDate() - 1) / 7) + 1;
+  const next = new Date(date);
+  next.setDate(date.getDate() + 7);
+  return { nth, isLast: next.getMonth() !== date.getMonth() };
+}
+
+/**
+ * Whether a recurring availability block is active on a given local date.
+ * The weekday must match first; then the recurrence pattern is applied.
+ * Blocks with no recurrence set behave as plain weekly (backward compatible).
+ */
+export function blockAppliesOn(block: AvailabilityBlock, date: Date): boolean {
+  if (block.weekday !== date.getDay()) return false;
+
+  const recurrence = block.recurrence ?? "weekly";
+  if (recurrence === "weekly") return true;
+
+  if (recurrence === "nth_weekday") {
+    const target = block.nth ?? 1;
+    const { nth, isLast } = weekdayOccurrence(date);
+    return target === -1 ? isLast : nth === target;
+  }
+
+  // biweekly / every_n_weeks: count matching weeks from the phase anchor.
+  const interval = recurrence === "biweekly" ? 2 : Math.max(1, block.intervalWeeks ?? 2);
+  const anchor = parseDate(block.anchorDate ?? RECURRENCE_EPOCH);
+  return weeksBetween(anchor, date) % interval === 0;
+}
+
 export function durationOf(i: Pick<Interview, "durationMins" | "type">): number {
   return i.durationMins ?? INTERVIEW_DURATION_MINS[i.type];
 }
@@ -126,10 +171,9 @@ export function generateSlots({
     const date = new Date(now);
     date.setDate(now.getDate() + offset);
     const dateStr = toDateStr(date);
-    const weekday = date.getDay();
 
     for (const block of relevantBlocks) {
-      if (block.weekday !== weekday) continue;
+      if (!blockAppliesOn(block, date)) continue;
       if (isWithinException(exceptions, block.memberId, dateStr)) continue;
 
       const booked = bookedRanges(interviews, block.memberName, dateStr, ignoreInterviewId);
