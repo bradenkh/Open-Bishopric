@@ -73,6 +73,18 @@ export async function GET(
     });
   }
 
+  // Record the open: first-open timestamp + a running count. Best-effort — a
+  // tracking failure must not block the member from seeing their slots.
+  const nowIso = new Date().toISOString();
+  try {
+    await admin
+      .from("booking_tokens")
+      .update({ opened_at: record.openedAt ?? nowIso, open_count: (record.openCount ?? 0) + 1 })
+      .eq("id", record.id);
+  } catch {
+    // tracking is non-critical
+  }
+
   const [blocks, exceptions, interviews] = await Promise.all([
     availabilityRepo.list(admin),
     availabilityExceptionsRepo.list(admin),

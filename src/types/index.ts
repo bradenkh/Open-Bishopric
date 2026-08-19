@@ -639,6 +639,10 @@ export interface BookingToken {
   settlementRecordId?: string;
   /** ISO timestamp; the link is dead after this (optional). */
   expiresAt?: string;
+  /** ISO timestamp of the first time the link was opened (null = never opened). */
+  openedAt?: string;
+  /** How many times the link has been opened. */
+  openCount?: number;
   /** ISO timestamp set once the link has been used to book. */
   usedAt?: string;
   /** The interview created when the link was used. */

@@ -5,7 +5,7 @@ import {
   Plus, CalendarClock, Clock, User, GripVertical, CalendarPlus,
   CheckCircle2, AlertTriangle, Pencil, RotateCcw,
   CalendarDays, CalendarOff, Trash2, Check, Link2, Copy, Repeat, Search, Send,
-  ChevronLeft, ChevronRight, List, Columns3,
+  ChevronLeft, ChevronRight, List, Columns3, Download, Eye,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1038,6 +1038,45 @@ function bookingUrl(token: string): string {
   return `${origin}/book/${token}`;
 }
 
+/** Short relative time, e.g. "3d ago", for link-open timestamps. */
+function timeAgo(iso: string): string {
+  const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
+/** CSV-escape a cell (quote if it contains a comma, quote, or newline). */
+function csvCell(v?: string): string {
+  const s = v ?? "";
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+/** Build and download a CSV of every member's settlement status + booking link. */
+function downloadSettlementCsv(rows: SettlementRowState[]) {
+  const header = ["Name", "Email", "Phone", "Status", "Opened", "Booking Link", "Scheduled"];
+  const lines = rows.map((r) => {
+    const opened = r.token?.openedAt ? `Yes (${r.token.openCount ?? 1}x)` : r.token ? "No" : "";
+    const link = r.token ? bookingUrl(r.token.token) : "";
+    const sched = r.interview?.scheduledDate
+      ? [r.interview.scheduledDate, r.interview.scheduledTime, r.interview.interviewer].filter(Boolean).join(" ")
+      : "";
+    return [r.name, r.member.email, r.member.phone, SETTLEMENT_STATUS_LABELS[r.status], opened, link, sched]
+      .map(csvCell)
+      .join(",");
+  });
+  const csv = [header.join(","), ...lines].join("\r\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `tithing-settlement-${SETTLEMENT_YEAR}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 /** Progress ring: a single green arc showing percent complete, big % in center. */
 function ProgressRing({ pct }: { pct: number }) {
   const r = 34;
@@ -1123,6 +1162,7 @@ function SettlementView({
   const count = (s: SettlementSegment) => rows.filter((r) => inSegment(r, s)).length;
   const completedN = rows.filter((r) => r.status === "completed" || r.status === "exempt").length;
   const invitedN = count("invited");
+  const openedNotBooked = rows.filter((r) => r.status === "invited" && r.token?.openedAt).length;
   const remaining = rows.filter((r) => r.status === "not_started" || r.status === "invited");
   const pct = total > 0 ? Math.round((completedN / total) * 100) : 0;
 
@@ -1171,23 +1211,31 @@ function SettlementView({
                   {completedN} of {total} complete · {remaining.length} to go
                 </p>
               </div>
-              <Button
-                size="sm"
-                variant="outline"
-                className="gap-1.5 shrink-0"
-                disabled={remaining.length === 0}
-                onClick={() => onGenerateAll(remaining.map((r) => r.member))}
-              >
-                <Link2 className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Generate all remaining</span>
-                <span className="sm:hidden">All links</span>
-              </Button>
+              <div className="flex gap-2 shrink-0">
+                <Button size="sm" variant="outline" className="gap-1.5" onClick={() => downloadSettlementCsv(rows)}>
+                  <Download className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Export CSV</span>
+                  <span className="sm:hidden">CSV</span>
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1.5"
+                  disabled={remaining.length === 0}
+                  onClick={() => onGenerateAll(remaining.map((r) => r.member))}
+                >
+                  <Link2 className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Generate all remaining</span>
+                  <span className="sm:hidden">All links</span>
+                </Button>
+              </div>
             </div>
             <BreakdownBar rows={rows} />
           </div>
         </div>
 
-        {/* Follow-up nudge: invited but not yet booked is where a sprint stalls. */}
+        {/* Follow-up nudge: invited but not yet booked is where a sprint stalls.
+            "Opened but didn't book" is the hotter signal, so it leads. */}
         {invitedN > 0 && (
           <button
             type="button"
@@ -1195,7 +1243,11 @@ function SettlementView({
             className="mt-3 flex w-full items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-left text-xs text-amber-800 transition-colors hover:bg-amber-100 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-200 dark:hover:bg-amber-900/40"
           >
             <Send className="h-3.5 w-3.5 shrink-0" />
-            <span><strong>{invitedN}</strong> {invitedN === 1 ? "person has" : "people have"} a link but haven&apos;t booked yet — follow up.</span>
+            {openedNotBooked > 0 ? (
+              <span><strong>{openedNotBooked}</strong> opened their link but haven&apos;t booked yet — good time to follow up.</span>
+            ) : (
+              <span><strong>{invitedN}</strong> {invitedN === 1 ? "person has" : "people have"} a link but haven&apos;t opened it yet.</span>
+            )}
           </button>
         )}
       </div>
@@ -1266,6 +1318,16 @@ function SettlementView({
                 {!r.interview?.scheduledDate && r.record?.declaredStatus && (
                   <p className="text-[11px] text-muted-foreground truncate">
                     Declared: {DECLARED_STATUS_LABELS[r.record.declaredStatus]}
+                  </p>
+                )}
+                {/* Link-open signal, for members invited but not yet booked. */}
+                {r.status === "invited" && r.token && (
+                  <p className={cn(
+                    "flex items-center gap-1 text-[11px] truncate",
+                    r.token.openedAt ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground",
+                  )}>
+                    <Eye className="h-3 w-3 shrink-0" />
+                    {r.token.openedAt ? `Opened ${timeAgo(r.token.openedAt)} · not booked` : "Link not opened yet"}
                   </p>
                 )}
               </div>
