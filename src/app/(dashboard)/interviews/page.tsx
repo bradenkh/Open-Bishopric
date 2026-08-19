@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import {
   Plus, CalendarClock, Clock, User, GripVertical, CalendarPlus,
   CheckCircle2, AlertTriangle, Pencil, RotateCcw,
-  CalendarDays, CalendarOff, Trash2, Check, Link2, Copy, Repeat,
+  CalendarDays, CalendarOff, Trash2, Check, Link2, Copy, Repeat, Search, Send,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -717,11 +717,14 @@ function AvailabilityView({
 
 // ── Tithing Settlement View ─────────────────────────────────────────────────────
 
+type SettlementSegment = "all" | "not_started" | "invited" | "scheduled" | "done";
+
 interface SettlementRowState {
   member: Member;
   name: string;
   record?: SettlementRecord;
   token?: BookingToken;
+  interview?: Interview;
   status: SettlementStatus;
 }
 
@@ -729,6 +732,7 @@ interface SettlementViewProps {
   members: Member[];
   settlements: SettlementRecord[];
   bookingTokens: BookingToken[];
+  interviews: Interview[];
   onGenerate: (member: Member) => void;
   onGenerateAll: (members: Member[]) => void;
   onSetStatus: (member: Member, record: SettlementRecord | undefined, status: SettlementStatus) => void;
@@ -740,10 +744,66 @@ function bookingUrl(token: string): string {
   return `${origin}/book/${token}`;
 }
 
+/** Progress ring: a single green arc showing percent complete, big % in center. */
+function ProgressRing({ pct }: { pct: number }) {
+  const r = 34;
+  const c = 2 * Math.PI * r;
+  const filled = (Math.min(100, Math.max(0, pct)) / 100) * c;
+  return (
+    <svg viewBox="0 0 80 80" className="h-20 w-20 shrink-0 -rotate-90" aria-hidden>
+      <circle cx="40" cy="40" r={r} fill="none" strokeWidth="8" className="stroke-muted" />
+      <circle
+        cx="40" cy="40" r={r} fill="none" strokeWidth="8" strokeLinecap="round"
+        className="stroke-green-500 transition-all duration-500"
+        strokeDasharray={`${filled} ${c - filled}`}
+      />
+      <text x="40" y="40" transform="rotate(90 40 40)" textAnchor="middle" dominantBaseline="central"
+        className="fill-foreground font-bold" style={{ fontSize: 18 }}>
+        {pct}%
+      </text>
+    </svg>
+  );
+}
+
+/** Ordered status segments for the breakdown bar + legend (colored dots). */
+const BREAKDOWN: { key: SettlementStatus[]; label: string; bar: string; dot: string }[] = [
+  { key: ["completed", "exempt"], label: "Done",      bar: "bg-green-500",  dot: "bg-green-500" },
+  { key: ["scheduled"],           label: "Scheduled", bar: "bg-blue-500",   dot: "bg-blue-500" },
+  { key: ["invited"],             label: "Invited",   bar: "bg-amber-400",  dot: "bg-amber-400" },
+  { key: ["declined"],            label: "Declined",  bar: "bg-red-400",    dot: "bg-red-400" },
+  { key: ["not_started"],         label: "Not started", bar: "bg-muted-foreground/30", dot: "bg-muted-foreground/40" },
+];
+
+function BreakdownBar({ rows }: { rows: SettlementRowState[] }) {
+  const total = rows.length || 1;
+  const seg = BREAKDOWN.map((b) => ({
+    ...b,
+    n: rows.filter((r) => b.key.includes(r.status)).length,
+  }));
+  return (
+    <div className="space-y-2">
+      <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-muted">
+        {seg.map((s) => s.n > 0 && (
+          <div key={s.label} className={cn("h-full", s.bar)} style={{ width: `${(s.n / total) * 100}%` }} />
+        ))}
+      </div>
+      <div className="flex flex-wrap gap-x-3 gap-y-1">
+        {seg.filter((s) => s.n > 0).map((s) => (
+          <span key={s.label} className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <span className={cn("h-2 w-2 rounded-full", s.dot)} /> {s.label} <span className="font-semibold text-foreground">{s.n}</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function SettlementView({
-  members, settlements, bookingTokens, onGenerate, onGenerateAll, onSetStatus, onSetDeclared,
+  members, settlements, bookingTokens, interviews, onGenerate, onGenerateAll, onSetStatus, onSetDeclared,
 }: SettlementViewProps) {
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [segment, setSegment] = useState<SettlementSegment>("all");
 
   const rows: SettlementRowState[] = useMemo(() => {
     const active = members.filter((m) => m.isActive);
@@ -753,15 +813,29 @@ function SettlementView({
       const token = bookingTokens
         .filter((t) => t.memberId === m.id && t.year === SETTLEMENT_YEAR && !t.usedAt)
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
-      return { member: m, name, record, token, status: record?.status ?? "not_started" };
+      const interview = record?.interviewId
+        ? interviews.find((i) => i.id === record.interviewId)
+        : undefined;
+      return { member: m, name, record, token, interview, status: record?.status ?? "not_started" };
     });
-  }, [members, settlements, bookingTokens]);
+  }, [members, settlements, bookingTokens, interviews]);
 
   const total = rows.length;
-  const completed = rows.filter((r) => r.status === "completed" || r.status === "exempt").length;
-  const scheduled = rows.filter((r) => r.status === "scheduled").length;
+  const inSegment = (r: SettlementRowState, s: SettlementSegment) =>
+    s === "all" ? true
+    : s === "done" ? (r.status === "completed" || r.status === "exempt" || r.status === "declined")
+    : r.status === s;
+
+  const count = (s: SettlementSegment) => rows.filter((r) => inSegment(r, s)).length;
+  const completedN = rows.filter((r) => r.status === "completed" || r.status === "exempt").length;
+  const invitedN = count("invited");
   const remaining = rows.filter((r) => r.status === "not_started" || r.status === "invited");
-  const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+  const pct = total > 0 ? Math.round((completedN / total) * 100) : 0;
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return rows.filter((r) => inSegment(r, segment) && (!q || r.name.toLowerCase().includes(q)));
+  }, [rows, segment, query]);
 
   async function copy(token: BookingToken) {
     try {
@@ -781,95 +855,175 @@ function SettlementView({
     );
   }
 
+  const SEGMENTS: { seg: SettlementSegment; label: string }[] = [
+    { seg: "all",         label: "All" },
+    { seg: "not_started", label: "Not started" },
+    { seg: "invited",     label: "Invited" },
+    { seg: "scheduled",   label: "Scheduled" },
+    { seg: "done",        label: "Done" },
+  ];
+
   return (
     <div className="space-y-4">
-      {/* Progress header */}
-      <div className="rounded-xl border border-border bg-card p-4 space-y-3">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-sm font-semibold">{SETTLEMENT_YEAR} Tithing Settlement</p>
-            <p className="text-xs text-muted-foreground">
-              {completed} of {total} done · {scheduled} scheduled · {remaining.length} to go
-            </p>
+      {/* Progress header: ring + breakdown + bulk action */}
+      <div className="rounded-xl border border-border bg-card p-4">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+          <ProgressRing pct={pct} />
+          <div className="min-w-0 flex-1 space-y-2">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold">{SETTLEMENT_YEAR} Tithing Settlement</p>
+                <p className="text-xs text-muted-foreground">
+                  {completedN} of {total} complete · {remaining.length} to go
+                </p>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5 shrink-0"
+                disabled={remaining.length === 0}
+                onClick={() => onGenerateAll(remaining.map((r) => r.member))}
+              >
+                <Link2 className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Generate all remaining</span>
+                <span className="sm:hidden">All links</span>
+              </Button>
+            </div>
+            <BreakdownBar rows={rows} />
           </div>
-          <Button
-            size="sm"
-            variant="outline"
-            className="gap-1.5"
-            disabled={remaining.length === 0}
-            onClick={() => onGenerateAll(remaining.map((r) => r.member))}
-          >
-            <Link2 className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">Generate all remaining</span>
-            <span className="sm:hidden">All links</span>
-          </Button>
         </div>
-        <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-          <div className="h-full rounded-full bg-green-500 transition-all" style={{ width: `${pct}%` }} />
+
+        {/* Follow-up nudge: invited but not yet booked is where a sprint stalls. */}
+        {invitedN > 0 && (
+          <button
+            type="button"
+            onClick={() => setSegment("invited")}
+            className="mt-3 flex w-full items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-left text-xs text-amber-800 transition-colors hover:bg-amber-100 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-200 dark:hover:bg-amber-900/40"
+          >
+            <Send className="h-3.5 w-3.5 shrink-0" />
+            <span><strong>{invitedN}</strong> {invitedN === 1 ? "person has" : "people have"} a link but haven&apos;t booked yet — follow up.</span>
+          </button>
+        )}
+      </div>
+
+      {/* Filter chips + search */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap gap-1.5">
+          {SEGMENTS.map(({ seg, label }) => {
+            const n = count(seg);
+            const active = segment === seg;
+            return (
+              <button
+                key={seg}
+                type="button"
+                onClick={() => setSegment(seg)}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                  active
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-border text-muted-foreground hover:bg-accent",
+                )}
+              >
+                {label}
+                <span className={cn(
+                  "rounded-full px-1.5 text-[10px] font-bold tabular-nums",
+                  active ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground",
+                )}>
+                  {n}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="relative sm:w-56">
+          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search members…"
+            className="h-9 pl-8 text-sm"
+          />
         </div>
       </div>
 
       {/* Roster */}
-      <div className="rounded-xl border border-border bg-card divide-y divide-border overflow-hidden">
-        {rows.map((r) => (
-          <div key={r.member.id} className="flex flex-wrap items-center gap-3 p-3">
-            <div className="h-8 w-8 rounded-full flex items-center justify-center text-xs font-semibold shrink-0 bg-primary/10 text-primary">
-              {getInitials(r.name)}
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium truncate">{r.name}</p>
-              {r.record?.declaredStatus && (
-                <p className="text-[11px] text-muted-foreground truncate">
-                  Declared: {DECLARED_STATUS_LABELS[r.record.declaredStatus]}
-                </p>
+      {filtered.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+          No members match.
+        </div>
+      ) : (
+        <div className="rounded-xl border border-border bg-card divide-y divide-border overflow-hidden">
+          {filtered.map((r) => (
+            <div key={r.member.id} className="flex flex-wrap items-center gap-3 p-3">
+              <div className="h-8 w-8 rounded-full flex items-center justify-center text-xs font-semibold shrink-0 bg-primary/10 text-primary">
+                {getInitials(r.name)}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium truncate">{r.name}</p>
+                {/* Booked slot, once scheduled */}
+                {r.interview?.scheduledDate && (
+                  <p className="flex items-center gap-1 text-[11px] text-muted-foreground truncate">
+                    <CalendarClock className="h-3 w-3 shrink-0" />
+                    {formatDate(r.interview.scheduledDate)}
+                    {r.interview.scheduledTime ? ` · ${formatTime(r.interview.scheduledTime)}` : ""}
+                    {r.interview.interviewer ? ` · ${r.interview.interviewer}` : ""}
+                  </p>
+                )}
+                {!r.interview?.scheduledDate && r.record?.declaredStatus && (
+                  <p className="text-[11px] text-muted-foreground truncate">
+                    Declared: {DECLARED_STATUS_LABELS[r.record.declaredStatus]}
+                  </p>
+                )}
+              </div>
+
+              <Badge className={cn("text-[10px] shrink-0", SETTLEMENT_STATUS_COLORS[r.status])}>
+                {SETTLEMENT_STATUS_LABELS[r.status]}
+              </Badge>
+
+              {/* Link actions — only meaningful until a slot is booked */}
+              {r.status !== "scheduled" && r.status !== "completed" && (
+                r.token ? (
+                  <Button size="sm" variant="ghost" className="h-8 gap-1 text-xs" onClick={() => copy(r.token!)}>
+                    {copiedId === r.token.id ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+                    {copiedId === r.token.id ? "Copied" : "Copy link"}
+                  </Button>
+                ) : (
+                  <Button size="sm" variant="ghost" className="h-8 gap-1 text-xs" onClick={() => onGenerate(r.member)}>
+                    <Link2 className="h-3.5 w-3.5" /> Generate link
+                  </Button>
+                )
               )}
-            </div>
 
-            <Badge className={cn("text-[10px] shrink-0", SETTLEMENT_STATUS_COLORS[r.status])}>
-              {SETTLEMENT_STATUS_LABELS[r.status]}
-            </Badge>
-
-            {/* Link actions */}
-            {r.token ? (
-              <Button size="sm" variant="ghost" className="h-8 gap-1 text-xs" onClick={() => copy(r.token!)}>
-                {copiedId === r.token.id ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
-                {copiedId === r.token.id ? "Copied" : "Copy link"}
-              </Button>
-            ) : (
-              <Button size="sm" variant="ghost" className="h-8 gap-1 text-xs" onClick={() => onGenerate(r.member)}>
-                <Link2 className="h-3.5 w-3.5" /> Generate link
-              </Button>
-            )}
-
-            {/* Status control */}
-            <Select value={r.status} onValueChange={(v) => onSetStatus(r.member, r.record, v as SettlementStatus)}>
-              <SelectTrigger className="h-8 w-[130px] text-xs shrink-0"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {SETTLEMENT_STATUSES.map((s) => (
-                  <SelectItem key={s} value={s}>{SETTLEMENT_STATUS_LABELS[s]}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            {/* Declared status, once completed */}
-            {r.status === "completed" && (
-              <Select
-                value={r.record?.declaredStatus ?? ""}
-                onValueChange={(v) => onSetDeclared(r.member, r.record, v as DeclaredTithingStatus)}
-              >
-                <SelectTrigger className="h-8 w-[130px] text-xs shrink-0">
-                  <SelectValue placeholder="Declared…" />
-                </SelectTrigger>
+              {/* Status control */}
+              <Select value={r.status} onValueChange={(v) => onSetStatus(r.member, r.record, v as SettlementStatus)}>
+                <SelectTrigger className="h-8 w-[130px] text-xs shrink-0"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {DECLARED_STATUSES.map((s) => (
-                    <SelectItem key={s} value={s}>{DECLARED_STATUS_LABELS[s]}</SelectItem>
+                  {SETTLEMENT_STATUSES.map((s) => (
+                    <SelectItem key={s} value={s}>{SETTLEMENT_STATUS_LABELS[s]}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-            )}
-          </div>
-        ))}
-      </div>
+
+              {/* Declared status, once completed */}
+              {r.status === "completed" && (
+                <Select
+                  value={r.record?.declaredStatus ?? ""}
+                  onValueChange={(v) => onSetDeclared(r.member, r.record, v as DeclaredTithingStatus)}
+                >
+                  <SelectTrigger className="h-8 w-[130px] text-xs shrink-0">
+                    <SelectValue placeholder="Declared…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DECLARED_STATUSES.map((s) => (
+                      <SelectItem key={s} value={s}>{DECLARED_STATUS_LABELS[s]}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -1502,6 +1656,7 @@ export default function InterviewsPage() {
           members={members}
           settlements={settlements}
           bookingTokens={bookingTokens}
+          interviews={interviews}
           onGenerate={(m) => { void generateLink(m); }}
           onGenerateAll={(ms) => { void generateAll(ms); }}
           onSetStatus={(m, r, s) => { void setSettlementStatus(m, r, s); }}
