@@ -107,6 +107,14 @@ interface GenerateArgs {
   days?: number;
   /** Exclude a booked interview from the conflict check (so editing keeps its slot). */
   ignoreInterviewId?: string;
+  /**
+   * Keep each interviewer's day contiguous. Once a day has any booking, only
+   * offer slots flush against an existing booking (or the first slot of a still
+   * -empty availability block) — so self-bookings pack together instead of
+   * leaving unusable gaps. The first booking of a day is still free to land
+   * anywhere. Off by default (the bishopric picker shows the full grid).
+   */
+  packAdjacent?: boolean;
 }
 
 function isWithinException(
@@ -154,6 +162,7 @@ export function generateSlots({
   interviews,
   days = 28,
   ignoreInterviewId,
+  packAdjacent = false,
 }: GenerateArgs): Slot[] {
   if (durationMins <= 0) return [];
 
@@ -180,6 +189,11 @@ export function generateSlots({
       const blockStart = toMinutes(block.startTime);
       const blockEnd = toMinutes(block.endTime);
 
+      // Packing state: whether this interviewer has any booking today, and which
+      // of their bookings fall inside this block (for the adjacency test).
+      const hasBookingToday = booked.length > 0;
+      const blockBookings = booked.filter(([bs]) => bs >= blockStart && bs < blockEnd);
+
       for (let start = blockStart; start + durationMins <= blockEnd; start += durationMins) {
         const end = start + durationMins;
         // Skip slots already in the past today.
@@ -187,6 +201,16 @@ export function generateSlots({
         // Skip slots that overlap an existing booking.
         const conflict = booked.some(([bs, be]) => start < be && end > bs);
         if (conflict) continue;
+
+        // Smart packing: once the day has a booking, keep the schedule
+        // contiguous — a slot must be flush against a booking in this block,
+        // or (if the block is still empty) be the block's first slot.
+        if (packAdjacent && hasBookingToday) {
+          const ok = blockBookings.length > 0
+            ? blockBookings.some(([bs, be]) => end === bs || start === be)
+            : start === blockStart;
+          if (!ok) continue;
+        }
 
         slots.push({
           date: dateStr,

@@ -84,6 +84,8 @@ export async function GET(
     blocks,
     exceptions,
     interviews,
+    // Keep each interviewer's day contiguous as members self-book.
+    packAdjacent: true,
   });
 
   return NextResponse.json({
@@ -134,6 +136,8 @@ export async function POST(
     blocks,
     exceptions,
     interviews,
+    // Keep each interviewer's day contiguous as members self-book.
+    packAdjacent: true,
   });
   const stillOpen = slots.some(
     (s) => s.date === date && s.time === time && s.memberName === interviewer,
