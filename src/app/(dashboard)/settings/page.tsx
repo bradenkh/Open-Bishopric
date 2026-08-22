@@ -191,17 +191,25 @@ function AIAssistantCard() {
   const [saving, setSaving] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState("");
+  // Set when the initial load itself failed (vs. an error from a later action),
+  // so we can show the reason instead of spinning forever.
+  const [loadError, setLoadError] = useState("");
 
-  useEffect(() => {
+  const load = () => {
+    setLoadError("");
     fetch("/api/settings/ai")
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.error) { setError(data.error); return; }
+      .then(async (r) => {
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok || data.error) {
+          throw new Error(data.error || `Couldn't load AI settings (HTTP ${r.status}).`);
+        }
         setConfigs(data.configs);
         setActiveId(data.activeConfigId);
       })
-      .catch(() => setError("Couldn't load AI settings."));
-  }, []);
+      .catch((e) => setLoadError(e instanceof Error ? e.message : "Couldn't load AI settings."));
+  };
+
+  useEffect(load, []);
 
   const openNew = () => {
     setDraft(BLANK_DRAFT);
@@ -321,7 +329,17 @@ function AIAssistantCard() {
           server and never shown here.
         </p>
 
-        {configs === null ? (
+        {configs === null && loadError ? (
+          <div className="space-y-3 rounded-lg border border-destructive/40 bg-destructive/5 p-4">
+            <p className="text-sm text-destructive">{loadError}</p>
+            <p className="text-xs text-muted-foreground">
+              If this mentions a missing table or column (e.g. <code>ai_configs</code>), the
+              database schema hasn&rsquo;t been updated yet — apply pending migrations with{" "}
+              <code>npm run db:migrate</code> (or redeploy so the <code>prebuild</code> step runs them).
+            </p>
+            <Button variant="outline" size="sm" onClick={load}>Retry</Button>
+          </div>
+        ) : configs === null ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" /> Loading…
           </div>
