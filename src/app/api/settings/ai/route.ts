@@ -2,59 +2,82 @@ import { NextResponse, type NextRequest } from "next/server";
 import { requireUser } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-const PROVIDERS = ["openai-compat", "deepseek"] as const;
-
 /**
- * AI assistant configuration (provider, model, base URL, API key). The key lives
- * in the server-only `app_settings` table, so all access goes through the
- * service-role client here. GET deliberately omits the key — it returns only
- * whether one is set — so the secret never reaches the browser.
+ * AI assistant configuration. The bishopric can save several named model
+ * configurations (provider + model + base URL + API key) and switch the
+ * assistant between them, so the model can be changed without re-typing keys.
+ *
+ * Every config — and its API key — lives in the server-only `ai_configs` table,
+ * so all access goes through the service-role client here. GET never returns a
+ * key: it reports only whether each config has one, so no secret reaches the
+ * browser.
  */
 export async function GET() {
   const auth = await requireUser();
   if ("error" in auth) return auth.error;
 
-  const { data, error } = await createAdminClient()
+  const admin = createAdminClient();
+
+  const { data: settings, error: settingsError } = await admin
     .from("app_settings")
-    .select("ai_provider, ai_model, ai_base_url, ai_api_key")
+    .select("active_ai_config_id")
     .eq("id", "default")
     .maybeSingle();
+  if (settingsError) {
+    return NextResponse.json({ error: settingsError.message }, { status: 500 });
+  }
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  const { data: configs, error: configsError } = await admin
+    .from("ai_configs")
+    .select("id, name, provider, model, base_url, api_key, created_at")
+    .order("created_at", { ascending: true });
+  if (configsError) {
+    return NextResponse.json({ error: configsError.message }, { status: 500 });
+  }
 
   return NextResponse.json({
-    provider: data?.ai_provider ?? "openai-compat",
-    model: data?.ai_model ?? "openai/gpt-4o-mini",
-    baseUrl: data?.ai_base_url ?? "https://openrouter.ai/api/v1",
-    hasApiKey: Boolean(data?.ai_api_key),
+    activeConfigId: settings?.active_ai_config_id ?? null,
+    configs: (configs ?? []).map((c) => ({
+      id: c.id,
+      name: c.name,
+      provider: c.provider,
+      model: c.model,
+      baseUrl: c.base_url ?? "",
+      hasApiKey: Boolean(c.api_key),
+    })),
   });
 }
 
+/**
+ * Select which saved configuration the assistant uses. Send
+ * `{ activeConfigId: "<id>" }` to switch, or `{ activeConfigId: null }` to clear
+ * the selection (falling back to the AI_* environment variables, if any).
+ */
 export async function PUT(request: NextRequest) {
   const auth = await requireUser();
   if ("error" in auth) return auth.error;
 
-  const body = await request.json();
-  const { provider, model, baseUrl } = body;
-  // apiKey is optional on update: omit it to keep the current key; send an empty
-  // string to clear it. Any other string replaces it.
-  const apiKey: string | undefined = body.apiKey;
+  const body = await request.json().catch(() => ({}));
+  const activeConfigId: string | null =
+    typeof body.activeConfigId === "string" ? body.activeConfigId : null;
 
-  if (provider && !PROVIDERS.includes(provider)) {
-    return NextResponse.json({ error: "Invalid provider" }, { status: 400 });
+  const admin = createAdminClient();
+
+  // Guard against pointing at a config that doesn't exist.
+  if (activeConfigId) {
+    const { data: exists, error } = await admin
+      .from("ai_configs")
+      .select("id")
+      .eq("id", activeConfigId)
+      .maybeSingle();
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (!exists) return NextResponse.json({ error: "Configuration not found" }, { status: 404 });
   }
 
-  const patch: Record<string, string> = {};
-  if (typeof provider === "string") patch.ai_provider = provider;
-  if (typeof model === "string" && model.trim()) patch.ai_model = model.trim();
-  if (typeof baseUrl === "string" && baseUrl.trim()) patch.ai_base_url = baseUrl.trim();
-  if (typeof apiKey === "string") patch.ai_api_key = apiKey.trim() || "";
-
-  const { error } = await createAdminClient()
+  const { error } = await admin
     .from("app_settings")
-    .update(patch)
+    .update({ active_ai_config_id: activeConfigId })
     .eq("id", "default");
-
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   return NextResponse.json({ ok: true });
