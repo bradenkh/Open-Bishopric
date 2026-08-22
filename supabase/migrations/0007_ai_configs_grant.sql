@@ -9,9 +9,9 @@
 -- "permission denied for table ai_configs", so the AI settings screen fails to
 -- load.
 --
--- 0006 has been corrected to include this grant for fresh installs; this separate
--- migration re-applies it to databases where 0006 already ran without it. The
--- grant is idempotent, so running it twice is harmless.
+-- 0006 is left as-is (forward-only: never edit an applied migration); this
+-- follow-on migration adds the missing grant for every database, whether or not
+-- 0006 has already run. The grant is idempotent, so re-running it is harmless.
 --
 -- RLS (enabled in 0006, with no policy) still blocks anon/authenticated from
 -- every row; only the service role, which bypasses RLS, can read or write here.

@@ -47,12 +47,6 @@ create trigger ai_configs_updated_at
 -- service-role client can touch it, so saved API keys never reach a client.
 alter table public.ai_configs enable row level security;
 
--- Table-level privileges. 0001's blanket `grant all on all tables` only covered
--- tables that existed then, so every later table must grant itself (see 0002).
--- RLS (enabled above, with no policy) still blocks anon/authenticated from every
--- row; only the service role, which bypasses RLS, can actually read or write.
-grant all on public.ai_configs to anon, authenticated, service_role;
-
 -- ── Pointer to the active configuration ──────────────────────────────────────
 alter table public.app_settings
   add column if not exists active_ai_config_id text
