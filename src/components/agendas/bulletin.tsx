@@ -32,7 +32,6 @@ const BULLETIN_CSS = `
 .bulletin .right h2{text-align:center;font-size:12pt;font-weight:700;text-decoration:underline;margin:0 0 12px}
 .bulletin .right .ann{margin-bottom:11px;font-size:9pt}
 .bulletin .right .ann .t{font-weight:700}
-.bulletin .right .ann .meta{color:#555;font-style:italic}
 @media print{.bulletin{max-width:none;padding:0}}
 `;
 
@@ -48,26 +47,6 @@ function bulletinDate(iso: string): string {
   const months = ["January", "February", "March", "April", "May", "June",
     "July", "August", "September", "October", "November", "December"];
   return `${months[m - 1]} ${ordinal(d)}, ${y}`;
-}
-
-/** A light "June 19 · 6:00 PM · location" meta line for an announcement. */
-function announcementMeta(a: Announcement): string {
-  const bits: string[] = [];
-  if (a.date) {
-    const [, m, d] = a.date.split("-").map(Number);
-    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
-      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    let when = `${months[m - 1]} ${d}`;
-    if (a.time) {
-      const [h, min] = a.time.split(":").map(Number);
-      const period = h >= 12 ? "PM" : "AM";
-      const hr = h % 12 === 0 ? 12 : h % 12;
-      when += ` · ${hr}:${String(min).padStart(2, "0")} ${period}`;
-    }
-    bits.push(when);
-  }
-  if (a.location) bits.push(a.location);
-  return bits.join(" · ");
 }
 
 interface Props {
@@ -167,16 +146,12 @@ export function BulletinDialog({ open, onOpenChange, meeting, ward, announcement
               {announcements.length === 0 ? (
                 <p className="ann">No announcements.</p>
               ) : (
-                announcements.map((a) => {
-                  const meta = announcementMeta(a);
-                  return (
-                    <p key={a.id} className="ann">
-                      <span className="t">{a.title}:</span>{" "}
-                      {a.description && formatText(a.description)}
-                      {meta && <span className="meta"> ({meta})</span>}
-                    </p>
-                  );
-                })
+                announcements.map((a) => (
+                  <p key={a.id} className="ann">
+                    <span className="t">{a.title}:</span>{" "}
+                    {a.description && formatText(a.description)}
+                  </p>
+                ))
               )}
             </div>
           </div>

@@ -112,7 +112,7 @@ export function AnnouncementsPanel({ announcements, onSave, onArchiveToggle, onD
                     </span>
                   )}
                 </div>
-                <div className="flex shrink-0 items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="flex shrink-0 items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                   <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(a)} title="Edit">
                     <Pencil className="h-3.5 w-3.5" />
                   </Button>
