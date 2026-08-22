@@ -149,63 +149,158 @@ function AssistantMemoryCard() {
 }
 
 // ── AI assistant ───────────────────────────────────────────────────────────────
-const AI_PROVIDERS: { value: string; label: string }[] = [
-  { value: "openai-compat", label: "OpenRouter (OpenAI-compatible)" },
-  { value: "deepseek", label: "DeepSeek" },
+const AI_PROVIDERS: { value: string; label: string; baseUrl: boolean; modelHint: string }[] = [
+  { value: "openai-compat", label: "OpenRouter (OpenAI-compatible)", baseUrl: true, modelHint: "openai/gpt-4o-mini" },
+  { value: "cerebras", label: "Cerebras", baseUrl: true, modelHint: "llama-3.3-70b" },
+  { value: "deepseek", label: "DeepSeek", baseUrl: false, modelHint: "deepseek-chat" },
 ];
 
+const providerMeta = (value: string) => AI_PROVIDERS.find((p) => p.value === value) ?? AI_PROVIDERS[0];
+const providerLabel = (value: string) => providerMeta(value).label;
+
 interface AIConfig {
+  id: string;
+  name: string;
   provider: string;
   model: string;
   baseUrl: string;
   hasApiKey: boolean;
 }
 
+/** Draft state for the add/edit form. */
+interface ConfigDraft {
+  name: string;
+  provider: string;
+  model: string;
+  baseUrl: string;
+  apiKey: string;
+}
+
+const BLANK_DRAFT: ConfigDraft = {
+  name: "", provider: "openai-compat", model: "",
+  baseUrl: "https://openrouter.ai/api/v1", apiKey: "",
+};
+
 function AIAssistantCard() {
-  const [config, setConfig] = useState<AIConfig | null>(null);
-  const [apiKey, setApiKey] = useState("");
+  const [configs, setConfigs] = useState<AIConfig[] | null>(null);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  // `editing` is the id of the config being edited, "new" for the add form, or
+  // null when the form is closed.
+  const [editing, setEditing] = useState<string | "new" | null>(null);
+  const [draft, setDraft] = useState<ConfigDraft>(BLANK_DRAFT);
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
     fetch("/api/settings/ai")
       .then((r) => r.json())
-      .then((data) => { if (!data.error) setConfig(data); })
+      .then((data) => {
+        if (data.error) { setError(data.error); return; }
+        setConfigs(data.configs);
+        setActiveId(data.activeConfigId);
+      })
       .catch(() => setError("Couldn't load AI settings."));
   }, []);
 
-  const set = (patch: Partial<AIConfig>) => {
-    setConfig((c) => (c ? { ...c, ...patch } : c));
-    setSaved(false);
+  const openNew = () => {
+    setDraft(BLANK_DRAFT);
+    setEditing("new");
+    setError("");
   };
 
-  const save = async () => {
-    if (!config) return;
-    setSaving(true); setError(""); setSaved(false);
+  const openEdit = (c: AIConfig) => {
+    setDraft({ name: c.name, provider: c.provider, model: c.model, baseUrl: c.baseUrl, apiKey: "" });
+    setEditing(c.id);
+    setError("");
+  };
+
+  const setDraftFields = (patch: Partial<ConfigDraft>) => setDraft((d) => ({ ...d, ...patch }));
+
+  // Switch the base URL default when the provider changes and the field still
+  // holds another provider's default (leave a user-typed value alone).
+  const onProviderChange = (provider: string) => {
+    const knownDefaults = ["https://openrouter.ai/api/v1", "https://api.cerebras.ai/v1", ""];
+    const nextDefault = provider === "cerebras" ? "https://api.cerebras.ai/v1"
+      : provider === "openai-compat" ? "https://openrouter.ai/api/v1" : "";
+    setDraftFields({
+      provider,
+      baseUrl: knownDefaults.includes(draft.baseUrl.trim()) ? nextDefault : draft.baseUrl,
+    });
+  };
+
+  const saveDraft = async () => {
+    setSaving(true); setError("");
     try {
-      const res = await fetch("/api/settings/ai", {
-        method: "PUT",
+      const isNew = editing === "new";
+      const url = isNew ? "/api/settings/ai/configs" : `/api/settings/ai/configs/${editing}`;
+      const body: Record<string, string> = {
+        name: draft.name,
+        provider: draft.provider,
+        model: draft.model,
+        baseUrl: draft.baseUrl,
+      };
+      // Only send the key when the user typed one (keeps the existing key on edit).
+      if (draft.apiKey) body.apiKey = draft.apiKey;
+      const res = await fetch(url, {
+        method: isNew ? "POST" : "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          provider: config.provider,
-          model: config.model,
-          baseUrl: config.baseUrl,
-          // Only send the key when the user typed a new one.
-          ...(apiKey ? { apiKey } : {}),
-        }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to save");
-      setConfig({ ...config, hasApiKey: apiKey ? true : config.hasApiKey });
-      setApiKey("");
-      setSaved(true);
+
+      setConfigs((prev) => {
+        const list = prev ?? [];
+        return isNew ? [...list, data.config] : list.map((c) => (c.id === data.config.id ? data.config : c));
+      });
+      setEditing(null);
+      setDraft(BLANK_DRAFT);
+      // First config, or none selected yet → make the new one active so the
+      // assistant starts using it right away.
+      if (isNew && !activeId) await use(data.config.id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save");
     } finally {
       setSaving(false);
     }
   };
+
+  const use = async (id: string) => {
+    const prev = activeId;
+    setActiveId(id); setError(""); setBusyId(id);
+    try {
+      const res = await fetch("/api/settings/ai", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ activeConfigId: id }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error ?? "Failed to switch");
+    } catch (e) {
+      setActiveId(prev);
+      setError(e instanceof Error ? e.message : "Failed to switch");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const remove = async (id: string) => {
+    if (!confirm("Delete this configuration?")) return;
+    setBusyId(id); setError("");
+    try {
+      const res = await fetch(`/api/settings/ai/configs/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error((await res.json()).error ?? "Failed to delete");
+      setConfigs((prev) => prev?.filter((c) => c.id !== id) ?? prev);
+      if (activeId === id) setActiveId(null);
+      if (editing === id) setEditing(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to delete");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const meta = providerMeta(draft.provider);
 
   return (
     <Card>
@@ -216,67 +311,133 @@ function AIAssistantCard() {
       </CardHeader>
       <CardContent className="space-y-4">
         <p className="text-sm text-muted-foreground">
-          Powers the chat assistant. By default it talks to{" "}
+          Save a model configuration for each provider and model you use, then switch
+          the assistant between them with one click — no re-typing keys. Works with{" "}
           <a href="https://openrouter.ai" target="_blank" rel="noreferrer" className="underline">
             OpenRouter
           </a>
-          , which lets you pick from many models (e.g. <code>openai/gpt-4o-mini</code>) with a
-          single API key. You can also point the base URL at any other OpenAI-compatible
-          gateway. Your API key is stored securely on the server and never shown here.
+          , <a href="https://cerebras.ai" target="_blank" rel="noreferrer" className="underline">Cerebras</a>,
+          DeepSeek, or any OpenAI-compatible gateway. API keys are stored securely on the
+          server and never shown here.
         </p>
 
-        {!config ? (
+        {configs === null ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" /> Loading…
           </div>
         ) : (
           <>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label>Provider</Label>
-                <Select value={config.provider} onValueChange={(v) => set({ provider: v })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {AI_PROVIDERS.map((p) => (
-                      <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="ai-model">Model</Label>
-                <Input id="ai-model" value={config.model}
-                  onChange={(e) => set({ model: e.target.value })} placeholder="openai/gpt-4o-mini" />
-              </div>
-            </div>
+            {configs.length === 0 ? (
+              <p className="text-sm text-muted-foreground italic">
+                No configurations yet. Add one to power the assistant.
+              </p>
+            ) : (
+              <ul className="divide-y divide-border rounded-lg border border-border">
+                {configs.map((c) => {
+                  const isActive = c.id === activeId;
+                  return (
+                    <li key={c.id} className="flex items-center gap-3 px-3 py-2.5">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-medium truncate">{c.name}</p>
+                          {isActive && (
+                            <Badge variant="outline" className="text-green-700 border-green-600/40 shrink-0">
+                              In use
+                            </Badge>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground truncate">
+                          {providerLabel(c.provider)} · {c.model}
+                          {!c.hasApiKey && " · no API key"}
+                        </p>
+                      </div>
+                      {!isActive && (
+                        <Button variant="outline" size="sm" className="shrink-0"
+                          disabled={busyId === c.id} onClick={() => use(c.id)}>
+                          {busyId === c.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Use"}
+                        </Button>
+                      )}
+                      <Button variant="ghost" size="sm" className="shrink-0"
+                        onClick={() => openEdit(c)}>Edit</Button>
+                      <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0"
+                        disabled={busyId === c.id} onClick={() => remove(c.id)} title="Delete">
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
 
-            {config.provider === "openai-compat" && (
-              <div className="space-y-1.5">
-                <Label htmlFor="ai-base-url">Base URL</Label>
-                <Input id="ai-base-url" value={config.baseUrl}
-                  onChange={(e) => set({ baseUrl: e.target.value })} />
+            {editing === null ? (
+              <Button variant="outline" onClick={openNew} className="gap-1">
+                <Plus className="h-4 w-4" /> Add configuration
+              </Button>
+            ) : (
+              <div className="space-y-4 rounded-lg border border-dashed border-border p-4">
+                <p className="text-sm font-medium">
+                  {editing === "new" ? "New configuration" : "Edit configuration"}
+                </p>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="ai-name">Name</Label>
+                  <Input id="ai-name" value={draft.name}
+                    onChange={(e) => setDraftFields({ name: e.target.value })}
+                    placeholder="e.g. Cerebras Llama 3.3 70B" />
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label>Provider</Label>
+                    <Select value={draft.provider} onValueChange={onProviderChange}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {AI_PROVIDERS.map((p) => (
+                          <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="ai-model">Model</Label>
+                    <Input id="ai-model" value={draft.model}
+                      onChange={(e) => setDraftFields({ model: e.target.value })}
+                      placeholder={meta.modelHint} />
+                  </div>
+                </div>
+
+                {meta.baseUrl && (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="ai-base-url">Base URL</Label>
+                    <Input id="ai-base-url" value={draft.baseUrl}
+                      onChange={(e) => setDraftFields({ baseUrl: e.target.value })} />
+                  </div>
+                )}
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="ai-api-key">API key</Label>
+                  <Input id="ai-api-key" type="password" autoComplete="off" value={draft.apiKey}
+                    onChange={(e) => setDraftFields({ apiKey: e.target.value })}
+                    placeholder={
+                      editing !== "new" && configs.find((c) => c.id === editing)?.hasApiKey
+                        ? "•••••••• (leave blank to keep current key)"
+                        : "Paste your API key"
+                    } />
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <Button onClick={saveDraft} disabled={saving}>
+                    {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+                    {editing === "new" ? "Save configuration" : "Save changes"}
+                  </Button>
+                  <Button variant="ghost" onClick={() => { setEditing(null); setError(""); }} disabled={saving}>
+                    Cancel
+                  </Button>
+                </div>
               </div>
             )}
 
-            <div className="space-y-1.5">
-              <Label htmlFor="ai-api-key">API key</Label>
-              <Input id="ai-api-key" type="password" autoComplete="off" value={apiKey}
-                onChange={(e) => { setApiKey(e.target.value); setSaved(false); }}
-                placeholder={config.hasApiKey ? "•••••••• (leave blank to keep current key)" : "Paste your API key"} />
-              {config.hasApiKey && (
-                <p className="text-xs text-muted-foreground flex items-center gap-1">
-                  <Check className="h-3 w-3 text-green-600" /> A key is configured.
-                </p>
-              )}
-            </div>
-
-            <div className="flex items-center gap-3">
-              <Button onClick={save} disabled={saving}>
-                {saving && <Loader2 className="h-4 w-4 animate-spin" />} Save AI settings
-              </Button>
-              {saved && <span className="text-sm text-green-600 flex items-center gap-1"><Check className="h-4 w-4" /> Saved</span>}
-              {error && <span className="text-sm text-destructive">{error}</span>}
-            </div>
+            {error && <p className="text-sm text-destructive">{error}</p>}
           </>
         )}
       </CardContent>
