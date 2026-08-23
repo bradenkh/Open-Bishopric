@@ -7,7 +7,7 @@ import {
   interviewsRepo,
   settlementRepo,
 } from "@/lib/db";
-import { generateSlots, groupSlotsByDate } from "@/lib/availability";
+import { generateSlots, groupSlotsByDate, nowInAppTz } from "@/lib/availability";
 import { INTERVIEW_DURATION_MINS } from "@/types";
 import type { BookingToken, Interview, SettlementRecord } from "@/types";
 
@@ -243,7 +243,7 @@ async function upsertSettlementScheduled(
     id: newId(),
     memberId: record.memberId,
     memberName: record.memberName,
-    year: record.year ?? new Date().getFullYear(),
+    year: record.year ?? nowInAppTz().getFullYear(),
     status: "scheduled",
     interviewId,
     createdBy: "self-signup",

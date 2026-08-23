@@ -1,16 +1,27 @@
 import { type ClassValue, clsx } from "clsx";
+import { format, parseISO } from "date-fns";
 import { twMerge } from "tailwind-merge";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/**
+ * Coerce a Date or ISO string to a Date. Date-only strings ("YYYY-MM-DD") are
+ * parsed as *local* dates via `parseISO`, avoiding the UTC-midnight off-by-one
+ * that `new Date("YYYY-MM-DD")` causes in negative-offset timezones.
+ */
+function toDate(date: Date | string): Date {
+  return typeof date === "string" ? parseISO(date) : date;
+}
+
 export function formatDate(date: Date | string): string {
-  return new Date(date).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+  return format(toDate(date), "MMM d, yyyy");
+}
+
+/** Full weekday name and date, e.g. "Tuesday · Sep 1, 2026". */
+export function formatDateWithWeekday(date: Date | string): string {
+  return format(toDate(date), "EEEE · MMM d, yyyy");
 }
 
 export function formatRelativeTime(date: Date | string): string {

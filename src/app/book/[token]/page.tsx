@@ -5,9 +5,7 @@ import { useParams } from "next/navigation";
 import Image from "next/image";
 import { CalendarClock, Clock, User, CheckCircle2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { cn, formatDate } from "@/lib/utils";
-import { parseDate } from "@/lib/availability";
-import { WEEKDAY_LABELS } from "@/types";
+import { cn, formatDate, formatDateWithWeekday } from "@/lib/utils";
 
 // ── Public, token-authenticated self-signup page (no login) ──────────────────
 // It talks only to /api/book/[token]; the token in the URL is the credential.
@@ -40,7 +38,7 @@ function formatTime(time: string): string {
 }
 
 function dayHeading(dateStr: string): string {
-  return `${WEEKDAY_LABELS[parseDate(dateStr).getDay()]} · ${formatDate(dateStr)}`;
+  return formatDateWithWeekday(dateStr);
 }
 
 function Shell({ children }: { children: React.ReactNode }) {

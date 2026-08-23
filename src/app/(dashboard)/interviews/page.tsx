@@ -31,9 +31,9 @@ import {
   INTERVIEW_DURATION_MINS, WEEKDAY_LABELS,
   SETTLEMENT_STATUS_LABELS, DECLARED_STATUS_LABELS, RECURRENCE_LABELS, NTH_LABELS,
 } from "@/types";
-import { formatDate, cn } from "@/lib/utils";
+import { formatDate, formatDateWithWeekday, cn } from "@/lib/utils";
 import {
-  generateSlots, groupSlotsByDate, durationForType, parseDate,
+  generateSlots, groupSlotsByDate, durationForType, nowInAppTz,
   toMinutes, fromMinutes, toDateStr, durationOf, blockAppliesOn, type Slot,
 } from "@/lib/availability";
 
@@ -68,15 +68,15 @@ function formatTime(time?: string) {
 
 /** "Tuesday · Jun 16" for a slot-group date header. */
 function dayHeading(dateStr: string): string {
-  return `${WEEKDAY_LABELS[parseDate(dateStr).getDay()]} · ${formatDate(dateStr)}`;
+  return formatDateWithWeekday(dateStr);
 }
 
 function stageLabel(stage: InterviewStage): string {
   return INTERVIEW_STAGES.find((s) => s.stage === stage)?.label ?? stage;
 }
 
-const TODAY = new Date().toISOString().slice(0, 10);
-const SETTLEMENT_YEAR = new Date().getFullYear();
+const TODAY = toDateStr(nowInAppTz());
+const SETTLEMENT_YEAR = nowInAppTz().getFullYear();
 
 /** An unguessable token for a personalized booking link (~32 bytes, base64url). */
 function generateToken(): string {
@@ -720,8 +720,8 @@ interface CalendarViewProps {
 }
 
 function CalendarView({ interviews, availability, exceptions, onSelect }: CalendarViewProps) {
-  const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
-  const todayStr = toDateStr(new Date());
+  const [weekStart, setWeekStart] = useState(() => startOfWeek(nowInAppTz()));
+  const todayStr = toDateStr(nowInAppTz());
 
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
 
@@ -778,7 +778,7 @@ function CalendarView({ interviews, availability, exceptions, onSelect }: Calend
           <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => setWeekStart((w) => addDays(w, -7))} aria-label="Previous week">
             <ChevronLeft className="h-4 w-4" />
           </Button>
-          <Button variant="outline" size="sm" className="h-8" onClick={() => setWeekStart(startOfWeek(new Date()))}>
+          <Button variant="outline" size="sm" className="h-8" onClick={() => setWeekStart(startOfWeek(nowInAppTz()))}>
             Today
           </Button>
           <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => setWeekStart((w) => addDays(w, 7))} aria-label="Next week">

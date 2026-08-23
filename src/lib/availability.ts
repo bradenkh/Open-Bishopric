@@ -1,7 +1,25 @@
+import { toZonedTime } from "date-fns-tz";
 import type {
   AvailabilityBlock, AvailabilityException, Interview, InterviewType,
 } from "@/types";
 import { INTERVIEW_DURATION_MINS } from "@/types";
+
+/**
+ * The ward's canonical timezone. All scheduling ("today", "now", past-slot
+ * filtering) is anchored here so it behaves identically no matter where the
+ * server runs (Vercel is UTC) or which timezone the viewer's browser is in.
+ */
+export const APP_TIME_ZONE = "America/New_York";
+
+/**
+ * The current instant expressed as NYC wall-clock. The returned Date's local
+ * getters (getFullYear/getMonth/getDate/getHours/…) yield New York values, so
+ * downstream helpers like `toDateStr` produce the correct ward-local date even
+ * on a UTC server.
+ */
+export function nowInAppTz(): Date {
+  return toZonedTime(new Date(), APP_TIME_ZONE);
+}
 
 // ── Time helpers ───────────────────────────────────────────────────────────────
 
@@ -166,7 +184,7 @@ export function generateSlots({
 }: GenerateArgs): Slot[] {
   if (durationMins <= 0) return [];
 
-  const now = new Date();
+  const now = nowInAppTz();
   const todayStr = toDateStr(now);
   const nowMins = now.getHours() * 60 + now.getMinutes();
 
