@@ -578,14 +578,14 @@ export const MOCK_INTERVIEWS: Interview[] = [
 export const MOCK_AVAILABILITY: AvailabilityBlock[] = [
   // Bishop Anderson — Sundays after church + a couple weeknights.
   { id: "av1", memberId: "bm1", memberName: "Bishop Anderson",  weekday: 0, startTime: "12:00", endTime: "13:30" },
-  { id: "av2", memberId: "bm1", memberName: "Bishop Anderson",  weekday: 2, startTime: "18:00", endTime: "19:30" },
+  { id: "av2", memberId: "bm1", memberName: "Bishop Anderson",  weekday: 2, startTime: "18:00", endTime: "19:30", preferredTime: "19:00" },
   { id: "av3", memberId: "bm1", memberName: "Bishop Anderson",  weekday: 3, startTime: "19:00", endTime: "20:00" },
   // Counselor Hughes
   { id: "av4", memberId: "bm2", memberName: "Counselor Hughes", weekday: 0, startTime: "12:00", endTime: "13:00" },
-  { id: "av5", memberId: "bm2", memberName: "Counselor Hughes", weekday: 4, startTime: "18:30", endTime: "20:00" },
+  { id: "av5", memberId: "bm2", memberName: "Counselor Hughes", weekday: 4, startTime: "18:30", endTime: "20:00", preferredTime: "19:00" },
   // Counselor Davis
   { id: "av6", memberId: "bm3", memberName: "Counselor Davis",  weekday: 0, startTime: "12:00", endTime: "13:00" },
-  { id: "av7", memberId: "bm3", memberName: "Counselor Davis",  weekday: 3, startTime: "19:00", endTime: "20:30" },
+  { id: "av7", memberId: "bm3", memberName: "Counselor Davis",  weekday: 3, startTime: "19:00", endTime: "20:30", preferredTime: "20:00" },
 ];
 
 // Time-off overrides — these date ranges remove the recurring availability above.

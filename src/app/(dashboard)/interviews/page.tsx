@@ -5,7 +5,7 @@ import {
   Plus, CalendarClock, Clock, User, GripVertical, CalendarPlus,
   CheckCircle2, AlertTriangle, Pencil, RotateCcw,
   CalendarDays, CalendarOff, Trash2, Check, Link2, Copy, Repeat, Search, Send,
-  ChevronLeft, ChevronRight, List, Columns3, Download, Eye,
+  ChevronLeft, ChevronRight, List, Columns3, Download, Eye, Star,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -257,7 +257,15 @@ function SlotPicker({
                         : "bg-card text-foreground border-border hover:bg-accent"
                     )}
                   >
-                    <span>{formatTime(s.time)}</span>
+                    <span className="flex items-center gap-1">
+                      {s.preferred && (
+                        <Star
+                          className={cn("h-3 w-3 shrink-0", isSelected(s) ? "fill-current" : "fill-amber-400 text-amber-400")}
+                          aria-label="Preferred time"
+                        />
+                      )}
+                      {formatTime(s.time)}
+                    </span>
                     {showMember && (
                       <span className={cn(
                         "block text-[10px]",
@@ -953,6 +961,9 @@ function AvailabilityView({
                             {recurrenceLabel(b)}
                           </span>
                           <span className="text-muted-foreground text-xs"> {formatTime(b.startTime)}–{formatTime(b.endTime)}</span>
+                          {b.preferredTime && (
+                            <span className="text-muted-foreground text-xs"> · prefers {formatTime(b.preferredTime)}</span>
+                          )}
                         </span>
                         <button
                           onClick={() => onDeleteBlock(b.id)}
@@ -1646,6 +1657,7 @@ const EMPTY_BLOCK = {
   weekday: 2,
   startTime: "18:00",
   endTime: "19:00",
+  preferredTime: "",
   recurrence: "weekly" as AvailabilityRecurrence,
   intervalWeeks: 2,
   nth: 1,
@@ -1824,6 +1836,13 @@ export default function InterviewsPage() {
       weekday: blockForm.weekday,
       startTime: blockForm.startTime,
       endTime: blockForm.endTime,
+      // Only keep a preferred time that falls inside the window.
+      preferredTime:
+        blockForm.preferredTime &&
+        blockForm.preferredTime >= blockForm.startTime &&
+        blockForm.preferredTime < blockForm.endTime
+          ? blockForm.preferredTime
+          : undefined,
       recurrence: rec,
       // every_n_weeks carries the interval; biweekly is implicitly 2.
       intervalWeeks: rec === "every_n_weeks" ? blockForm.intervalWeeks : undefined,
@@ -2314,10 +2333,39 @@ export default function InterviewsPage() {
             {blockForm.startTime >= blockForm.endTime && (
               <p className="text-xs text-red-600 dark:text-red-400">End time must be after the start time.</p>
             )}
+
+            <div className="space-y-1.5">
+              <Label htmlFor="blkPreferred">Preferred time <span className="font-normal text-muted-foreground">(optional)</span></Label>
+              <Input
+                id="blkPreferred"
+                type="time"
+                value={blockForm.preferredTime}
+                min={blockForm.startTime}
+                max={blockForm.endTime}
+                onChange={(e) => setBlockForm((f) => ({ ...f, preferredTime: e.target.value }))}
+              />
+              <p className="text-xs text-muted-foreground">
+                Booked first, then the slots around it. Leave blank to fill from the start of the window.
+              </p>
+              {blockForm.preferredTime !== "" &&
+                (blockForm.preferredTime < blockForm.startTime || blockForm.preferredTime >= blockForm.endTime) && (
+                  <p className="text-xs text-red-600 dark:text-red-400">Preferred time must fall inside the window.</p>
+                )}
+            </div>
           </div>
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setBlockForm(EMPTY_BLOCK)}>Cancel</Button>
-            <Button onClick={saveBlock} disabled={blockForm.startTime >= blockForm.endTime}>Add</Button>
+            <Button
+              onClick={saveBlock}
+              disabled={
+                blockForm.startTime >= blockForm.endTime ||
+                (blockForm.preferredTime !== "" &&
+                  (blockForm.preferredTime < blockForm.startTime ||
+                    blockForm.preferredTime >= blockForm.endTime))
+              }
+            >
+              Add
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

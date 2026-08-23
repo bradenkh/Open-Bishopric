@@ -98,6 +98,8 @@ export async function GET(
     interviews,
     // Keep each interviewer's day contiguous as members self-book.
     packAdjacent: true,
+    // Offer each window's preferred time first.
+    preferredFirst: true,
   });
 
   return NextResponse.json({
@@ -150,6 +152,8 @@ export async function POST(
     interviews,
     // Keep each interviewer's day contiguous as members self-book.
     packAdjacent: true,
+    // Offer each window's preferred time first.
+    preferredFirst: true,
   });
   const stillOpen = slots.some(
     (s) => s.date === date && s.time === time && s.memberName === interviewer,

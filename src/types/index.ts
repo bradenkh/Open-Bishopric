@@ -549,6 +549,14 @@ export interface AvailabilityBlock {
   /** 24-hour "HH:MM". */
   startTime: string;
   endTime: string;
+  /**
+   * The window's preferred appointment time ("HH:MM"), e.g. 19:00 for a
+   * 18:00–20:00 window. The scheduler phases the slot grid so this time is a
+   * bookable boundary and offers it first, filling the neighbouring slots
+   * (18:45, 19:15, …) only once the preferred slot is taken. Omitted ⇒ the
+   * window has no preference and behaves as before (earliest slot first).
+   */
+  preferredTime?: string;
   /** How the window repeats. Defaults to "weekly" (existing rows). */
   recurrence?: AvailabilityRecurrence;
   /** For biweekly / every_n_weeks: the week interval (biweekly ⇒ 2). */

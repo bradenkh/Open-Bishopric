@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import Image from "next/image";
-import { CalendarClock, Clock, User, CheckCircle2, Loader2 } from "lucide-react";
+import { CalendarClock, Clock, User, CheckCircle2, Loader2, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn, formatDate, formatDateWithWeekday } from "@/lib/utils";
 
@@ -16,6 +16,7 @@ interface Slot {
   endTime: string;
   memberId: string;
   memberName: string;
+  preferred?: boolean;
 }
 interface DayGroup {
   date: string;
@@ -262,7 +263,12 @@ export default function BookingPage() {
                       )}
                     >
                       <span className="flex items-center gap-1">
-                        <Clock className="h-3 w-3" /> {formatTime(s.time)}
+                        {s.preferred ? (
+                          <Star className={cn("h-3 w-3", isSel ? "fill-current" : "fill-amber-400 text-amber-400")} />
+                        ) : (
+                          <Clock className="h-3 w-3" />
+                        )}
+                        {formatTime(s.time)}
                       </span>
                       <span
                         className={cn(
