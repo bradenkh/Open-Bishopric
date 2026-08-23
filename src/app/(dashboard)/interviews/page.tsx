@@ -31,9 +31,9 @@ import {
   INTERVIEW_DURATION_MINS, WEEKDAY_LABELS,
   SETTLEMENT_STATUS_LABELS, DECLARED_STATUS_LABELS, RECURRENCE_LABELS, NTH_LABELS,
 } from "@/types";
-import { formatDate, cn } from "@/lib/utils";
+import { formatDate, formatDateWithWeekday, cn } from "@/lib/utils";
 import {
-  generateSlots, groupSlotsByDate, durationForType, parseDate,
+  generateSlots, groupSlotsByDate, durationForType,
   toMinutes, fromMinutes, toDateStr, durationOf, blockAppliesOn, type Slot,
 } from "@/lib/availability";
 
@@ -68,7 +68,7 @@ function formatTime(time?: string) {
 
 /** "Tuesday · Jun 16" for a slot-group date header. */
 function dayHeading(dateStr: string): string {
-  return `${WEEKDAY_LABELS[parseDate(dateStr).getDay()]} · ${formatDate(dateStr)}`;
+  return formatDateWithWeekday(dateStr);
 }
 
 function stageLabel(stage: InterviewStage): string {
