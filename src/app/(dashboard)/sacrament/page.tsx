@@ -248,7 +248,7 @@ export default function SacramentPage() {
           <Button variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={() => setSelectedSunday(addDays(selectedSunday, -7))} title="Previous Sunday">
             <ChevronLeft className="h-4 w-4" />
           </Button>
-          <p className="min-w-[15rem] text-center text-sm font-semibold">{formatSunday(selectedSunday)}</p>
+          <p className="min-w-0 flex-1 text-center text-sm font-semibold truncate">{formatSunday(selectedSunday)}</p>
           <Button variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={() => setSelectedSunday(addDays(selectedSunday, 7))} title="Next Sunday">
             <ChevronRight className="h-4 w-4" />
           </Button>
