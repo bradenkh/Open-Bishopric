@@ -64,12 +64,12 @@ insert into public.interviews (id, member_name, member_id, type, stage, requires
 
 -- availability_blocks
 insert into public.availability_blocks (id, member_id, member_name, weekday, start_time, end_time) values ('av1', 'bm1', 'Bishop Anderson', 0, '12:00', '13:30') on conflict (id) do nothing;
-insert into public.availability_blocks (id, member_id, member_name, weekday, start_time, end_time) values ('av2', 'bm1', 'Bishop Anderson', 2, '18:00', '19:30') on conflict (id) do nothing;
+insert into public.availability_blocks (id, member_id, member_name, weekday, start_time, end_time, preferred_time) values ('av2', 'bm1', 'Bishop Anderson', 2, '18:00', '19:30', '19:00') on conflict (id) do nothing;
 insert into public.availability_blocks (id, member_id, member_name, weekday, start_time, end_time) values ('av3', 'bm1', 'Bishop Anderson', 3, '19:00', '20:00') on conflict (id) do nothing;
 insert into public.availability_blocks (id, member_id, member_name, weekday, start_time, end_time) values ('av4', 'bm2', 'Counselor Hughes', 0, '12:00', '13:00') on conflict (id) do nothing;
-insert into public.availability_blocks (id, member_id, member_name, weekday, start_time, end_time) values ('av5', 'bm2', 'Counselor Hughes', 4, '18:30', '20:00') on conflict (id) do nothing;
+insert into public.availability_blocks (id, member_id, member_name, weekday, start_time, end_time, preferred_time) values ('av5', 'bm2', 'Counselor Hughes', 4, '18:30', '20:00', '19:00') on conflict (id) do nothing;
 insert into public.availability_blocks (id, member_id, member_name, weekday, start_time, end_time) values ('av6', 'bm3', 'Counselor Davis', 0, '12:00', '13:00') on conflict (id) do nothing;
-insert into public.availability_blocks (id, member_id, member_name, weekday, start_time, end_time) values ('av7', 'bm3', 'Counselor Davis', 3, '19:00', '20:30') on conflict (id) do nothing;
+insert into public.availability_blocks (id, member_id, member_name, weekday, start_time, end_time, preferred_time) values ('av7', 'bm3', 'Counselor Davis', 3, '19:00', '20:30', '20:00') on conflict (id) do nothing;
 
 -- availability_exceptions
 insert into public.availability_exceptions (id, member_id, member_name, start_date, end_date, reason) values ('ax1', 'bm1', 'Bishop Anderson', '2026-06-14', '2026-06-20', 'Out of town') on conflict (id) do nothing;

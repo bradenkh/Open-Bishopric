@@ -111,6 +111,30 @@ export interface Slot {
   endTime: string;
   memberId: string;
   memberName: string;
+  /** True when this is the window's preferred time (see AvailabilityBlock.preferredTime). */
+  preferred?: boolean;
+}
+
+/**
+ * The start (in minutes) of the slot a window prefers to fill first. When the
+ * block sets a `preferredTime`, the grid is phased so that time is a bookable
+ * boundary and this returns it (clamped to a slot that actually fits inside the
+ * window). Without a preference it falls back to `gridStart` — the window's
+ * first slot — preserving the original earliest-first behaviour.
+ */
+function preferredSlotStart(
+  block: AvailabilityBlock,
+  gridStart: number,
+  blockEnd: number,
+  durationMins: number,
+): number {
+  if (!block.preferredTime) return gridStart;
+  const pref = toMinutes(block.preferredTime);
+  // The last boundary on the phased grid that still fits a full slot.
+  const span = blockEnd - durationMins - gridStart;
+  if (span < 0) return gridStart;
+  const lastStart = gridStart + Math.floor(span / durationMins) * durationMins;
+  return Math.min(Math.max(pref, gridStart), lastStart);
 }
 
 interface GenerateArgs {
@@ -133,6 +157,13 @@ interface GenerateArgs {
    * anywhere. Off by default (the bishopric picker shows the full grid).
    */
   packAdjacent?: boolean;
+  /**
+   * Order each day's slots so every window's preferred time comes first, then
+   * the rest chronologically — so callers that consume slots in order (the
+   * self-signup page, the agent's suggestions) offer the preferred time first.
+   * Off by default: the bishopric picker keeps a plain chronological grid.
+   */
+  preferredFirst?: boolean;
 }
 
 function isWithinException(
@@ -181,6 +212,7 @@ export function generateSlots({
   days = 28,
   ignoreInterviewId,
   packAdjacent = false,
+  preferredFirst = false,
 }: GenerateArgs): Slot[] {
   if (durationMins <= 0) return [];
 
@@ -207,12 +239,22 @@ export function generateSlots({
       const blockStart = toMinutes(block.startTime);
       const blockEnd = toMinutes(block.endTime);
 
+      // Phase the slot grid to the window's preferred time so that time — and
+      // its neighbours (e.g. 18:45 / 19:15 around a 19:00 preference) — land on
+      // bookable boundaries. Absent a preference the grid starts at blockStart,
+      // exactly as before.
+      const phase = block.preferredTime
+        ? ((toMinutes(block.preferredTime) - blockStart) % durationMins + durationMins) % durationMins
+        : 0;
+      const gridStart = blockStart + phase;
+      const preferredStart = preferredSlotStart(block, gridStart, blockEnd, durationMins);
+
       // Packing state: whether this interviewer has any booking today, and which
       // of their bookings fall inside this block (for the adjacency test).
       const hasBookingToday = booked.length > 0;
       const blockBookings = booked.filter(([bs]) => bs >= blockStart && bs < blockEnd);
 
-      for (let start = blockStart; start + durationMins <= blockEnd; start += durationMins) {
+      for (let start = gridStart; start + durationMins <= blockEnd; start += durationMins) {
         const end = start + durationMins;
         // Skip slots already in the past today.
         if (dateStr === todayStr && start < nowMins) continue;
@@ -222,11 +264,13 @@ export function generateSlots({
 
         // Smart packing: once the day has a booking, keep the schedule
         // contiguous — a slot must be flush against a booking in this block,
-        // or (if the block is still empty) be the block's first slot.
+        // or (if the block is still empty) be the window's preferred slot, so
+        // the first self-booking lands on the preferred time and the rest pack
+        // around it.
         if (packAdjacent && hasBookingToday) {
           const ok = blockBookings.length > 0
             ? blockBookings.some(([bs, be]) => end === bs || start === be)
-            : start === blockStart;
+            : start === preferredStart;
           if (!ok) continue;
         }
 
@@ -236,18 +280,19 @@ export function generateSlots({
           endTime: fromMinutes(end),
           memberId: block.memberId,
           memberName: block.memberName,
+          preferred: start === preferredStart && !!block.preferredTime,
         });
       }
     }
   }
 
-  slots.sort((a, b) =>
-    a.date === b.date
-      ? a.time === b.time
-        ? a.memberName.localeCompare(b.memberName)
-        : a.time.localeCompare(b.time)
-      : a.date.localeCompare(b.date),
-  );
+  slots.sort((a, b) => {
+    if (a.date !== b.date) return a.date.localeCompare(b.date);
+    // Within a day, float preferred slots ahead of the rest when asked.
+    if (preferredFirst && !!a.preferred !== !!b.preferred) return a.preferred ? -1 : 1;
+    if (a.time !== b.time) return a.time.localeCompare(b.time);
+    return a.memberName.localeCompare(b.memberName);
+  });
   return slots;
 }
 

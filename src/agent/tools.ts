@@ -670,6 +670,8 @@ export const findInterviewSlots = tool({
       interviews: (interviewsRes.data ?? []).map((r) => fromRow<Interview>(r)),
       days,
       ignoreInterviewId: interviewId,
+      // Suggest each window's preferred time first.
+      preferredFirst: true,
     });
 
     return {
