@@ -2,7 +2,10 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 /** Routes that don't require an authenticated session. */
-const PUBLIC_PATHS = ["/login", "/auth"];
+// /book + /api/book power the token-authenticated public self-signup flow: the
+// unguessable link is the credential, and the API runs with the service role,
+// so these must bypass the login gate while the rest of the app stays private.
+const PUBLIC_PATHS = ["/login", "/auth", "/book", "/api/book"];
 
 /**
  * Refreshes the Supabase auth session and gates protected routes.

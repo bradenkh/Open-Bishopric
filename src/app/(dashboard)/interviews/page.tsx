@@ -4,7 +4,8 @@ import { useState, useEffect, useMemo } from "react";
 import {
   Plus, CalendarClock, Clock, User, GripVertical, CalendarPlus,
   CheckCircle2, AlertTriangle, Pencil, RotateCcw,
-  CalendarDays, CalendarOff, Trash2, Check,
+  CalendarDays, CalendarOff, Trash2, Check, Link2, Copy, Repeat, Search, Send,
+  ChevronLeft, ChevronRight, List, Columns3, Download, Eye,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,14 +23,18 @@ import { useData, newId } from "@/contexts/DataContext";
 import type {
   Interview, InterviewType, InterviewStage,
   AvailabilityBlock, AvailabilityException, BishopricMember,
+  SettlementRecord, SettlementStatus, DeclaredTithingStatus,
+  BookingToken, Member, AvailabilityRecurrence,
 } from "@/types";
 import {
   INTERVIEW_TYPE_LABELS, INTERVIEW_STAGES, INTERVIEW_PIPELINE, INTERVIEW_STAGE_COLORS,
   INTERVIEW_DURATION_MINS, WEEKDAY_LABELS,
+  SETTLEMENT_STATUS_LABELS, DECLARED_STATUS_LABELS, RECURRENCE_LABELS, NTH_LABELS,
 } from "@/types";
 import { formatDate, cn } from "@/lib/utils";
 import {
-  generateSlots, groupSlotsByDate, durationForType, parseDate, type Slot,
+  generateSlots, groupSlotsByDate, durationForType, parseDate,
+  toMinutes, fromMinutes, toDateStr, durationOf, blockAppliesOn, type Slot,
 } from "@/lib/availability";
 
 // ── Bishopric helpers ─────────────────────────────────────────────────────────
@@ -71,6 +76,39 @@ function stageLabel(stage: InterviewStage): string {
 }
 
 const TODAY = new Date().toISOString().slice(0, 10);
+const SETTLEMENT_YEAR = new Date().getFullYear();
+
+/** An unguessable token for a personalized booking link (~32 bytes, base64url). */
+function generateToken(): string {
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/** Human-readable recurrence for an availability block's list row. */
+function recurrenceLabel(b: AvailabilityBlock): string {
+  const rec = b.recurrence ?? "weekly";
+  const day = WEEKDAY_LABELS[b.weekday];
+  if (rec === "weekly") return `Every ${day}`;
+  if (rec === "biweekly") return `Every other ${day}`;
+  if (rec === "every_n_weeks") return `Every ${b.intervalWeeks ?? 2} weeks · ${day}`;
+  if (rec === "nth_weekday") return `${NTH_LABELS[b.nth ?? 1] ?? "First"} ${day} of the month`;
+  return day;
+}
+
+const SETTLEMENT_STATUS_COLORS: Record<SettlementStatus, string> = {
+  not_started: "bg-muted text-muted-foreground",
+  invited:     "bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200",
+  scheduled:   "bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-200",
+  completed:   "bg-green-100 text-green-800 dark:bg-green-900/60 dark:text-green-200",
+  declined:    "bg-red-100 text-red-800 dark:bg-red-900/60 dark:text-red-200",
+  exempt:      "bg-slate-100 text-slate-700 dark:bg-slate-800/60 dark:text-slate-300",
+};
+
+const SETTLEMENT_STATUSES: SettlementStatus[] = [
+  "not_started", "invited", "scheduled", "completed", "declined", "exempt",
+];
+const DECLARED_STATUSES: DeclaredTithingStatus[] = ["full", "partial", "non", "exempt"];
 
 /**
  * The column an interview belongs in. A `scheduled` interview whose date has
@@ -559,6 +597,298 @@ function KanbanView({ interviews, onSelect, onMove }: KanbanViewProps) {
   );
 }
 
+// ── List View (compact alternative to the kanban board) ─────────────────────────
+
+interface ListViewProps {
+  interviews: Interview[];
+  onSelect: (i: Interview) => void;
+}
+
+/** A subtitle line for a list row: the booked slot, or the next action to take. */
+function listRowSubtitle(i: Interview): string {
+  const stage = deriveStage(i);
+  if (i.scheduledDate && (stage === "scheduled" || stage === "pending_confirmation" || stage === "date_passed" || stage === "completed")) {
+    const when = `${formatDate(i.scheduledDate)}${i.scheduledTime ? ` · ${formatTime(i.scheduledTime)}` : ""}`;
+    return i.interviewer ? `${when} · ${i.interviewer}` : when;
+  }
+  return NEXT_ACTION[stage];
+}
+
+function ListView({ interviews, onSelect }: ListViewProps) {
+  const groups = INTERVIEW_PIPELINE
+    .map((stage) => ({ stage, items: interviews.filter((i) => deriveStage(i) === stage) }))
+    .filter((g) => g.items.length > 0);
+
+  if (interviews.length === 0) {
+    return (
+      <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+        No interviews yet. Add one to get started.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {groups.map(({ stage, items }) => (
+        <div key={stage}>
+          <div className="mb-1.5 flex items-center gap-2 px-1">
+            <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{stageLabel(stage)}</p>
+            <span className={cn("rounded-full px-1.5 text-[10px] font-bold tabular-nums", INTERVIEW_STAGE_COLORS[stage])}>
+              {items.length}
+            </span>
+          </div>
+          <div className="rounded-xl border border-border bg-card divide-y divide-border overflow-hidden">
+            {items.map((i) => (
+              <button
+                key={i.id}
+                type="button"
+                onClick={() => onSelect(i)}
+                className="flex w-full items-center gap-3 p-3 text-left transition-colors hover:bg-accent"
+              >
+                <div className="h-8 w-8 rounded-full flex items-center justify-center text-[11px] font-semibold shrink-0 bg-primary/10 text-primary">
+                  {getInitials(i.memberName)}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium truncate">{i.memberName}</p>
+                  <p className="text-[11px] text-muted-foreground truncate">
+                    {INTERVIEW_TYPE_LABELS[i.type]} · {listRowSubtitle(i)}
+                  </p>
+                </div>
+                <Badge className={cn("text-[10px] shrink-0", INTERVIEW_STAGE_COLORS[stage])}>
+                  {stageLabel(stage)}
+                </Badge>
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Calendar (week) View ────────────────────────────────────────────────────────
+
+const HOUR_PX = 44; // vertical pixels per hour in the week grid
+
+function startOfWeek(d: Date): Date {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  x.setDate(x.getDate() - x.getDay()); // back up to Sunday
+  return x;
+}
+function addDays(d: Date, n: number): Date {
+  const x = new Date(d);
+  x.setDate(x.getDate() + n);
+  return x;
+}
+
+interface CalItem {
+  interview: Interview;
+  startM: number;
+  endM: number;
+  lane: number;
+}
+
+/** Assign overlapping interviews to side-by-side lanes within a day column. */
+function layoutDay(interviews: Interview[]): { items: CalItem[]; lanes: number } {
+  const sorted = interviews
+    .map((i) => {
+      const startM = toMinutes(i.scheduledTime!);
+      return { interview: i, startM, endM: startM + durationOf(i), lane: 0 };
+    })
+    .sort((a, b) => a.startM - b.startM || a.endM - b.endM);
+
+  const laneEnds: number[] = [];
+  for (const it of sorted) {
+    let lane = laneEnds.findIndex((end) => end <= it.startM);
+    if (lane === -1) {
+      lane = laneEnds.length;
+      laneEnds.push(it.endM);
+    } else {
+      laneEnds[lane] = it.endM;
+    }
+    it.lane = lane;
+  }
+  return { items: sorted, lanes: Math.max(1, laneEnds.length) };
+}
+
+interface CalendarViewProps {
+  interviews: Interview[];
+  availability: AvailabilityBlock[];
+  exceptions: AvailabilityException[];
+  onSelect: (i: Interview) => void;
+}
+
+function CalendarView({ interviews, availability, exceptions, onSelect }: CalendarViewProps) {
+  const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
+  const todayStr = toDateStr(new Date());
+
+  const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
+
+  // Interviews that have a concrete date+time within the visible week.
+  const scheduledInterviews = useMemo(
+    () => interviews.filter((i) => i.scheduledDate && i.scheduledTime),
+    [interviews],
+  );
+
+  // Availability bands per day (union of interviewer windows honoring exceptions).
+  const bandsByDate = useMemo(() => {
+    const map = new Map<string, { start: number; end: number }[]>();
+    for (const day of days) {
+      const dateStr = toDateStr(day);
+      const bands = availability
+        .filter((b) => blockAppliesOn(b, day))
+        .filter((b) => !exceptions.some(
+          (e) => e.memberId === b.memberId && dateStr >= e.startDate && dateStr <= e.endDate,
+        ))
+        .map((b) => ({ start: toMinutes(b.startTime), end: toMinutes(b.endTime) }));
+      map.set(dateStr, bands);
+    }
+    return map;
+  }, [days, availability, exceptions]);
+
+  // Dynamic vertical bounds: fit availability + booked interviews, min 8am–8pm.
+  const [minM, maxM] = useMemo(() => {
+    let lo = 8 * 60;
+    let hi = 20 * 60;
+    for (const bands of bandsByDate.values()) {
+      for (const b of bands) { lo = Math.min(lo, b.start); hi = Math.max(hi, b.end); }
+    }
+    for (const i of scheduledInterviews) {
+      const inWeek = days.some((d) => toDateStr(d) === i.scheduledDate);
+      if (!inWeek) continue;
+      const s = toMinutes(i.scheduledTime!);
+      lo = Math.min(lo, s); hi = Math.max(hi, s + durationOf(i));
+    }
+    return [Math.floor(lo / 60) * 60, Math.ceil(hi / 60) * 60];
+  }, [bandsByDate, scheduledInterviews, days]);
+
+  const totalMin = Math.max(60, maxM - minM);
+  const gridHeight = (totalMin / 60) * HOUR_PX;
+  const hours = Array.from({ length: totalMin / 60 + 1 }, (_, i) => minM + i * 60);
+  const yFor = (m: number) => ((m - minM) / 60) * HOUR_PX;
+
+  const label = `${formatDate(toDateStr(weekStart))} – ${formatDate(toDateStr(addDays(weekStart, 6)))}`;
+
+  return (
+    <div className="space-y-3">
+      {/* Week nav */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1">
+          <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => setWeekStart((w) => addDays(w, -7))} aria-label="Previous week">
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <Button variant="outline" size="sm" className="h-8" onClick={() => setWeekStart(startOfWeek(new Date()))}>
+            Today
+          </Button>
+          <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => setWeekStart((w) => addDays(w, 7))} aria-label="Next week">
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </div>
+        <p className="text-sm font-medium text-muted-foreground">{label}</p>
+      </div>
+
+      {/* Grid */}
+      <div className="overflow-x-auto rounded-xl border border-border bg-card">
+        <div style={{ minWidth: 640 }}>
+          {/* Day headers */}
+          <div className="flex border-b border-border">
+            <div className="w-12 shrink-0" />
+            {days.map((d) => {
+              const dateStr = toDateStr(d);
+              const isToday = dateStr === todayStr;
+              return (
+                <div key={dateStr} className={cn("flex-1 py-2 text-center border-l border-border", isToday && "bg-primary/5")}>
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{WEEKDAY_LABELS[d.getDay()].slice(0, 3)}</p>
+                  <p className={cn("text-sm font-semibold", isToday ? "text-primary" : "text-foreground")}>{d.getDate()}</p>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Time grid */}
+          <div className="flex" style={{ height: gridHeight }}>
+            {/* Time gutter */}
+            <div className="relative w-12 shrink-0">
+              {hours.map((h) => (
+                <div key={h} className="absolute right-1 -translate-y-1/2 text-[10px] text-muted-foreground" style={{ top: yFor(h) }}>
+                  {formatTime(fromMinutes(h))}
+                </div>
+              ))}
+            </div>
+
+            {/* Day columns */}
+            {days.map((d) => {
+              const dateStr = toDateStr(d);
+              const isToday = dateStr === todayStr;
+              const bands = bandsByDate.get(dateStr) ?? [];
+              const dayInterviews = scheduledInterviews.filter((i) => i.scheduledDate === dateStr);
+              const { items, lanes } = layoutDay(dayInterviews);
+              return (
+                <div key={dateStr} className={cn("relative flex-1 border-l border-border", isToday && "bg-primary/5")}>
+                  {/* Hour lines */}
+                  {hours.map((h) => (
+                    <div key={h} className="absolute inset-x-0 border-t border-border/50" style={{ top: yFor(h) }} />
+                  ))}
+                  {/* Availability bands */}
+                  {bands.map((b, idx) => (
+                    <div
+                      key={idx}
+                      className="absolute inset-x-0.5 rounded bg-green-500/10 border border-green-500/20"
+                      style={{ top: yFor(b.start), height: Math.max(4, yFor(b.end) - yFor(b.start)) }}
+                    />
+                  ))}
+                  {/* Interview blocks */}
+                  {items.map(({ interview: i, startM, endM, lane }) => {
+                    const stage = deriveStage(i);
+                    return (
+                      <button
+                        key={i.id}
+                        type="button"
+                        onClick={() => onSelect(i)}
+                        className={cn(
+                          "absolute rounded-md border px-1 py-0.5 text-left overflow-hidden transition-shadow hover:shadow-md hover:z-10",
+                          INTERVIEW_STAGE_COLORS[stage],
+                        )}
+                        style={{
+                          top: yFor(startM),
+                          height: Math.max(16, yFor(endM) - yFor(startM) - 1),
+                          left: `${(lane / lanes) * 100}%`,
+                          width: `${(1 / lanes) * 100}%`,
+                        }}
+                        title={`${i.memberName} · ${INTERVIEW_TYPE_LABELS[i.type]}`}
+                      >
+                        <p className="text-[10px] font-semibold leading-tight truncate">{i.memberName}</p>
+                        <p className="text-[9px] leading-tight truncate opacity-80">{formatTime(i.scheduledTime!)}</p>
+                      </button>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Legend */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+        <span className="flex items-center gap-1.5">
+          <span className="h-2.5 w-3 rounded-sm bg-green-500/20 border border-green-500/30" /> Open availability
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className={cn("h-2.5 w-3 rounded-sm", INTERVIEW_STAGE_COLORS.scheduled)} /> Scheduled
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className={cn("h-2.5 w-3 rounded-sm", INTERVIEW_STAGE_COLORS.pending_confirmation)} /> Confirming
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className={cn("h-2.5 w-3 rounded-sm", INTERVIEW_STAGE_COLORS.completed)} /> Completed
+        </span>
+      </div>
+    </div>
+  );
+}
+
 // ── Availability View ───────────────────────────────────────────────────────────
 
 interface AvailabilityViewProps {
@@ -617,9 +947,12 @@ function AvailabilityView({
                   <ul className="space-y-1">
                     {blocks.map((b) => (
                       <li key={b.id} className="group flex items-center justify-between gap-2 rounded-md border border-border px-2.5 py-1.5 text-sm">
-                        <span>
-                          <span className="font-medium">{WEEKDAY_LABELS[b.weekday]}</span>
-                          <span className="text-muted-foreground"> · {formatTime(b.startTime)}–{formatTime(b.endTime)}</span>
+                        <span className="min-w-0">
+                          <span className="font-medium flex items-center gap-1">
+                            {(b.recurrence ?? "weekly") !== "weekly" && <Repeat className="h-3 w-3 text-muted-foreground shrink-0" />}
+                            {recurrenceLabel(b)}
+                          </span>
+                          <span className="text-muted-foreground text-xs"> {formatTime(b.startTime)}–{formatTime(b.endTime)}</span>
                         </span>
                         <button
                           onClick={() => onDeleteBlock(b.id)}
@@ -672,6 +1005,381 @@ function AvailabilityView({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// ── Tithing Settlement View ─────────────────────────────────────────────────────
+
+type SettlementSegment = "all" | "not_started" | "invited" | "scheduled" | "done";
+
+interface SettlementRowState {
+  member: Member;
+  name: string;
+  record?: SettlementRecord;
+  token?: BookingToken;
+  interview?: Interview;
+  status: SettlementStatus;
+}
+
+interface SettlementViewProps {
+  members: Member[];
+  settlements: SettlementRecord[];
+  bookingTokens: BookingToken[];
+  interviews: Interview[];
+  onGenerate: (member: Member) => void;
+  onGenerateAll: (members: Member[]) => void;
+  onSetStatus: (member: Member, record: SettlementRecord | undefined, status: SettlementStatus) => void;
+  onSetDeclared: (member: Member, record: SettlementRecord | undefined, declared: DeclaredTithingStatus) => void;
+}
+
+function bookingUrl(token: string): string {
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  return `${origin}/book/${token}`;
+}
+
+/** Short relative time, e.g. "3d ago", for link-open timestamps. */
+function timeAgo(iso: string): string {
+  const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
+/** CSV-escape a cell (quote if it contains a comma, quote, or newline). */
+function csvCell(v?: string): string {
+  const s = v ?? "";
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+/** Build and download a CSV of every member's settlement status + booking link. */
+function downloadSettlementCsv(rows: SettlementRowState[]) {
+  const header = ["Name", "Email", "Phone", "Status", "Opened", "Booking Link", "Scheduled"];
+  const lines = rows.map((r) => {
+    const opened = r.token?.openedAt ? `Yes (${r.token.openCount ?? 1}x)` : r.token ? "No" : "";
+    const link = r.token ? bookingUrl(r.token.token) : "";
+    const sched = r.interview?.scheduledDate
+      ? [r.interview.scheduledDate, r.interview.scheduledTime, r.interview.interviewer].filter(Boolean).join(" ")
+      : "";
+    return [r.name, r.member.email, r.member.phone, SETTLEMENT_STATUS_LABELS[r.status], opened, link, sched]
+      .map(csvCell)
+      .join(",");
+  });
+  const csv = [header.join(","), ...lines].join("\r\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `tithing-settlement-${SETTLEMENT_YEAR}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/** Progress ring: a single green arc showing percent complete, big % in center. */
+function ProgressRing({ pct }: { pct: number }) {
+  const r = 34;
+  const c = 2 * Math.PI * r;
+  const filled = (Math.min(100, Math.max(0, pct)) / 100) * c;
+  return (
+    <svg viewBox="0 0 80 80" className="h-20 w-20 shrink-0 -rotate-90" aria-hidden>
+      <circle cx="40" cy="40" r={r} fill="none" strokeWidth="8" className="stroke-muted" />
+      <circle
+        cx="40" cy="40" r={r} fill="none" strokeWidth="8" strokeLinecap="round"
+        className="stroke-green-500 transition-all duration-500"
+        strokeDasharray={`${filled} ${c - filled}`}
+      />
+      <text x="40" y="40" transform="rotate(90 40 40)" textAnchor="middle" dominantBaseline="central"
+        className="fill-foreground font-bold" style={{ fontSize: 18 }}>
+        {pct}%
+      </text>
+    </svg>
+  );
+}
+
+/** Ordered status segments for the breakdown bar + legend (colored dots). */
+const BREAKDOWN: { key: SettlementStatus[]; label: string; bar: string; dot: string }[] = [
+  { key: ["completed", "exempt"], label: "Done",      bar: "bg-green-500",  dot: "bg-green-500" },
+  { key: ["scheduled"],           label: "Scheduled", bar: "bg-blue-500",   dot: "bg-blue-500" },
+  { key: ["invited"],             label: "Invited",   bar: "bg-amber-400",  dot: "bg-amber-400" },
+  { key: ["declined"],            label: "Declined",  bar: "bg-red-400",    dot: "bg-red-400" },
+  { key: ["not_started"],         label: "Not started", bar: "bg-muted-foreground/30", dot: "bg-muted-foreground/40" },
+];
+
+function BreakdownBar({ rows }: { rows: SettlementRowState[] }) {
+  const total = rows.length || 1;
+  const seg = BREAKDOWN.map((b) => ({
+    ...b,
+    n: rows.filter((r) => b.key.includes(r.status)).length,
+  }));
+  return (
+    <div className="space-y-2">
+      <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-muted">
+        {seg.map((s) => s.n > 0 && (
+          <div key={s.label} className={cn("h-full", s.bar)} style={{ width: `${(s.n / total) * 100}%` }} />
+        ))}
+      </div>
+      <div className="flex flex-wrap gap-x-3 gap-y-1">
+        {seg.filter((s) => s.n > 0).map((s) => (
+          <span key={s.label} className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <span className={cn("h-2 w-2 rounded-full", s.dot)} /> {s.label} <span className="font-semibold text-foreground">{s.n}</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SettlementView({
+  members, settlements, bookingTokens, interviews, onGenerate, onGenerateAll, onSetStatus, onSetDeclared,
+}: SettlementViewProps) {
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [segment, setSegment] = useState<SettlementSegment>("all");
+
+  const rows: SettlementRowState[] = useMemo(() => {
+    const active = members.filter((m) => m.isActive);
+    return active.map((m) => {
+      const name = `${m.firstName} ${m.lastName}`;
+      const record = settlements.find((s) => s.memberId === m.id && s.year === SETTLEMENT_YEAR);
+      const token = bookingTokens
+        .filter((t) => t.memberId === m.id && t.year === SETTLEMENT_YEAR && !t.usedAt)
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+      const interview = record?.interviewId
+        ? interviews.find((i) => i.id === record.interviewId)
+        : undefined;
+      return { member: m, name, record, token, interview, status: record?.status ?? "not_started" };
+    });
+  }, [members, settlements, bookingTokens, interviews]);
+
+  const total = rows.length;
+  const inSegment = (r: SettlementRowState, s: SettlementSegment) =>
+    s === "all" ? true
+    : s === "done" ? (r.status === "completed" || r.status === "exempt" || r.status === "declined")
+    : r.status === s;
+
+  const count = (s: SettlementSegment) => rows.filter((r) => inSegment(r, s)).length;
+  const completedN = rows.filter((r) => r.status === "completed" || r.status === "exempt").length;
+  const invitedN = count("invited");
+  const openedNotBooked = rows.filter((r) => r.status === "invited" && r.token?.openedAt).length;
+  const remaining = rows.filter((r) => r.status === "not_started" || r.status === "invited");
+  const pct = total > 0 ? Math.round((completedN / total) * 100) : 0;
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return rows.filter((r) => inSegment(r, segment) && (!q || r.name.toLowerCase().includes(q)));
+  }, [rows, segment, query]);
+
+  async function copy(token: BookingToken) {
+    try {
+      await navigator.clipboard.writeText(bookingUrl(token.token));
+      setCopiedId(token.id);
+      setTimeout(() => setCopiedId((c) => (c === token.id ? null : c)), 1800);
+    } catch {
+      // Clipboard may be blocked; ignore.
+    }
+  }
+
+  if (total === 0) {
+    return (
+      <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+        No active ward members yet. Add members to track tithing settlement.
+      </div>
+    );
+  }
+
+  const SEGMENTS: { seg: SettlementSegment; label: string }[] = [
+    { seg: "all",         label: "All" },
+    { seg: "not_started", label: "Not started" },
+    { seg: "invited",     label: "Invited" },
+    { seg: "scheduled",   label: "Scheduled" },
+    { seg: "done",        label: "Done" },
+  ];
+
+  return (
+    <div className="space-y-4">
+      {/* Progress header: ring + breakdown + bulk action */}
+      <div className="rounded-xl border border-border bg-card p-4">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+          <ProgressRing pct={pct} />
+          <div className="min-w-0 flex-1 space-y-2">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold">{SETTLEMENT_YEAR} Tithing Settlement</p>
+                <p className="text-xs text-muted-foreground">
+                  {completedN} of {total} complete · {remaining.length} to go
+                </p>
+              </div>
+              <div className="flex gap-2 shrink-0">
+                <Button size="sm" variant="outline" className="gap-1.5" onClick={() => downloadSettlementCsv(rows)}>
+                  <Download className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Export CSV</span>
+                  <span className="sm:hidden">CSV</span>
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1.5"
+                  disabled={remaining.length === 0}
+                  onClick={() => onGenerateAll(remaining.map((r) => r.member))}
+                >
+                  <Link2 className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Generate all remaining</span>
+                  <span className="sm:hidden">All links</span>
+                </Button>
+              </div>
+            </div>
+            <BreakdownBar rows={rows} />
+          </div>
+        </div>
+
+        {/* Follow-up nudge: invited but not yet booked is where a sprint stalls.
+            "Opened but didn't book" is the hotter signal, so it leads. */}
+        {invitedN > 0 && (
+          <button
+            type="button"
+            onClick={() => setSegment("invited")}
+            className="mt-3 flex w-full items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-left text-xs text-amber-800 transition-colors hover:bg-amber-100 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-200 dark:hover:bg-amber-900/40"
+          >
+            <Send className="h-3.5 w-3.5 shrink-0" />
+            {openedNotBooked > 0 ? (
+              <span><strong>{openedNotBooked}</strong> opened their link but haven&apos;t booked yet — good time to follow up.</span>
+            ) : (
+              <span><strong>{invitedN}</strong> {invitedN === 1 ? "person has" : "people have"} a link but haven&apos;t opened it yet.</span>
+            )}
+          </button>
+        )}
+      </div>
+
+      {/* Filter chips + search */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap gap-1.5">
+          {SEGMENTS.map(({ seg, label }) => {
+            const n = count(seg);
+            const active = segment === seg;
+            return (
+              <button
+                key={seg}
+                type="button"
+                onClick={() => setSegment(seg)}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                  active
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-border text-muted-foreground hover:bg-accent",
+                )}
+              >
+                {label}
+                <span className={cn(
+                  "rounded-full px-1.5 text-[10px] font-bold tabular-nums",
+                  active ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground",
+                )}>
+                  {n}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="relative sm:w-56">
+          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search members…"
+            className="h-9 pl-8 text-sm"
+          />
+        </div>
+      </div>
+
+      {/* Roster */}
+      {filtered.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+          No members match.
+        </div>
+      ) : (
+        <div className="rounded-xl border border-border bg-card divide-y divide-border overflow-hidden">
+          {filtered.map((r) => (
+            <div key={r.member.id} className="flex flex-wrap items-center gap-3 p-3">
+              <div className="h-8 w-8 rounded-full flex items-center justify-center text-xs font-semibold shrink-0 bg-primary/10 text-primary">
+                {getInitials(r.name)}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium truncate">{r.name}</p>
+                {/* Booked slot, once scheduled */}
+                {r.interview?.scheduledDate && (
+                  <p className="flex items-center gap-1 text-[11px] text-muted-foreground truncate">
+                    <CalendarClock className="h-3 w-3 shrink-0" />
+                    {formatDate(r.interview.scheduledDate)}
+                    {r.interview.scheduledTime ? ` · ${formatTime(r.interview.scheduledTime)}` : ""}
+                    {r.interview.interviewer ? ` · ${r.interview.interviewer}` : ""}
+                  </p>
+                )}
+                {!r.interview?.scheduledDate && r.record?.declaredStatus && (
+                  <p className="text-[11px] text-muted-foreground truncate">
+                    Declared: {DECLARED_STATUS_LABELS[r.record.declaredStatus]}
+                  </p>
+                )}
+                {/* Link-open signal, for members invited but not yet booked. */}
+                {r.status === "invited" && r.token && (
+                  <p className={cn(
+                    "flex items-center gap-1 text-[11px] truncate",
+                    r.token.openedAt ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground",
+                  )}>
+                    <Eye className="h-3 w-3 shrink-0" />
+                    {r.token.openedAt ? `Opened ${timeAgo(r.token.openedAt)} · not booked` : "Link not opened yet"}
+                  </p>
+                )}
+              </div>
+
+              <Badge className={cn("text-[10px] shrink-0", SETTLEMENT_STATUS_COLORS[r.status])}>
+                {SETTLEMENT_STATUS_LABELS[r.status]}
+              </Badge>
+
+              {/* Link actions — only meaningful until a slot is booked */}
+              {r.status !== "scheduled" && r.status !== "completed" && (
+                r.token ? (
+                  <Button size="sm" variant="ghost" className="h-8 gap-1 text-xs" onClick={() => copy(r.token!)}>
+                    {copiedId === r.token.id ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+                    {copiedId === r.token.id ? "Copied" : "Copy link"}
+                  </Button>
+                ) : (
+                  <Button size="sm" variant="ghost" className="h-8 gap-1 text-xs" onClick={() => onGenerate(r.member)}>
+                    <Link2 className="h-3.5 w-3.5" /> Generate link
+                  </Button>
+                )
+              )}
+
+              {/* Status control */}
+              <Select value={r.status} onValueChange={(v) => onSetStatus(r.member, r.record, v as SettlementStatus)}>
+                <SelectTrigger className="h-8 w-[130px] text-xs shrink-0"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {SETTLEMENT_STATUSES.map((s) => (
+                    <SelectItem key={s} value={s}>{SETTLEMENT_STATUS_LABELS[s]}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              {/* Declared status, once completed */}
+              {r.status === "completed" && (
+                <Select
+                  value={r.record?.declaredStatus ?? ""}
+                  onValueChange={(v) => onSetDeclared(r.member, r.record, v as DeclaredTithingStatus)}
+                >
+                  <SelectTrigger className="h-8 w-[130px] text-xs shrink-0">
+                    <SelectValue placeholder="Declared…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DECLARED_STATUSES.map((s) => (
+                      <SelectItem key={s} value={s}>{DECLARED_STATUS_LABELS[s]}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -919,7 +1627,7 @@ function StageAdvancePanel({
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
-type PageView = "board" | "availability";
+type PageView = "calendar" | "board" | "settlement" | "availability";
 
 const EMPTY_FORM = {
   memberName: "",
@@ -932,7 +1640,16 @@ const EMPTY_FORM = {
   notes: "",
 };
 
-const EMPTY_BLOCK = { open: false, member: null as BishopricMember | null, weekday: 2, startTime: "18:00", endTime: "19:00" };
+const EMPTY_BLOCK = {
+  open: false,
+  member: null as BishopricMember | null,
+  weekday: 2,
+  startTime: "18:00",
+  endTime: "19:00",
+  recurrence: "weekly" as AvailabilityRecurrence,
+  intervalWeeks: 2,
+  nth: 1,
+};
 const EMPTY_EXCEPTION = { open: false, member: null as BishopricMember | null, startDate: "", endDate: "", reason: "" };
 
 export default function InterviewsPage() {
@@ -941,15 +1658,21 @@ export default function InterviewsPage() {
   const interviewsCol  = data.interviews;
   const availabilityCol = data.availability;
   const exceptionsCol  = data.exceptions;
+  const settlementsCol = data.settlements;
+  const bookingTokensCol = data.bookingTokens;
   const interviews   = interviewsCol.items;
   const availability = availabilityCol.items;
   const exceptions   = exceptionsCol.items;
+  const settlements  = settlementsCol.items;
+  const bookingTokens = bookingTokensCol.items;
+  const members      = data.members;
   const bishopric    = data.bishopric;
 
   const INTERVIEWERS = useMemo(() => deriveInterviewers(bishopric), [bishopric]);
   const BISHOP       = useMemo(() => deriveBishop(bishopric), [bishopric]);
 
-  const [view,       setView]       = useState<PageView>("board");
+  const [view,       setView]       = useState<PageView>("calendar");
+  const [boardMode,  setBoardMode]  = useState<"board" | "list">("board");
   const [selected,   setSelected]   = useState<Interview | null>(null);
   // Deep link from the dashboard: /interviews?new=1 opens the New dialog.
   const [dialogOpen, setDialogOpen] = useState(() =>
@@ -1092,6 +1815,8 @@ export default function InterviewsPage() {
   async function saveBlock() {
     if (!blockForm.member || blockForm.startTime >= blockForm.endTime) return;
     const m = blockForm.member;
+    const rec = blockForm.recurrence;
+    const usesInterval = rec === "biweekly" || rec === "every_n_weeks";
     await availabilityCol.create({
       id: newId(),
       memberId: m.id,
@@ -1099,6 +1824,12 @@ export default function InterviewsPage() {
       weekday: blockForm.weekday,
       startTime: blockForm.startTime,
       endTime: blockForm.endTime,
+      recurrence: rec,
+      // every_n_weeks carries the interval; biweekly is implicitly 2.
+      intervalWeeks: rec === "every_n_weeks" ? blockForm.intervalWeeks : undefined,
+      nth: rec === "nth_weekday" ? blockForm.nth : undefined,
+      // Phase interval recurrences from today (this week counts as "on").
+      anchorDate: usesInterval ? TODAY : undefined,
     });
     setBlockForm(EMPTY_BLOCK);
   }
@@ -1119,9 +1850,95 @@ export default function InterviewsPage() {
     setExceptionForm(EMPTY_EXCEPTION);
   }
 
+  // ── Settlement handlers ────────────────────────────────────────────────────
+
+  const memberName = (m: Member) => `${m.firstName} ${m.lastName}`;
+
+  /** Create (or reuse) this year's settlement record + a personalized booking link. */
+  async function generateLink(m: Member) {
+    const now = new Date().toISOString();
+    let record = settlements.find((s) => s.memberId === m.id && s.year === SETTLEMENT_YEAR);
+    if (!record) {
+      record = {
+        id: newId(),
+        memberId: m.id,
+        memberName: memberName(m),
+        year: SETTLEMENT_YEAR,
+        status: "invited",
+        createdBy: user?.uid ?? "mock",
+        createdAt: now,
+        updatedAt: now,
+      };
+      await settlementsCol.create(record);
+    } else if (record.status === "not_started") {
+      await settlementsCol.update(record.id, { status: "invited" });
+    }
+    const token: BookingToken = {
+      id: newId(),
+      token: generateToken(),
+      memberId: m.id,
+      memberName: memberName(m),
+      purpose: "tithing_settlement",
+      year: SETTLEMENT_YEAR,
+      settlementRecordId: record.id,
+      createdBy: user?.uid ?? "mock",
+      createdAt: now,
+      updatedAt: now,
+    };
+    await bookingTokensCol.create(token);
+  }
+
+  async function generateAll(ms: Member[]) {
+    for (const m of ms) {
+      const hasToken = bookingTokens.some(
+        (t) => t.memberId === m.id && t.year === SETTLEMENT_YEAR && !t.usedAt,
+      );
+      if (!hasToken) await generateLink(m);
+    }
+  }
+
+  async function setSettlementStatus(
+    m: Member, record: SettlementRecord | undefined, status: SettlementStatus,
+  ) {
+    const now = new Date().toISOString();
+    if (record) {
+      await settlementsCol.update(record.id, { status });
+    } else {
+      await settlementsCol.create({
+        id: newId(), memberId: m.id, memberName: memberName(m), year: SETTLEMENT_YEAR,
+        status, createdBy: user?.uid ?? "mock", createdAt: now, updatedAt: now,
+      });
+    }
+  }
+
+  async function setDeclared(
+    m: Member, record: SettlementRecord | undefined, declared: DeclaredTithingStatus,
+  ) {
+    const now = new Date().toISOString();
+    if (record) {
+      await settlementsCol.update(record.id, { declaredStatus: declared });
+    } else {
+      await settlementsCol.create({
+        id: newId(), memberId: m.id, memberName: memberName(m), year: SETTLEMENT_YEAR,
+        status: "completed", declaredStatus: declared,
+        createdBy: user?.uid ?? "mock", createdAt: now, updatedAt: now,
+      });
+    }
+  }
+
+  // ── Settlement counts (for the tab badge / header) ──────────────────────────
+  const activeMemberCount = members.filter((m) => m.isActive).length;
+  const settlementDone = members.filter((m) => {
+    const r = settlements.find((s) => s.memberId === m.id && s.year === SETTLEMENT_YEAR);
+    return m.isActive && (r?.status === "completed" || r?.status === "exempt");
+  }).length;
+  const settlementRemaining = activeMemberCount - settlementDone;
+
   const TAB_CONFIG: { view: PageView; label: string; count?: number }[] = [
-    { view: "board",        label: "Board",        count: needsScheduling + toReview },
-    { view: "availability", label: "Availability", count: availability.length },
+    { view: "calendar",     label: "Calendar" },
+    { view: "board",        label: "Board",              count: needsScheduling + toReview },
+    { view: "settlement",   label: "Tithing Settlement", count: settlementRemaining },
+    { view: "availability", label: "Availability",       count: availability.length },
   ];
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -1132,7 +1949,7 @@ export default function InterviewsPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Interviews</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Scheduling</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             {needsScheduling} to schedule
             {pending > 0 && (
@@ -1188,8 +2005,53 @@ export default function InterviewsPage() {
       </div>
 
       {/* ── Views ── */}
+      {view === "calendar" && (
+        <CalendarView
+          interviews={interviews}
+          availability={availability}
+          exceptions={exceptions}
+          onSelect={setSelected}
+        />
+      )}
+
       {view === "board" && (
-        <KanbanView interviews={interviews} onSelect={setSelected} onMove={handleMove} />
+        <div className="space-y-3">
+          <div className="flex justify-end">
+            <div className="inline-flex rounded-lg border border-border p-0.5">
+              {([["board", "Board", Columns3], ["list", "List", List]] as const).map(([mode, label, Icon]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setBoardMode(mode)}
+                  className={cn(
+                    "flex items-center gap-1.5 rounded-md px-3 py-1 text-xs font-medium transition-colors",
+                    boardMode === mode ? "bg-primary/10 text-primary" : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <Icon className="h-3.5 w-3.5" /> {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          {boardMode === "board" ? (
+            <KanbanView interviews={interviews} onSelect={setSelected} onMove={handleMove} />
+          ) : (
+            <ListView interviews={interviews} onSelect={setSelected} />
+          )}
+        </div>
+      )}
+
+      {view === "settlement" && (
+        <SettlementView
+          members={members}
+          settlements={settlements}
+          bookingTokens={bookingTokens}
+          interviews={interviews}
+          onGenerate={(m) => { void generateLink(m); }}
+          onGenerateAll={(ms) => { void generateAll(ms); }}
+          onSetStatus={(m, r, s) => { void setSettlementStatus(m, r, s); }}
+          onSetDeclared={(m, r, d) => { void setDeclared(m, r, d); }}
+        />
       )}
 
       {view === "availability" && (
@@ -1395,6 +2257,50 @@ export default function InterviewsPage() {
                 </SelectContent>
               </Select>
             </div>
+            <div className="space-y-1.5">
+              <Label>Repeats</Label>
+              <Select
+                value={blockForm.recurrence}
+                onValueChange={(v) => setBlockForm((f) => ({ ...f, recurrence: v as AvailabilityRecurrence }))}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {(Object.keys(RECURRENCE_LABELS) as AvailabilityRecurrence[]).map((r) => (
+                    <SelectItem key={r} value={r}>{RECURRENCE_LABELS[r]}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {blockForm.recurrence === "every_n_weeks" && (
+              <div className="space-y-1.5">
+                <Label htmlFor="intWeeks">Every how many weeks?</Label>
+                <Input
+                  id="intWeeks" type="number" min={2} max={12}
+                  value={blockForm.intervalWeeks}
+                  onChange={(e) => setBlockForm((f) => ({ ...f, intervalWeeks: Math.max(2, Number(e.target.value) || 2) }))}
+                />
+                <p className="text-xs text-muted-foreground">Counting from this week.</p>
+              </div>
+            )}
+
+            {blockForm.recurrence === "nth_weekday" && (
+              <div className="space-y-1.5">
+                <Label>Which {WEEKDAY_LABELS[blockForm.weekday]} of the month?</Label>
+                <Select
+                  value={String(blockForm.nth)}
+                  onValueChange={(v) => setBlockForm((f) => ({ ...f, nth: Number(v) }))}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {[1, 2, 3, 4, 5, -1].map((n) => (
+                      <SelectItem key={n} value={String(n)}>{NTH_LABELS[n]} {WEEKDAY_LABELS[blockForm.weekday]}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label htmlFor="blkStart">From</Label>
