@@ -84,9 +84,22 @@
   * {
     border-color: hsl(var(--border));
   }
+  html {
+    /* No grey flash on tap for links/buttons — feels native on mobile. */
+    -webkit-tap-highlight-color: transparent;
+  }
   body {
     background-color: hsl(var(--background));
     color: hsl(var(--foreground));
     font-feature-settings: "rlig" 1, "calt" 1;
+    /* App-wide guard: vertical is the only page-level scroll axis. Intentional
+       horizontal scrollers keep their own `overflow-x-auto` and are unaffected. */
+    overflow-x: hidden;
   }
+}
+
+/* Tailwind v4 has no built-in `pb-safe`; define it so the bottom nav clears the
+   iOS home indicator (needs `viewportFit: "cover"` for the inset to be non-zero). */
+@utility pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
 }

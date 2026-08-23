@@ -36,7 +36,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <ChatProvider>
         <div className="flex h-full min-h-screen">
           <Sidebar />
-          <main className="flex-1 overflow-auto lg:pl-60">
+          <main className="flex-1 min-w-0 overflow-x-hidden overflow-y-auto overscroll-y-contain lg:pl-60">
             <div className="pb-20 lg:pb-0">{children}</div>
           </main>
           <BottomNav />
