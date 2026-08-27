@@ -85,6 +85,15 @@ export async function GET(
     // tracking is non-critical
   }
 
+  // Jump the settlement record straight to `link_opened` the moment the member
+  // follows their link — no manual "invited" step in between. Best-effort and
+  // forward-only: it never downgrades a record that's already scheduled/done.
+  try {
+    await markSettlementOpened(admin, record);
+  } catch {
+    // status tracking is non-critical
+  }
+
   const [blocks, exceptions, interviews] = await Promise.all([
     availabilityRepo.list(admin),
     availabilityExceptionsRepo.list(admin),
@@ -205,6 +214,56 @@ export async function POST(
     time,
     interviewer,
     durationMins: SETTLEMENT_MINS,
+  });
+}
+
+/**
+ * Advance the member's settlement record to `link_opened` when they open the
+ * link. Forward-only: only `not_started` / `link_created` records move; anything
+ * already scheduled, completed, or otherwise past this point is left alone. If
+ * no record exists yet (link generated outside the normal flow), create one so
+ * the open is still reflected on the board.
+ */
+async function markSettlementOpened(
+  admin: ReturnType<typeof createAdminClient>,
+  record: BookingToken,
+): Promise<void> {
+  let existing: SettlementRecord | null = null;
+  if (record.settlementRecordId) {
+    const { data } = await admin
+      .from("settlement_records")
+      .select("*")
+      .eq("id", record.settlementRecordId)
+      .maybeSingle();
+    existing = data ? fromRow<SettlementRecord>(data as Record<string, unknown>) : null;
+  }
+  if (!existing && record.memberId && record.year != null) {
+    const { data } = await admin
+      .from("settlement_records")
+      .select("*")
+      .eq("member_id", record.memberId)
+      .eq("year", record.year)
+      .maybeSingle();
+    existing = data ? fromRow<SettlementRecord>(data as Record<string, unknown>) : null;
+  }
+
+  if (existing) {
+    if (existing.status === "not_started" || existing.status === "link_created") {
+      await settlementRepo.update(admin, existing.id, { status: "link_opened" });
+    }
+    return;
+  }
+
+  const now = new Date().toISOString();
+  await settlementRepo.create(admin, {
+    id: newId(),
+    memberId: record.memberId,
+    memberName: record.memberName,
+    year: record.year ?? nowInAppTz().getFullYear(),
+    status: "link_opened",
+    createdBy: "self-signup",
+    createdAt: now,
+    updatedAt: now,
   });
 }
 

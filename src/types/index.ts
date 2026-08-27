@@ -585,24 +585,31 @@ export interface AvailabilityException {
 /**
  * Where a member stands in the year's tithing settlement. Every active ward
  * member gets a record; the bishopric works the ward toward all-completed.
- *   not_started → invited (link generated) → scheduled (slot booked) → completed
+ *   not_started → link_created (link generated) → link_opened (member opened it)
+ *              → scheduled (slot booked) → completed
  *   declined / exempt are terminal outcomes recorded by the bishopric.
+ *
+ * `link_created` means the personalized link exists — NOT that it has been sent.
+ * The bishopric still has to deliver it (text, email, in person). `link_opened`
+ * is set automatically the first time the member follows the link.
  */
 export type SettlementStatus =
   | "not_started"
-  | "invited"
+  | "link_created"
+  | "link_opened"
   | "scheduled"
   | "completed"
   | "declined"
   | "exempt";
 
 export const SETTLEMENT_STATUS_LABELS: Record<SettlementStatus, string> = {
-  not_started: "Not started",
-  invited:     "Invited",
-  scheduled:   "Scheduled",
-  completed:   "Completed",
-  declined:    "Declined",
-  exempt:      "Exempt",
+  not_started:  "Not started",
+  link_created: "Link created",
+  link_opened:  "Link opened",
+  scheduled:    "Scheduled",
+  completed:    "Completed",
+  declined:     "Declined",
+  exempt:       "Exempt",
 };
 
 /** The member's self-declared tithing status, recorded at/after the interview. */

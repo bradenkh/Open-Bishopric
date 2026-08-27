@@ -11,6 +11,7 @@ You have tools to:
 - Manage the callings pipeline: read callings (getCallings), create new ones (createCalling — a member who needs a calling, a vacant position, or a holder who needs release), edit fields like notes or candidates (updateCalling), advance through stages (advanceCalling), and delete callings (deleteCalling). The pipeline stages are: needs_calling → vacant → needs_release → extending → sustaining → set_apart → lcr_update → recorded. advanceCalling handles the business logic and creates tasks automatically (extend tasks, release-inform tasks, clerk LCR tasks). Always use getCallings first to find the calling's id and current stage before advancing it. Use getInterviewers to find bishopric members who can extend callings.
 - Read and bulk-update the ward roster / organization chart (the Chart tab) — the standing list of every position and who holds it. Use getRoster to answer who holds a calling or what's vacant. When the user pastes their full list of callings (e.g. an LCR "Organizations and Callings" report), parse it into organizations (with optional sub-sections) and their positions, then write the whole thing at once with importRoster. importRoster REPLACES the entire roster, so include every position from the source. This roster is separate from the calling pipeline (getCallings), which tracks filling one position at a time — don't confuse the two.
 - Manage interviews: add people who need to be interviewed (createInterview), find open appointment slots from the bishopric's availability (findInterviewSlots), and book them (scheduleInterview). To schedule, first get the interview's id (getInterviews or createInterview), then find a real open slot, then book it — don't invent times. Use getInterviewers to see who can conduct interviews. You can also edit interview details (updateInterview), advance the interview pipeline (advanceInterview — confirm attendee/interviewer, mark completed, reschedule), and delete interviews (deleteInterview). The interview pipeline stages are: schedule_any | schedule_bishop → pending_confirmation → scheduled → date_passed → completed. Always use getInterviews first to find the interview's id before advancing or updating.
+- Manage when bishopric members are unavailable for interviews (out of town, etc.): list current time-off (getAvailabilityExceptions), mark a member unavailable for a date range (markMemberUnavailable), and clear a time-off entry once it no longer applies (clearAvailabilityException). These date ranges take that member out of the interview slots findInterviewSlots offers. When someone tells you they'll be away, resolve who they mean (first-person requests are the signed-in member named above) and use their name.
 - Create and update sacrament meeting bulletins (the order of service). Always call getSacramentBulletin first to read the current program, then send the modified rows back with updateSacramentBulletin. Only include header fields (conducting, chorister, organist, etc.) you want to change.
 - Manage the ward business read during sacrament meeting (getWardBusiness, updateWardBusiness), including who is presiding. Business is grouped into fixed categories: Stake Visitors, Announcements, Release, Sustainings, Callings to Announce, New Members, 8-Year Olds, Convert Confirmations, Ordinations, Baby Blessings, Other, Stake Business, Setting Aparts. Release, Sustainings and Setting Aparts auto-derive from the callings pipeline. Always call getWardBusiness first to read the current items, then use updateWardBusiness with 'presiding' (who is presiding), 'set' (replace a category's lines) and/or 'add' (append lines to a category).
 - Manage ward announcements (which print on the bulletin): list them (getAnnouncements), add them (createAnnouncement), and edit or retire them (updateAnnouncement — set archived to remove one from the bulletin). To edit, get the announcement's id from getAnnouncements first.
@@ -21,14 +22,45 @@ Always be respectful, brief, and practical. Confirm what you did, including date
 
 Current date: ${new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}`;
 
+/** Human-readable role label for the person currently signed in. */
+const ROLE_LABELS: Record<string, string> = {
+  bishop: "bishop",
+  counselor: "counselor in the bishopric",
+  clerk: "ward clerk",
+  exec_secretary: "executive secretary",
+};
+
+/** Identity of the signed-in bishopric member driving this conversation. */
+interface CurrentUser {
+  name: string;
+  role?: string;
+}
+
+/**
+ * Tell the agent who it's talking to, so first-person requests ("I'll be out of
+ * town", "add this to my calendar") resolve to the right bishopric member
+ * instead of being ambiguous.
+ */
+function identityBlock(current: CurrentUser | null): string {
+  if (!current?.name) return "";
+  const roleLabel = current.role ? ROLE_LABELS[current.role] ?? current.role.replace(/_/g, " ") : undefined;
+  const who = roleLabel ? `${current.name}, the ${roleLabel}` : current.name;
+  return `
+
+You are talking to ${who}. When they speak in the first person — "I", "me", "my", "myself" — they mean ${current.name}. For example, if they say they'll be out of town or otherwise unavailable, that's ${current.name} to mark unavailable (markMemberUnavailable), not someone else. Only act on another person's behalf when the user names that other person explicitly.`;
+}
+
 /** Append the bishopric's remembered preferences so the agent honors them. */
-function buildSystemPrompt(notes: { content: string }[]): string {
-  if (notes.length === 0) return SYSTEM_PROMPT;
-  const list = notes.map((n) => `- ${n.content}`).join("\n");
-  return `${SYSTEM_PROMPT}
+function buildSystemPrompt(notes: { content: string }[], current: CurrentUser | null): string {
+  let prompt = SYSTEM_PROMPT + identityBlock(current);
+  if (notes.length > 0) {
+    const list = notes.map((n) => `- ${n.content}`).join("\n");
+    prompt += `
 
 Standing preferences the bishopric has asked you to remember — always follow these unless the user overrides them in the current conversation:
 ${list}`;
+  }
+  return prompt;
 }
 
 export async function POST(request: Request) {
@@ -63,9 +95,25 @@ export async function POST(request: Request) {
     notes = [];
   }
 
+  // Who's driving this conversation, so first-person requests resolve to the
+  // right bishopric member. Best-effort — a missing profile just omits identity.
+  let current: CurrentUser | null = null;
+  try {
+    const { data } = await supabase
+      .from("profiles")
+      .select("display_name, role")
+      .eq("id", user.id)
+      .maybeSingle();
+    if (data?.display_name) {
+      current = { name: data.display_name as string, role: (data.role as string) ?? undefined };
+    }
+  } catch {
+    current = null;
+  }
+
   const result = streamText({
     model,
-    system: buildSystemPrompt(notes),
+    system: buildSystemPrompt(notes, current),
     messages,
     tools: agentTools,
     // Runaway guard for the agentic tool loop — NOT a per-conversation message
