@@ -1376,6 +1376,99 @@ export const forgetPreference = tool({
   },
 });
 
+// ── Interview availability: time off (out of town, etc.) ──────────────────────
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Resolve a bishopric member by name to their profile id, which is what an
+ * availability exception keys on (it must match that member's availability
+ * blocks). Prefers an exact name match, falling back to a unique substring.
+ */
+async function resolveBishopricMember(
+  name: string,
+): Promise<{ id: string; name: string } | { error: string }> {
+  const { data, error } = await db().from("profiles").select("id, display_name");
+  if (error) throw error;
+  const profiles = (data ?? []) as { id: string; display_name: string }[];
+  const q = name.trim().toLowerCase();
+  const exact = profiles.filter((p) => p.display_name?.toLowerCase() === q);
+  const matches = exact.length ? exact : profiles.filter((p) => p.display_name?.toLowerCase().includes(q));
+  const known = profiles.map((p) => p.display_name).filter(Boolean).join(", ") || "none";
+  if (matches.length === 0) {
+    return { error: `No bishopric member named "${name}". Known members: ${known}.` };
+  }
+  if (matches.length > 1) {
+    return { error: `"${name}" matches multiple members: ${matches.map((p) => p.display_name).join(", ")}. Be more specific.` };
+  }
+  return { id: matches[0].id, name: matches[0].display_name };
+}
+
+export const getAvailabilityExceptions = tool({
+  description:
+    "List the date ranges when bishopric members are marked unavailable for interviews (out of town, etc.). Use to see who's away, or to get an entry's id before clearing it.",
+  inputSchema: z.object({
+    memberName: z.string().optional().describe("Filter to a single bishopric member by name"),
+  }),
+  execute: async ({ memberName }) => {
+    let query = db().from("availability_exceptions").select("*").order("start_date");
+    if (memberName) query = query.ilike("member_name", `%${memberName}%`);
+    const { data, error } = await query;
+    if (error) throw error;
+    return (data ?? []).map((r) => fromRow<AvailabilityException>(r));
+  },
+});
+
+export const markMemberUnavailable = tool({
+  description:
+    "Mark a bishopric member unavailable for interviews over a date range (e.g. they'll be out of town). This removes them from the interview slots findInterviewSlots offers for those days. For a first-person request ('I'll be away'), use the signed-in member's name. Dates are YYYY-MM-DD; omit endDate for a single day.",
+  inputSchema: z.object({
+    memberName: z.string().describe("Bishopric member who will be unavailable"),
+    startDate: z.string().describe("First unavailable day, YYYY-MM-DD"),
+    endDate: z.string().optional().describe("Last unavailable day, YYYY-MM-DD (defaults to startDate)"),
+    reason: z.string().optional().describe("Why they're unavailable, e.g. 'out of town'"),
+  }),
+  execute: async ({ memberName, startDate, endDate, reason }) => {
+    const end = endDate || startDate;
+    if (!ISO_DATE.test(startDate) || !ISO_DATE.test(end)) {
+      return { error: "Dates must be in YYYY-MM-DD format." };
+    }
+    if (end < startDate) {
+      return { error: "endDate can't be before startDate." };
+    }
+    const resolved = await resolveBishopricMember(memberName);
+    if ("error" in resolved) return resolved;
+
+    const { data, error } = await db()
+      .from("availability_exceptions")
+      .insert({
+        id: crypto.randomUUID(),
+        member_id: resolved.id,
+        member_name: resolved.name,
+        start_date: startDate,
+        end_date: end,
+        reason: reason?.trim() || null,
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    return fromRow<AvailabilityException>(data);
+  },
+});
+
+export const clearAvailabilityException = tool({
+  description:
+    "Remove a time-off entry by id (get the id from getAvailabilityExceptions), e.g. when a member's plans change and they'll be available after all.",
+  inputSchema: z.object({
+    id: z.string().describe("The availability-exception id to remove"),
+  }),
+  execute: async ({ id }) => {
+    const { error } = await db().from("availability_exceptions").delete().eq("id", id);
+    if (error) throw error;
+    return { ok: true, id };
+  },
+});
+
 export const agentTools = {
   getMembers,
   getTasks,
@@ -1398,6 +1491,10 @@ export const agentTools = {
   updateInterview,
   advanceInterview,
   deleteInterview,
+  // Interview availability (time off)
+  getAvailabilityExceptions,
+  markMemberUnavailable,
+  clearAvailabilityException,
   // Sacrament meeting bulletins
   getSacramentBulletin,
   updateSacramentBulletin,

@@ -97,16 +97,17 @@ function recurrenceLabel(b: AvailabilityBlock): string {
 }
 
 const SETTLEMENT_STATUS_COLORS: Record<SettlementStatus, string> = {
-  not_started: "bg-muted text-muted-foreground",
-  invited:     "bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200",
-  scheduled:   "bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-200",
-  completed:   "bg-green-100 text-green-800 dark:bg-green-900/60 dark:text-green-200",
-  declined:    "bg-red-100 text-red-800 dark:bg-red-900/60 dark:text-red-200",
-  exempt:      "bg-slate-100 text-slate-700 dark:bg-slate-800/60 dark:text-slate-300",
+  not_started:  "bg-muted text-muted-foreground",
+  link_created: "bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200",
+  link_opened:  "bg-amber-200 text-amber-900 dark:bg-amber-800/70 dark:text-amber-100",
+  scheduled:    "bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-200",
+  completed:    "bg-green-100 text-green-800 dark:bg-green-900/60 dark:text-green-200",
+  declined:     "bg-red-100 text-red-800 dark:bg-red-900/60 dark:text-red-200",
+  exempt:       "bg-slate-100 text-slate-700 dark:bg-slate-800/60 dark:text-slate-300",
 };
 
 const SETTLEMENT_STATUSES: SettlementStatus[] = [
-  "not_started", "invited", "scheduled", "completed", "declined", "exempt",
+  "not_started", "link_created", "link_opened", "scheduled", "completed", "declined", "exempt",
 ];
 const DECLARED_STATUSES: DeclaredTithingStatus[] = ["full", "partial", "non", "exempt"];
 
@@ -1022,7 +1023,7 @@ function AvailabilityView({
 
 // ── Tithing Settlement View ─────────────────────────────────────────────────────
 
-type SettlementSegment = "all" | "not_started" | "invited" | "scheduled" | "done";
+type SettlementSegment = "all" | "not_started" | "link" | "scheduled" | "done";
 
 interface SettlementRowState {
   member: Member;
@@ -1111,11 +1112,12 @@ function ProgressRing({ pct }: { pct: number }) {
 
 /** Ordered status segments for the breakdown bar + legend (colored dots). */
 const BREAKDOWN: { key: SettlementStatus[]; label: string; bar: string; dot: string }[] = [
-  { key: ["completed", "exempt"], label: "Done",      bar: "bg-green-500",  dot: "bg-green-500" },
-  { key: ["scheduled"],           label: "Scheduled", bar: "bg-blue-500",   dot: "bg-blue-500" },
-  { key: ["invited"],             label: "Invited",   bar: "bg-amber-400",  dot: "bg-amber-400" },
-  { key: ["declined"],            label: "Declined",  bar: "bg-red-400",    dot: "bg-red-400" },
-  { key: ["not_started"],         label: "Not started", bar: "bg-muted-foreground/30", dot: "bg-muted-foreground/40" },
+  { key: ["completed", "exempt"], label: "Done",         bar: "bg-green-500",  dot: "bg-green-500" },
+  { key: ["scheduled"],           label: "Scheduled",    bar: "bg-blue-500",   dot: "bg-blue-500" },
+  { key: ["link_opened"],         label: "Opened",       bar: "bg-amber-500",  dot: "bg-amber-500" },
+  { key: ["link_created"],        label: "Link created", bar: "bg-amber-300",  dot: "bg-amber-300" },
+  { key: ["declined"],            label: "Declined",     bar: "bg-red-400",    dot: "bg-red-400" },
+  { key: ["not_started"],         label: "Not started",  bar: "bg-muted-foreground/30", dot: "bg-muted-foreground/40" },
 ];
 
 function BreakdownBar({ rows }: { rows: SettlementRowState[] }) {
@@ -1165,16 +1167,24 @@ function SettlementView({
   }, [members, settlements, bookingTokens, interviews]);
 
   const total = rows.length;
+  // A member with a link (created or opened) who hasn't booked yet.
+  const hasLink = (r: SettlementRowState) =>
+    r.status === "link_created" || r.status === "link_opened";
+  // Opened is authoritative from the token, so it holds even if the status
+  // write lagged behind the open being recorded.
+  const hasOpened = (r: SettlementRowState) =>
+    r.status === "link_opened" || !!r.token?.openedAt;
   const inSegment = (r: SettlementRowState, s: SettlementSegment) =>
     s === "all" ? true
     : s === "done" ? (r.status === "completed" || r.status === "exempt" || r.status === "declined")
+    : s === "link" ? hasLink(r)
     : r.status === s;
 
   const count = (s: SettlementSegment) => rows.filter((r) => inSegment(r, s)).length;
   const completedN = rows.filter((r) => r.status === "completed" || r.status === "exempt").length;
-  const invitedN = count("invited");
-  const openedNotBooked = rows.filter((r) => r.status === "invited" && r.token?.openedAt).length;
-  const remaining = rows.filter((r) => r.status === "not_started" || r.status === "invited");
+  const linkedN = count("link");
+  const openedNotBooked = rows.filter((r) => hasLink(r) && hasOpened(r)).length;
+  const remaining = rows.filter((r) => r.status === "not_started" || hasLink(r));
   const pct = total > 0 ? Math.round((completedN / total) * 100) : 0;
 
   const filtered = useMemo(() => {
@@ -1203,7 +1213,7 @@ function SettlementView({
   const SEGMENTS: { seg: SettlementSegment; label: string }[] = [
     { seg: "all",         label: "All" },
     { seg: "not_started", label: "Not started" },
-    { seg: "invited",     label: "Invited" },
+    { seg: "link",        label: "Link" },
     { seg: "scheduled",   label: "Scheduled" },
     { seg: "done",        label: "Done" },
   ];
@@ -1245,19 +1255,19 @@ function SettlementView({
           </div>
         </div>
 
-        {/* Follow-up nudge: invited but not yet booked is where a sprint stalls.
+        {/* Follow-up nudge: a link out but not yet booked is where a sprint stalls.
             "Opened but didn't book" is the hotter signal, so it leads. */}
-        {invitedN > 0 && (
+        {linkedN > 0 && (
           <button
             type="button"
-            onClick={() => setSegment("invited")}
+            onClick={() => setSegment("link")}
             className="mt-3 flex w-full items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-left text-xs text-amber-800 transition-colors hover:bg-amber-100 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-200 dark:hover:bg-amber-900/40"
           >
             <Send className="h-3.5 w-3.5 shrink-0" />
             {openedNotBooked > 0 ? (
               <span><strong>{openedNotBooked}</strong> opened their link but haven&apos;t booked yet — good time to follow up.</span>
             ) : (
-              <span><strong>{invitedN}</strong> {invitedN === 1 ? "person has" : "people have"} a link but haven&apos;t opened it yet.</span>
+              <span><strong>{linkedN}</strong> {linkedN === 1 ? "person has" : "people have"} a link but haven&apos;t opened it yet.</span>
             )}
           </button>
         )}
@@ -1331,8 +1341,8 @@ function SettlementView({
                     Declared: {DECLARED_STATUS_LABELS[r.record.declaredStatus]}
                   </p>
                 )}
-                {/* Link-open signal, for members invited but not yet booked. */}
-                {r.status === "invited" && r.token && (
+                {/* Link-open signal, for members with a link but not yet booked. */}
+                {(r.status === "link_created" || r.status === "link_opened") && r.token && (
                   <p className={cn(
                     "flex items-center gap-1 text-[11px] truncate",
                     r.token.openedAt ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground",
@@ -1883,14 +1893,14 @@ export default function InterviewsPage() {
         memberId: m.id,
         memberName: memberName(m),
         year: SETTLEMENT_YEAR,
-        status: "invited",
+        status: "link_created",
         createdBy: user?.uid ?? "mock",
         createdAt: now,
         updatedAt: now,
       };
       await settlementsCol.create(record);
     } else if (record.status === "not_started") {
-      await settlementsCol.update(record.id, { status: "invited" });
+      await settlementsCol.update(record.id, { status: "link_created" });
     }
     const token: BookingToken = {
       id: newId(),
