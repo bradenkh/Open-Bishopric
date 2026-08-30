@@ -728,8 +728,13 @@ interface CalendarViewProps {
   onSelect: (i: Interview) => void;
 }
 
+/** A contiguous run of hours the compressed axis actually draws. */
+interface TimeSegment { start: number; end: number }
+
 function CalendarView({ interviews, availability, exceptions, onSelect }: CalendarViewProps) {
   const [weekStart, setWeekStart] = useState(() => startOfWeek(nowInAppTz()));
+  // When true, fall back to the full Sun–Sat week instead of active days only.
+  const [showAllDays, setShowAllDays] = useState(false);
   const todayStr = toDateStr(nowInAppTz());
 
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
@@ -756,28 +761,62 @@ function CalendarView({ interviews, availability, exceptions, onSelect }: Calend
     return map;
   }, [days, availability, exceptions]);
 
-  // Dynamic vertical bounds: fit availability + booked interviews, min 8am–8pm.
-  const [minM, maxM] = useMemo(() => {
-    let lo = 8 * 60;
-    let hi = 20 * 60;
-    for (const bands of bandsByDate.values()) {
-      for (const b of bands) { lo = Math.min(lo, b.start); hi = Math.max(hi, b.end); }
+  // Booked interviews per day, so both "is this day active" and the columns
+  // read from the same source.
+  const apptsByDate = useMemo(() => {
+    const map = new Map<string, Interview[]>();
+    for (const day of days) {
+      const dateStr = toDateStr(day);
+      map.set(dateStr, scheduledInterviews.filter((i) => i.scheduledDate === dateStr));
     }
-    for (const i of scheduledInterviews) {
-      const inWeek = days.some((d) => toDateStr(d) === i.scheduledDate);
-      if (!inWeek) continue;
-      const s = toMinutes(i.scheduledTime!);
-      lo = Math.min(lo, s); hi = Math.max(hi, s + durationOf(i));
-    }
-    return [Math.floor(lo / 60) * 60, Math.ceil(hi / 60) * 60];
-  }, [bandsByDate, scheduledInterviews, days]);
+    return map;
+  }, [days, scheduledInterviews]);
 
-  const totalMin = Math.max(60, maxM - minM);
-  const gridHeight = (totalMin / 60) * HOUR_PX;
-  const hours = Array.from({ length: totalMin / 60 + 1 }, (_, i) => minM + i * 60);
-  const yFor = (m: number) => ((m - minM) / 60) * HOUR_PX;
+  // A day earns a column only if availability is entered or something is booked.
+  const dayIsActive = useMemo(() => {
+    return (day: Date) => {
+      const ds = toDateStr(day);
+      return (bandsByDate.get(ds)?.length ?? 0) > 0 || (apptsByDate.get(ds)?.length ?? 0) > 0;
+    };
+  }, [bandsByDate, apptsByDate]);
+
+  const activeDays = useMemo(() => days.filter(dayIsActive), [days, dayIsActive]);
+  const hiddenCount = days.length - activeDays.length;
+  // No active days at all → show the whole week so it isn't an empty shell.
+  const visibleDays = useMemo(
+    () => (showAllDays || activeDays.length === 0 ? days : activeDays),
+    [showAllDays, activeDays, days],
+  );
+
+  // Compress the vertical axis: instead of one continuous 8am–8pm ruler, draw
+  // only the hour ranges that actually hold availability or a booking across the
+  // visible days. Overlapping/adjacent ranges merge; the gaps between the
+  // resulting segments collapse to a labelled divider.
+  const segments = useMemo<TimeSegment[]>(() => {
+    const raw: [number, number][] = [];
+    for (const day of visibleDays) {
+      const ds = toDateStr(day);
+      for (const b of bandsByDate.get(ds) ?? []) raw.push([b.start, b.end]);
+      for (const i of apptsByDate.get(ds) ?? []) {
+        const s = toMinutes(i.scheduledTime!);
+        raw.push([s, s + durationOf(i)]);
+      }
+    }
+    if (raw.length === 0) return [{ start: 8 * 60, end: 20 * 60 }];
+    const rounded = raw
+      .map(([s, e]) => [Math.floor(s / 60) * 60, Math.ceil(e / 60) * 60] as [number, number])
+      .sort((a, b) => a[0] - b[0]);
+    const merged: TimeSegment[] = [];
+    for (const [s, e] of rounded) {
+      const last = merged[merged.length - 1];
+      if (last && s <= last.end) last.end = Math.max(last.end, e);
+      else merged.push({ start: s, end: e });
+    }
+    return merged;
+  }, [visibleDays, bandsByDate, apptsByDate]);
 
   const label = `${formatDate(toDateStr(weekStart))} – ${formatDate(toDateStr(addDays(weekStart, 6)))}`;
+  const canToggleDays = activeDays.length > 0 && hiddenCount > 0;
 
   return (
     <div className="space-y-3">
@@ -798,85 +837,137 @@ function CalendarView({ interviews, availability, exceptions, onSelect }: Calend
       </div>
 
       {/* Grid */}
-      <div className="overflow-x-auto rounded-xl border border-border bg-card">
-        <div style={{ minWidth: 640 }}>
-          {/* Day headers */}
-          <div className="flex border-b border-border">
-            <div className="w-12 shrink-0" />
-            {days.map((d) => {
-              const dateStr = toDateStr(d);
-              const isToday = dateStr === todayStr;
-              return (
-                <div key={dateStr} className={cn("flex-1 py-2 text-center border-l border-border", isToday && "bg-primary/5")}>
-                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{WEEKDAY_LABELS[d.getDay()].slice(0, 3)}</p>
-                  <p className={cn("text-sm font-semibold", isToday ? "text-primary" : "text-foreground")}>{d.getDate()}</p>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Time grid */}
-          <div className="flex" style={{ height: gridHeight }}>
-            {/* Time gutter */}
-            <div className="relative w-12 shrink-0">
-              {hours.map((h) => (
-                <div key={h} className="absolute right-1 -translate-y-1/2 text-[10px] text-muted-foreground" style={{ top: yFor(h) }}>
-                  {formatTime(fromMinutes(h))}
-                </div>
-              ))}
+      <div className="overflow-hidden rounded-xl border border-border bg-card">
+        <div className="overflow-x-auto">
+          <div style={{ minWidth: 480 }}>
+            {/* Day headers */}
+            <div className="flex border-b border-border">
+              <div className="w-12 shrink-0" />
+              {visibleDays.map((d) => {
+                const dateStr = toDateStr(d);
+                const isToday = dateStr === todayStr;
+                const active = dayIsActive(d);
+                return (
+                  <div key={dateStr} className={cn("flex-1 py-2 text-center border-l border-border", isToday && "bg-primary/5")}>
+                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{WEEKDAY_LABELS[d.getDay()].slice(0, 3)}</p>
+                    <p className={cn(
+                      "text-sm font-semibold",
+                      isToday ? "text-primary" : active ? "text-foreground" : "font-medium text-muted-foreground/60",
+                    )}>
+                      {d.getDate()}
+                    </p>
+                  </div>
+                );
+              })}
             </div>
 
-            {/* Day columns */}
-            {days.map((d) => {
-              const dateStr = toDateStr(d);
-              const isToday = dateStr === todayStr;
-              const bands = bandsByDate.get(dateStr) ?? [];
-              const dayInterviews = scheduledInterviews.filter((i) => i.scheduledDate === dateStr);
-              const { items, lanes } = layoutDay(dayInterviews);
+            {/* Compressed time grid: one body per active segment, dividers between. */}
+            {segments.map((seg, si) => {
+              const segTotal = Math.max(60, seg.end - seg.start);
+              const segHeight = (segTotal / 60) * HOUR_PX;
+              const segHours = Array.from({ length: Math.floor(segTotal / 60) + 1 }, (_, i) => seg.start + i * 60);
+              const yFor = (m: number) => ((m - seg.start) / 60) * HOUR_PX;
+              const prev = si > 0 ? segments[si - 1] : null;
               return (
-                <div key={dateStr} className={cn("relative flex-1 border-l border-border", isToday && "bg-primary/5")}>
-                  {/* Hour lines */}
-                  {hours.map((h) => (
-                    <div key={h} className="absolute inset-x-0 border-t border-border/50" style={{ top: yFor(h) }} />
-                  ))}
-                  {/* Availability bands */}
-                  {bands.map((b, idx) => (
-                    <div
-                      key={idx}
-                      className="absolute inset-x-0.5 rounded bg-green-500/10 border border-green-500/20"
-                      style={{ top: yFor(b.start), height: Math.max(4, yFor(b.end) - yFor(b.start)) }}
-                    />
-                  ))}
-                  {/* Interview blocks */}
-                  {items.map(({ interview: i, startM, endM, lane }) => {
-                    const stage = deriveStage(i);
-                    return (
-                      <button
-                        key={i.id}
-                        type="button"
-                        onClick={() => onSelect(i)}
-                        className={cn(
-                          "absolute rounded-md border px-1 py-0.5 text-left overflow-hidden transition-shadow hover:shadow-md hover:z-10",
-                          INTERVIEW_STAGE_COLORS[stage],
-                        )}
-                        style={{
-                          top: yFor(startM),
-                          height: Math.max(16, yFor(endM) - yFor(startM) - 1),
-                          left: `${(lane / lanes) * 100}%`,
-                          width: `${(1 / lanes) * 100}%`,
-                        }}
-                        title={`${i.memberName} · ${INTERVIEW_TYPE_LABELS[i.type]}`}
-                      >
-                        <p className="text-[10px] font-semibold leading-tight truncate">{i.memberName}</p>
-                        <p className="text-[9px] leading-tight truncate opacity-80">{formatTime(i.scheduledTime!)}</p>
-                      </button>
-                    );
-                  })}
+                <div key={seg.start}>
+                  {/* Collapsed-time divider */}
+                  {prev && (
+                    <div className="flex items-center gap-2 border-y border-dashed border-border bg-muted/30 py-1 pl-14 pr-4">
+                      <span className="h-px flex-1 border-t border-dashed border-border" />
+                      <span className="whitespace-nowrap text-[10px] text-muted-foreground">
+                        {formatTime(fromMinutes(prev.end))} – {formatTime(fromMinutes(seg.start))} · no availability
+                      </span>
+                      <span className="h-px flex-1 border-t border-dashed border-border" />
+                    </div>
+                  )}
+
+                  <div className="flex" style={{ height: segHeight }}>
+                    {/* Time gutter */}
+                    <div className="relative w-12 shrink-0">
+                      {segHours.map((h) => (
+                        <div key={h} className="absolute right-1 -translate-y-1/2 text-[10px] text-muted-foreground" style={{ top: yFor(h) }}>
+                          {formatTime(fromMinutes(h))}
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Day columns */}
+                    {visibleDays.map((d) => {
+                      const dateStr = toDateStr(d);
+                      const isToday = dateStr === todayStr;
+                      const bands = (bandsByDate.get(dateStr) ?? []).filter((b) => b.end > seg.start && b.start < seg.end);
+                      const dayInterviews = apptsByDate.get(dateStr) ?? [];
+                      const { items, lanes } = layoutDay(dayInterviews);
+                      return (
+                        <div key={dateStr} className={cn("relative flex-1 border-l border-border", isToday && "bg-primary/5")}>
+                          {/* Hour lines */}
+                          {segHours.map((h) => (
+                            <div key={h} className="absolute inset-x-0 border-t border-border/50" style={{ top: yFor(h) }} />
+                          ))}
+                          {/* Availability bands (clipped to this segment) */}
+                          {bands.map((b, idx) => {
+                            const ts = Math.max(b.start, seg.start);
+                            const te = Math.min(b.end, seg.end);
+                            return (
+                              <div
+                                key={idx}
+                                className="absolute inset-x-0.5 rounded bg-green-500/10 border border-green-500/20"
+                                style={{ top: yFor(ts), height: Math.max(4, yFor(te) - yFor(ts)) }}
+                              />
+                            );
+                          })}
+                          {/* Interview blocks that fall inside this segment */}
+                          {items.map(({ interview: i, startM, endM, lane }) => {
+                            if (endM <= seg.start || startM >= seg.end) return null;
+                            const stage = deriveStage(i);
+                            return (
+                              <button
+                                key={i.id}
+                                type="button"
+                                onClick={() => onSelect(i)}
+                                className={cn(
+                                  "absolute rounded-md border px-1 py-0.5 text-left overflow-hidden transition-shadow hover:shadow-md hover:z-10",
+                                  INTERVIEW_STAGE_COLORS[stage],
+                                )}
+                                style={{
+                                  top: yFor(startM),
+                                  height: Math.max(16, yFor(endM) - yFor(startM) - 1),
+                                  left: `${(lane / lanes) * 100}%`,
+                                  width: `${(1 / lanes) * 100}%`,
+                                }}
+                                title={`${i.memberName} · ${INTERVIEW_TYPE_LABELS[i.type]}`}
+                              >
+                                <p className="text-[10px] font-semibold leading-tight truncate">{i.memberName}</p>
+                                <p className="text-[9px] leading-tight truncate opacity-80">{formatTime(i.scheduledTime!)}</p>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               );
             })}
           </div>
         </div>
+
+        {/* Hidden-days affordance: honest and reversible. */}
+        {canToggleDays && (
+          <div className="flex items-center justify-center gap-2 border-t border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+            {!showAllDays && (
+              <span>{hiddenCount} {hiddenCount === 1 ? "day" : "days"} hidden — no availability</span>
+            )}
+            <button
+              type="button"
+              onClick={() => setShowAllDays((v) => !v)}
+              className="inline-flex items-center gap-1 font-semibold text-primary hover:underline"
+            >
+              <Eye className="h-3.5 w-3.5" />
+              {showAllDays ? "Collapse to active days" : "Show all days"}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Legend */}
