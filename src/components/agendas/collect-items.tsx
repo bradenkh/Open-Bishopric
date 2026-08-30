@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Mail, Copy, Check, Clock, MessageSquare } from "lucide-react";
+import { Mail, Copy, Check, Clock, MessageSquare, RefreshCw, Loader2 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -16,13 +16,14 @@ import type { AgendaItem, AgendaSolicitation, Meeting } from "@/types";
 /**
  * Pre-meeting agenda collection. For each organization leader, shows the items
  * they reported last time (keep / dismiss) and a pre-composed message asking for
- * updates. Sending opens the leader's email (mailto) and records the request;
- * kept items are written onto this meeting's agenda so nothing is lost. Their
- * reply can be pasted back here and handed to the AI assistant to parse into
- * agenda items.
+ * updates. Sending emails the leader (via the configured Gmail account) and
+ * records the request; kept items are written onto this meeting's agenda so
+ * nothing is lost. Their reply is captured automatically by the inbound poll
+ * ("Check for replies") — or can still be pasted back here and handed to the AI
+ * assistant to parse into agenda items.
  *
- * Deferred (see plan): a real email provider would replace `mailto:`, and an
- * inbound webhook would record replies automatically instead of pasting them in.
+ * When email isn't configured yet (Settings → Email), sending falls back to
+ * opening the user's mail client with a `mailto:` link.
  */
 export function CollectItemsDialog({
   open, onOpenChange, meeting: meetingProp,
@@ -32,7 +33,7 @@ export function CollectItemsDialog({
   meeting: Meeting;
 }) {
   const { user } = useAuth();
-  const { wardInfo, members, meetings, solicitations } = useData();
+  const { wardInfo, members, meetings, solicitations, reloadAll } = useData();
 
   // Resolve the live meeting so sequential agenda writes (one per leader) build
   // on each other rather than clobbering from a stale prop snapshot.
@@ -55,6 +56,8 @@ export function CollectItemsDialog({
   const [messages, setMessages] = useState<Record<string, string>>({});
   const [replies, setReplies] = useState<Record<string, string>>({});
   const [copied, setCopied] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [checkMsg, setCheckMsg] = useState<string | null>(null);
 
   function leaderEmail(name: string): string | undefined {
     const m = members.find((mm) => `${mm.firstName} ${mm.lastName}`.toLowerCase() === name.toLowerCase());
@@ -159,13 +162,61 @@ export function CollectItemsDialog({
     const kept = keptIds(org, name, prior);
     const keptItems = prior.filter((i) => kept.has(i.id));
     const message = messageFor(org, name, prior, kept);
-    await upsertSolicitation(org, name, { status: "sent", sentAt: new Date().toISOString() }, keptItems, message);
+    const email = leaderEmail(name);
+    const subject = `Agenda items — ${meeting.title} (${formatDate(meeting.date)})`;
+
+    // Send through the configured Gmail account; fall back to a mailto: link when
+    // email isn't set up (409) or the send fails. On a real send we store the
+    // Message-ID so the inbound poll can match the leader's reply to this request.
+    let messageId: string | undefined;
+    let sentByServer = false;
+    if (email) {
+      try {
+        const res = await fetch("/api/email/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ to: email, subject, body: message }),
+        });
+        if (res.ok) {
+          messageId = (await res.json()).messageId;
+          sentByServer = true;
+        }
+      } catch {
+        /* network error — fall back to mailto below */
+      }
+    }
+
+    const patch: Partial<AgendaSolicitation> = { status: "sent", sentAt: new Date().toISOString() };
+    if (messageId) patch.emailMessageId = messageId;
+    await upsertSolicitation(org, name, patch, keptItems, message);
     await applyKeptToAgenda(org, keptItems);
 
-    const email = leaderEmail(name);
-    const subject = encodeURIComponent(`Agenda items — ${meeting.title} (${formatDate(meeting.date)})`);
-    const body = encodeURIComponent(message);
-    window.location.assign(`mailto:${email ?? ""}?subject=${subject}&body=${body}`);
+    if (!sentByServer) {
+      window.location.assign(
+        `mailto:${email ?? ""}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(message)}`,
+      );
+    }
+  }
+
+  /** Pull inbound Gmail replies and let the server match them to sent requests. */
+  async function checkReplies() {
+    setChecking(true);
+    setCheckMsg(null);
+    try {
+      const res = await fetch("/api/email/poll", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to check for replies");
+      await reloadAll();
+      setCheckMsg(
+        data.matched > 0
+          ? `Captured ${data.matched} repl${data.matched === 1 ? "y" : "ies"}.`
+          : "No new replies found.",
+      );
+    } catch (e) {
+      setCheckMsg(e instanceof Error ? e.message : "Failed to check for replies");
+    } finally {
+      setChecking(false);
+    }
   }
 
   async function saveReply(org: string, name: string, prior: AgendaItem[]) {
@@ -201,10 +252,20 @@ export function CollectItemsDialog({
           </p>
         ) : (
           <div className="space-y-4">
-            <p className="text-xs text-muted-foreground">
-              Send each leader their items from {previous ? `the ${formatDate(previous.date)} meeting` : "last meeting"} to keep
-              or dismiss, plus a request for new items. Paste their reply below and the assistant can add the items to the agenda.
-            </p>
+            <div className="flex items-start justify-between gap-3">
+              <p className="text-xs text-muted-foreground flex-1">
+                Send each leader their items from {previous ? `the ${formatDate(previous.date)} meeting` : "last meeting"} to keep
+                or dismiss, plus a request for new items. Replies are captured automatically — click
+                &ldquo;Check for replies&rdquo; — or paste one below and the assistant can add the items to the agenda.
+              </p>
+              <div className="flex flex-col items-end gap-1 shrink-0">
+                <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={checkReplies} disabled={checking}>
+                  {checking ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                  Check for replies
+                </Button>
+                {checkMsg && <span className="text-[10px] text-muted-foreground">{checkMsg}</span>}
+              </div>
+            </div>
 
             {leaders.map((leader) => {
               const org = leader.role;

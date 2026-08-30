@@ -58,6 +58,42 @@ dashboard (**Authentication → Users → Invite**, or Add user). A matching
 (`bishop` | `counselor` | `clerk` | `exec_secretary`) via the invite's user
 metadata; otherwise role defaults to `counselor`.
 
+## Email (send & receive)
+
+The app can really send agenda-item requests, to-do reminders, and interview
+times — and read the replies — using a **Gmail account over an app password**.
+This needs **no custom domain and no OAuth** (so no 7-day token expiry): Gmail
+sends from its own address and already receives mail there, so there are no MX
+records or provider verification to set up. It's free and fine for ward volume.
+
+**One-time setup** (do this on a Gmail account — ideally a dedicated ward one like
+`firstwardbishopric@gmail.com`, so mail doesn't come from a personal address):
+
+1. Turn on **2-Step Verification** (https://myaccount.google.com/security).
+2. Create an **App Password** (https://myaccount.google.com/apppasswords) — a
+   16-character code.
+3. In the app, go to **Settings → Email**, enter the Gmail address and app
+   password, **Save**, then **Send test email** to confirm it works.
+
+No new environment variables are required — the address and app password are
+stored server-side in the RLS-locked `app_settings` table (the same place the AI
+key lives), never exposed to the browser.
+
+**How it works** (`src/lib/email/gmail.ts`):
+
+- **Sending** goes out over SMTP (`smtp.gmail.com:465`) via `nodemailer`. Each
+  outbound request stores the message's `Message-ID` on its record
+  (`agenda_solicitations` / `interviews`).
+- **Receiving** reads the INBOX over IMAP (`imap.gmail.com:993`) via `imapflow` /
+  `mailparser`. `POST /api/email/poll` matches each reply's `In-Reply-To` /
+  `References` headers back to the stored `Message-ID`, then records agenda
+  replies (`status='replied'`) and interview replies (appended to the interview's
+  notes for the assistant to parse). Trigger it with **Check for replies** in the
+  Collect-agenda-items dialog, or wire it to a cron.
+- The AI assistant also has `sendTaskReminder` and `emailInterviewTimes` tools.
+- If email isn't configured, sending an agenda request **falls back to a
+  `mailto:` link**, so nothing breaks before setup.
+
 ## Database setup & schema changes
 
 Migrations are tracked and applied automatically. A `schema_migrations` table

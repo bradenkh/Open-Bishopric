@@ -6,6 +6,7 @@ import { generateSlots } from "@/lib/availability";
 import { parseBulletin, defaultBulletin, upcomingSunday } from "@/lib/bulletin";
 import { isAnnouncementActive } from "@/lib/announcements";
 import { listAgentNotes } from "@/lib/agent-notes";
+import { isEmailConfigured, sendEmail } from "@/lib/email/gmail";
 import { WARD_BUSINESS_CATEGORIES, makeEntry, seedBusiness } from "@/lib/ward";
 import { INTERVIEW_DURATION_MINS } from "@/types";
 import type {
@@ -1332,6 +1333,110 @@ export const recordSolicitationReply = tool({
   },
 });
 
+// ── Email: send reminders and scheduling requests ────────────────────────────
+
+/** Resolve a ward member's email by (case-insensitive) full name. */
+async function memberEmailByName(name: string): Promise<string | undefined> {
+  const { data, error } = await db().from("members").select("email").ilike("first_name || ' ' || last_name", name);
+  if (error) {
+    // Some Postgres configs disallow computed-column filters; fall back to a scan.
+    const { data: all } = await db().from("members").select("first_name, last_name, email");
+    return (all ?? [])
+      .map((r) => fromRow<Member>(r))
+      .find((m) => `${m.firstName} ${m.lastName}`.toLowerCase() === name.toLowerCase())?.email;
+  }
+  return (data?.[0] as { email?: string } | undefined)?.email ?? undefined;
+}
+
+export const sendTaskReminder = tool({
+  description:
+    "Email a reminder about a to-do/task to the person it concerns. Use when the bishopric wants to nudge someone about an assignment. Resolves the recipient from the task's member (or pass an explicit email). Requires email to be configured in Settings → Email.",
+  inputSchema: z.object({
+    taskId: z.string().describe("The task to send a reminder about (from getTasks)"),
+    to: z.string().optional().describe("Recipient email; if omitted, resolved from the task's member"),
+    note: z.string().optional().describe("Optional extra line to include in the reminder"),
+  }),
+  execute: async ({ taskId, to, note }) => {
+    if (!(await isEmailConfigured())) {
+      return { error: "Email isn't configured yet. Add a Gmail address and app password in Settings → Email." };
+    }
+    const { data: row, error } = await db().from("tasks").select("*").eq("id", taskId).maybeSingle();
+    if (error) throw error;
+    if (!row) return { error: "No task found with that id." };
+    const task = fromRow<Task>(row);
+
+    const recipient = to ?? (task.memberName ? await memberEmailByName(task.memberName) : undefined);
+    if (!recipient) {
+      return { error: "No email address found for this task. Provide a `to` address, or add an email to the member's record." };
+    }
+
+    const lines = [
+      task.memberName ? `Hi ${task.memberName.split(" ")[0]},` : "Hello,",
+      "",
+      `This is a friendly reminder about: ${task.title}.`,
+      task.description ? `\n${task.description}` : "",
+      task.dueDate ? `\nDue: ${task.dueDate}` : "",
+      note ? `\n${note}` : "",
+      "",
+      "Thank you!",
+    ].filter(Boolean);
+
+    const { messageId } = await sendEmail({
+      to: recipient,
+      subject: `Reminder: ${task.title}`,
+      body: lines.join("\n"),
+    });
+    await db().from("tasks").update({ reminder_sent_at: new Date().toISOString() }).eq("id", taskId);
+    return { ok: true, taskId, to: recipient, messageId };
+  },
+});
+
+export const emailInterviewTimes = tool({
+  description:
+    "Email a member proposed interview time(s) and ask them to reply with what works. Use after findInterviewSlots to send options for scheduling. Stores the message id so the member's reply is matched back to this interview by the inbound poll. Requires email to be configured.",
+  inputSchema: z.object({
+    interviewId: z.string().describe("The interview to schedule (from getInterviews)"),
+    proposedTimes: z.array(z.string()).min(1).describe("Human-readable time options, e.g. 'Tuesday, Sep 2 at 7:00 PM'"),
+    to: z.string().optional().describe("Recipient email; if omitted, resolved from the interview's member"),
+    note: z.string().optional().describe("Optional extra context to include"),
+  }),
+  execute: async ({ interviewId, proposedTimes, to, note }) => {
+    if (!(await isEmailConfigured())) {
+      return { error: "Email isn't configured yet. Add a Gmail address and app password in Settings → Email." };
+    }
+    const { data: row, error } = await db().from("interviews").select("*").eq("id", interviewId).maybeSingle();
+    if (error) throw error;
+    if (!row) return { error: "No interview found with that id." };
+    const interview = fromRow<Interview>(row);
+
+    const recipient = to ?? (await memberEmailByName(interview.memberName));
+    if (!recipient) {
+      return { error: "No email address found for this member. Provide a `to` address, or add an email to their member record." };
+    }
+
+    const first = interview.memberName.split(" ")[0];
+    const options = proposedTimes.map((t) => `• ${t}`).join("\n");
+    const body = [
+      `Hi ${first},`,
+      "",
+      "We'd like to schedule a short interview with you. Do any of these times work?",
+      "",
+      options,
+      note ? `\n${note}` : "",
+      "",
+      "Just reply to this email and let us know. Thank you!",
+    ].filter(Boolean).join("\n");
+
+    const { messageId } = await sendEmail({
+      to: recipient,
+      subject: "Scheduling an interview",
+      body,
+    });
+    await db().from("interviews").update({ email_message_id: messageId }).eq("id", interviewId);
+    return { ok: true, interviewId, to: recipient, messageId };
+  },
+});
+
 // ── Memory: standing preferences the assistant remembers across conversations ──
 
 export const rememberPreference = tool({
@@ -1410,6 +1515,9 @@ export const agentTools = {
   getMeetingAgenda,
   addAgendaItems,
   recordSolicitationReply,
+  // Email
+  sendTaskReminder,
+  emailInterviewTimes,
   // Memory
   rememberPreference,
   getRememberedPreferences,

@@ -64,6 +64,8 @@ export interface Task {
    *   setApartBy   — who set them apart (set_apart tasks only)
    */
   context?: Record<string, unknown>;
+  /** When a to-do reminder was last emailed to the assignee (send-only). */
+  reminderSentAt?: string;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
@@ -329,8 +331,12 @@ export interface AgendaSolicitation {
   carriedItems: AgendaItem[];
   /** The composed message body (editable before sending). */
   message?: string;
-  /** Raw reply text (pasted in, or future inbound email). */
+  /** Raw reply text (pasted in, or captured from an inbound email reply). */
   replyText?: string;
+  /** Message-ID / thread of the outbound request, used to match the leader's
+   *  inbound reply back to this row (see src/lib/email/gmail.ts). */
+  emailMessageId?: string;
+  emailThreadId?: string;
   sentAt?: string;
   createdBy: string;
   createdAt: string;
@@ -460,6 +466,10 @@ export interface Interview {
   /** Length of the appointment in minutes (defaults to the type's length). */
   durationMins?: number;
   notes?: string;
+  /** Message-ID / thread of the scheduling email sent to the member, used to
+   *  match their reply back to this interview (see src/lib/email/gmail.ts). */
+  emailMessageId?: string;
+  emailThreadId?: string;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
