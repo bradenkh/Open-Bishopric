@@ -90,6 +90,11 @@ key lives), never exposed to the browser.
   replies (`status='replied'`) and interview replies (appended to the interview's
   notes for the assistant to parse). Trigger it with **Check for replies** in the
   Collect-agenda-items dialog, or wire it to a cron.
+- **Searching & reading** the inbox is available to the AI assistant via
+  `searchInbox` (Gmail search over the INBOX — filter by sender, subject,
+  free text, recency, or unread — returning per-message summaries keyed by a
+  stable IMAP `uid`) and `readEmail` (open one message's full body by `uid`).
+  Both read only; messages are never marked seen.
 - The AI assistant also has `sendTaskReminder` and `emailInterviewTimes` tools.
 - If email isn't configured, sending an agenda request **falls back to a
   `mailto:` link**, so nothing breaks before setup.
