@@ -47,7 +47,7 @@ export default function ChatPage() {
   };
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] flex-col lg:h-screen">
+    <div className="flex h-[calc(100dvh-5rem)] flex-col lg:h-screen">
       <div className="flex items-center gap-3 border-b border-border px-4 py-3 lg:px-6">
         <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10">
           <Church className="h-4 w-4 text-primary" />
