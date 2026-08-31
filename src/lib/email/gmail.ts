@@ -157,3 +157,148 @@ export async function fetchNewReplies({ withinDays = 30 }: { withinDays?: number
 
   return messages;
 }
+
+/** Open a connected IMAP client for the configured mailbox. Caller must logout. */
+async function openImap(): Promise<ImapFlow> {
+  const creds = await getGmailCreds();
+  if (!creds) throw new Error("Email is not configured.");
+  const client = new ImapFlow({
+    host: "imap.gmail.com",
+    port: 993,
+    secure: true,
+    auth: { user: creds.address, pass: creds.appPassword },
+    logger: false,
+  });
+  await client.connect();
+  return client;
+}
+
+export interface InboxSearch {
+  /** Free-text Gmail search (e.g. "temple recommend"), matched across the message. */
+  query?: string;
+  /** Restrict to a sender (name or address). */
+  from?: string;
+  /** Restrict to a subject phrase. */
+  subject?: string;
+  /** Only messages received within this many days. */
+  withinDays?: number;
+  /** Only unread messages. */
+  unreadOnly?: boolean;
+  /** Max messages to return (newest first). */
+  limit?: number;
+}
+
+/** A one-line inbox result: enough to scan a list and pick one to open by uid. */
+export interface InboxSummary {
+  /** Stable IMAP UID — pass to `readInboxMessage` to open the full email. */
+  uid: number;
+  from: string;
+  to: string;
+  subject: string;
+  date?: string;
+  /** First ~300 characters of the plain-text body. */
+  snippet: string;
+  unread: boolean;
+}
+
+/**
+ * Search the Gmail INBOX and return one-line summaries, newest first. Structured
+ * filters (from/subject/withinDays/unreadOnly) and a free-text `query` are ANDed
+ * together using Gmail's own search (X-GM-RAW), so `query` accepts Gmail search
+ * syntax. Reads only — messages are not marked seen. With no filters at all it
+ * defaults to the last 30 days so it never scans the entire mailbox.
+ */
+export async function searchInbox(criteria: InboxSearch = {}): Promise<InboxSummary[]> {
+  const { query, from, subject, withinDays, unreadOnly, limit = 20 } = criteria;
+
+  const rawParts: string[] = [];
+  if (from) rawParts.push(`from:(${from})`);
+  if (subject) rawParts.push(`subject:(${subject})`);
+  if (unreadOnly) rawParts.push("is:unread");
+  if (withinDays) rawParts.push(`newer_than:${withinDays}d`);
+  if (query) rawParts.push(query);
+  const raw = rawParts.join(" ").trim();
+  // Fall back to a 30-day window when nothing was specified. `gmraw` runs the
+  // string through Gmail's own X-GM-RAW search (Gmail-only, which this is).
+  const searchQuery = raw
+    ? { gmraw: raw }
+    : { since: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) };
+
+  const client = await openImap();
+  const summaries: InboxSummary[] = [];
+  try {
+    const lock = await client.getMailboxLock("INBOX");
+    try {
+      // `search` returns UIDs in ascending order; take the newest `limit`.
+      const uids = (await client.search(searchQuery, { uid: true })) || [];
+      const recent = uids.slice(-limit).reverse();
+      if (recent.length === 0) return [];
+      for await (const msg of client.fetch(recent, { uid: true, flags: true, source: true }, { uid: true })) {
+        if (!msg.source) continue;
+        const parsed = await simpleParser(msg.source);
+        summaries.push({
+          uid: msg.uid,
+          from: parsed.from?.text ?? "",
+          to: Array.isArray(parsed.to) ? parsed.to.map((a) => a.text).join(", ") : parsed.to?.text ?? "",
+          subject: parsed.subject ?? "",
+          date: parsed.date?.toISOString(),
+          snippet: (parsed.text ?? "").trim().replace(/\s+/g, " ").slice(0, 300),
+          unread: !msg.flags?.has("\\Seen"),
+        });
+      }
+    } finally {
+      lock.release();
+    }
+  } finally {
+    await client.logout();
+  }
+
+  // `fetch` yields in UID (oldest→newest) order regardless of the range; sort so
+  // the newest message is first, matching the "recent" intent of the search.
+  summaries.sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
+  return summaries;
+}
+
+/** A full inbox email opened by uid. */
+export interface InboxMessage {
+  uid: number;
+  from: string;
+  to: string;
+  cc?: string;
+  subject: string;
+  date?: string;
+  /** Full plain-text body. */
+  text: string;
+  messageId?: string;
+}
+
+/**
+ * Read one INBOX email in full by its IMAP UID (from `searchInbox`). Returns the
+ * complete plain-text body plus headers, or null if no message has that UID.
+ * Reads only — the message is not marked seen.
+ */
+export async function readInboxMessage(uid: number): Promise<InboxMessage | null> {
+  const client = await openImap();
+  try {
+    const lock = await client.getMailboxLock("INBOX");
+    try {
+      const msg = await client.fetchOne(String(uid), { uid: true, source: true }, { uid: true });
+      if (!msg || !msg.source) return null;
+      const parsed = await simpleParser(msg.source);
+      return {
+        uid,
+        from: parsed.from?.text ?? "",
+        to: Array.isArray(parsed.to) ? parsed.to.map((a) => a.text).join(", ") : parsed.to?.text ?? "",
+        cc: Array.isArray(parsed.cc) ? parsed.cc.map((a) => a.text).join(", ") : parsed.cc?.text,
+        subject: parsed.subject ?? "",
+        date: parsed.date?.toISOString(),
+        text: (parsed.text ?? "").trim(),
+        messageId: parsed.messageId,
+      };
+    } finally {
+      lock.release();
+    }
+  } finally {
+    await client.logout();
+  }
+}
