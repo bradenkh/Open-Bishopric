@@ -643,6 +643,10 @@ export interface SettlementRecord {
   interviewId?: string;
   declaredStatus?: DeclaredTithingStatus;
   notes?: string;
+  /** ISO timestamp the booking link was last emailed to the member (null = never). */
+  linkSentAt?: string;
+  /** Gmail Message-ID of the link email, for reference. */
+  linkEmailMessageId?: string;
   createdBy?: string;
   createdAt: string;
   updatedAt: string;

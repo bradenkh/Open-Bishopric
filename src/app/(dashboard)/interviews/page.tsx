@@ -5,7 +5,7 @@ import {
   Plus, CalendarClock, Clock, User, GripVertical, CalendarPlus,
   CheckCircle2, AlertTriangle, Pencil, RotateCcw,
   CalendarDays, CalendarOff, Trash2, Check, Link2, Copy, Repeat, Search, Send,
-  ChevronLeft, ChevronRight, List, Columns3, Download, Eye, Star,
+  ChevronLeft, ChevronRight, List, Columns3, Download, Eye, Star, Mail, Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,6 +36,10 @@ import {
   generateSlots, groupSlotsByDate, durationForType, nowInAppTz,
   toMinutes, fromMinutes, toDateStr, durationOf, blockAppliesOn, type Slot,
 } from "@/lib/availability";
+import {
+  DEFAULT_SETTLEMENT_EMAIL, renderSettlementEmail, withDefaults,
+  type SettlementEmailTemplate,
+} from "@/lib/settlement-email";
 
 // ── Bishopric helpers ─────────────────────────────────────────────────────────
 
@@ -1132,6 +1136,12 @@ interface SettlementViewProps {
   interviews: Interview[];
   onGenerate: (member: Member) => void;
   onGenerateAll: (members: Member[]) => void;
+  /** The saved template used to pre-fill the compose dialog. */
+  emailTemplate: SettlementEmailTemplate;
+  /** Email one member their booking link with the given template. */
+  onEmail: (member: Member, tpl: SettlementEmailTemplate) => Promise<boolean>;
+  /** Email the given members their links; resolves with how many were sent. */
+  onEmailSelected: (members: Member[], tpl: SettlementEmailTemplate) => Promise<number>;
   onSetStatus: (member: Member, record: SettlementRecord | undefined, status: SettlementStatus) => void;
   onSetDeclared: (member: Member, record: SettlementRecord | undefined, declared: DeclaredTithingStatus) => void;
 }
@@ -1159,14 +1169,15 @@ function csvCell(v?: string): string {
 
 /** Build and download a CSV of every member's settlement status + booking link. */
 function downloadSettlementCsv(rows: SettlementRowState[]) {
-  const header = ["Name", "Email", "Phone", "Status", "Opened", "Booking Link", "Scheduled"];
+  const header = ["Name", "Email", "Phone", "Status", "Emailed", "Opened", "Booking Link", "Scheduled"];
   const lines = rows.map((r) => {
     const opened = r.token?.openedAt ? `Yes (${r.token.openCount ?? 1}x)` : r.token ? "No" : "";
+    const emailed = r.record?.linkSentAt ? r.record.linkSentAt.slice(0, 10) : "";
     const link = r.token ? bookingUrl(r.token.token) : "";
     const sched = r.interview?.scheduledDate
       ? [r.interview.scheduledDate, r.interview.scheduledTime, r.interview.interviewer].filter(Boolean).join(" ")
       : "";
-    return [r.name, r.member.email, r.member.phone, SETTLEMENT_STATUS_LABELS[r.status], opened, link, sched]
+    return [r.name, r.member.email, r.member.phone, SETTLEMENT_STATUS_LABELS[r.status], emailed, opened, link, sched]
       .map(csvCell)
       .join(",");
   });
@@ -1236,11 +1247,21 @@ function BreakdownBar({ rows }: { rows: SettlementRowState[] }) {
 }
 
 function SettlementView({
-  members, settlements, bookingTokens, interviews, onGenerate, onGenerateAll, onSetStatus, onSetDeclared,
+  members, settlements, bookingTokens, interviews, onGenerate, onGenerateAll,
+  emailTemplate, onEmail, onEmailSelected, onSetStatus, onSetDeclared,
 }: SettlementViewProps) {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [segment, setSegment] = useState<SettlementSegment>("all");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [emailedId, setEmailedId] = useState<string | null>(null);
+  const [emailMsg, setEmailMsg] = useState<string | null>(null);
+  // Compose dialog: opened for one member (row button) or the selected set.
+  const [composeOpen, setComposeOpen] = useState(false);
+  const [composeRecipients, setComposeRecipients] = useState<Member[]>([]);
+  const [draftSubject, setDraftSubject] = useState(emailTemplate.subject);
+  const [draftBody, setDraftBody] = useState(emailTemplate.body);
+  const [composeSending, setComposeSending] = useState(false);
 
   const rows: SettlementRowState[] = useMemo(() => {
     const active = members.filter((m) => m.isActive);
@@ -1293,6 +1314,98 @@ function SettlementView({
     }
   }
 
+  // A row worth emailing: still awaiting a booking and the member has an email.
+  const emailable = (r: SettlementRowState) =>
+    !!r.member.email && r.status !== "scheduled" && r.status !== "completed";
+
+  function toggleSelected(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  const selectableIds = filtered.filter(emailable).map((r) => r.member.id);
+  const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selected.has(id));
+  // How many selected members are still worth emailing (a selected member who
+  // has since booked no longer counts toward the send).
+  const selectedCount = rows.filter((r) => selected.has(r.member.id) && emailable(r)).length;
+  function toggleSelectAll() {
+    setSelected((prev) => {
+      if (selectableIds.every((id) => prev.has(id))) {
+        const next = new Set(prev);
+        selectableIds.forEach((id) => next.delete(id));
+        return next;
+      }
+      return new Set([...prev, ...selectableIds]);
+    });
+  }
+
+  /** Open the compose dialog for a set of recipients, pre-filled from the saved template. */
+  function openCompose(recipients: Member[]) {
+    if (recipients.length === 0) return;
+    setComposeRecipients(recipients);
+    setDraftSubject(emailTemplate.subject);
+    setDraftBody(emailTemplate.body);
+    setEmailMsg(null);
+    setComposeOpen(true);
+  }
+
+  function openComposeSelected() {
+    const toSend = rows.filter((r) => selected.has(r.member.id) && r.member.email).map((r) => r.member);
+    openCompose(toSend);
+  }
+
+  /** Send the composed (possibly edited) template to the dialog's recipients. */
+  async function sendCompose() {
+    const tpl: SettlementEmailTemplate = { subject: draftSubject, body: draftBody };
+    const recipients = composeRecipients;
+    setComposeSending(true);
+    setEmailMsg(null);
+    try {
+      if (recipients.length === 1) {
+        const m = recipients[0];
+        const ok = await onEmail(m, tpl);
+        setComposeOpen(false);
+        if (ok) {
+          setEmailedId(m.id);
+          setTimeout(() => setEmailedId((c) => (c === m.id ? null : c)), 1800);
+          setEmailMsg(`Emailed ${m.firstName}'s link.`);
+        }
+      } else {
+        const sent = await onEmailSelected(recipients, tpl);
+        setSelected(new Set());
+        setComposeOpen(false);
+        setEmailMsg(`Emailed ${sent} link${sent === 1 ? "" : "s"}.`);
+      }
+    } catch (e) {
+      setEmailMsg(e instanceof Error ? e.message : "Failed to send emails.");
+      setComposeOpen(false);
+    } finally {
+      setComposeSending(false);
+    }
+  }
+
+  // Preview the composed email for the first recipient: real first name, and
+  // their existing link if they have one (otherwise a representative sample).
+  const previewRecipient = composeRecipients[0];
+  const previewLink = previewRecipient
+    ? (() => {
+        const t = bookingTokens
+          .filter((bt) => bt.memberId === previewRecipient.id && bt.year === SETTLEMENT_YEAR && !bt.usedAt)
+          .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+        return t ? bookingUrl(t.token) : `${bookingUrl("your-personal-link")}`;
+      })()
+    : "";
+  const preview = previewRecipient
+    ? renderSettlementEmail(
+        { subject: draftSubject, body: draftBody },
+        { name: previewRecipient.firstName, link: previewLink },
+      )
+    : null;
+
   if (total === 0) {
     return (
       <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
@@ -1340,9 +1453,20 @@ function SettlementView({
                   <span className="hidden sm:inline">Generate all remaining</span>
                   <span className="sm:hidden">All links</span>
                 </Button>
+                <Button
+                  size="sm"
+                  className="gap-1.5"
+                  disabled={selectedCount === 0}
+                  onClick={openComposeSelected}
+                >
+                  <Mail className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Email selected{selectedCount > 0 ? ` (${selectedCount})` : ""}</span>
+                  <span className="sm:hidden">Email{selectedCount > 0 ? ` (${selectedCount})` : ""}</span>
+                </Button>
               </div>
             </div>
             <BreakdownBar rows={rows} />
+            {emailMsg && <p className="text-xs text-muted-foreground">{emailMsg}</p>}
           </div>
         </div>
 
@@ -1404,6 +1528,20 @@ function SettlementView({
         </div>
       </div>
 
+      {/* Select-all helper for bulk emailing the shown, still-outstanding members. */}
+      {selectableIds.length > 0 && (
+        <label className="flex items-center gap-2 px-1 text-xs text-muted-foreground">
+          <input
+            type="checkbox"
+            className="h-4 w-4 accent-primary"
+            checked={allSelected}
+            onChange={toggleSelectAll}
+            aria-label="Select all members with an email"
+          />
+          Select all shown ({selectableIds.length}) with an email
+        </label>
+      )}
+
       {/* Roster */}
       {filtered.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
@@ -1413,6 +1551,23 @@ function SettlementView({
         <div className="rounded-xl border border-border bg-card divide-y divide-border overflow-hidden">
           {filtered.map((r) => (
             <div key={r.member.id} className="flex flex-wrap items-center gap-3 p-3">
+              {emailable(r) ? (
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 shrink-0 accent-primary"
+                  checked={selected.has(r.member.id)}
+                  onChange={() => toggleSelected(r.member.id)}
+                  aria-label={`Select ${r.name} to email`}
+                />
+              ) : (
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 shrink-0"
+                  disabled
+                  title={r.member.email ? "Already booked or complete" : "No email on file"}
+                  aria-label={`${r.name} can't be emailed`}
+                />
+              )}
               <div className="h-8 w-8 rounded-full flex items-center justify-center text-xs font-semibold shrink-0 bg-primary/10 text-primary">
                 {getInitials(r.name)}
               </div>
@@ -1442,6 +1597,13 @@ function SettlementView({
                     {r.token.openedAt ? `Opened ${timeAgo(r.token.openedAt)} · not booked` : "Link not opened yet"}
                   </p>
                 )}
+                {/* Delivery signal: when the link was last emailed. */}
+                {r.record?.linkSentAt && r.status !== "scheduled" && r.status !== "completed" && (
+                  <p className="flex items-center gap-1 text-[11px] text-muted-foreground truncate">
+                    <Mail className="h-3 w-3 shrink-0" />
+                    Emailed {timeAgo(r.record.linkSentAt)}
+                  </p>
+                )}
               </div>
 
               <Badge className={cn("text-[10px] shrink-0", SETTLEMENT_STATUS_COLORS[r.status])}>
@@ -1450,16 +1612,33 @@ function SettlementView({
 
               {/* Link actions — only meaningful until a slot is booked */}
               {r.status !== "scheduled" && r.status !== "completed" && (
-                r.token ? (
-                  <Button size="sm" variant="ghost" className="h-8 gap-1 text-xs" onClick={() => copy(r.token!)}>
-                    {copiedId === r.token.id ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
-                    {copiedId === r.token.id ? "Copied" : "Copy link"}
+                <>
+                  {r.token ? (
+                    <Button size="sm" variant="ghost" className="h-8 gap-1 text-xs" onClick={() => copy(r.token!)}>
+                      {copiedId === r.token.id ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+                      {copiedId === r.token.id ? "Copied" : "Copy link"}
+                    </Button>
+                  ) : (
+                    <Button size="sm" variant="ghost" className="h-8 gap-1 text-xs" onClick={() => onGenerate(r.member)}>
+                      <Link2 className="h-3.5 w-3.5" /> Generate link
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-8 gap-1 text-xs"
+                    disabled={!r.member.email}
+                    title={r.member.email ? undefined : "No email on file"}
+                    onClick={() => openCompose([r.member])}
+                  >
+                    {emailedId === r.member.id ? (
+                      <Check className="h-3.5 w-3.5 text-green-600" />
+                    ) : (
+                      <Mail className="h-3.5 w-3.5" />
+                    )}
+                    {emailedId === r.member.id ? "Sent" : "Email link"}
                   </Button>
-                ) : (
-                  <Button size="sm" variant="ghost" className="h-8 gap-1 text-xs" onClick={() => onGenerate(r.member)}>
-                    <Link2 className="h-3.5 w-3.5" /> Generate link
-                  </Button>
-                )
+                </>
               )}
 
               {/* Status control */}
@@ -1492,6 +1671,59 @@ function SettlementView({
           ))}
         </div>
       )}
+
+      {/* Compose dialog — pre-filled from the saved template, editable per send. */}
+      <Dialog open={composeOpen} onOpenChange={(open) => { if (!open) setComposeOpen(false); }}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>
+              {composeRecipients.length === 1
+                ? `Email ${composeRecipients[0].firstName} their settlement link`
+                : `Email ${composeRecipients.length} members their settlement links`}
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              <code className="rounded bg-muted px-1 py-0.5">{"{name}"}</code> and{" "}
+              <code className="rounded bg-muted px-1 py-0.5">{"{link}"}</code> are filled in for
+              each recipient when sent. Edits here apply to this send only — change the saved
+              default in Settings → Email.
+            </p>
+            <div className="space-y-1.5">
+              <Label htmlFor="compose-subject" className="text-xs">Subject</Label>
+              <Input id="compose-subject" value={draftSubject}
+                onChange={(e) => setDraftSubject(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="compose-body" className="text-xs">Message</Label>
+              <Textarea id="compose-body" rows={9} value={draftBody}
+                onChange={(e) => setDraftBody(e.target.value)} />
+            </div>
+            {preview && (
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">
+                  Preview{composeRecipients.length > 1 ? ` (${previewRecipient.firstName}, first of ${composeRecipients.length})` : ""}
+                </Label>
+                <div className="rounded-lg border border-border bg-muted/40 p-3 text-xs">
+                  <p className="font-medium">{preview.subject}</p>
+                  <p className="mt-1 whitespace-pre-wrap text-muted-foreground">{preview.body}</p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setComposeOpen(false)} disabled={composeSending}>
+              Cancel
+            </Button>
+            <Button onClick={() => { void sendCompose(); }} disabled={composeSending || !draftSubject.trim() || !draftBody.trim()} className="gap-1.5">
+              {composeSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              {composeRecipients.length === 1 ? "Send" : `Send ${composeRecipients.length}`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -1799,6 +2031,20 @@ export default function InterviewsPage() {
   const [blockForm,     setBlockForm]     = useState(EMPTY_BLOCK);
   const [exceptionForm, setExceptionForm] = useState(EMPTY_EXCEPTION);
 
+  // The saved settlement-email template (Settings → Email), used to pre-fill the
+  // compose dialog. Falls back to the built-in default until loaded.
+  const [emailTemplate, setEmailTemplate] = useState<SettlementEmailTemplate>(DEFAULT_SETTLEMENT_EMAIL);
+  useEffect(() => {
+    fetch("/api/settings/email")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d && !d.error) {
+          setEmailTemplate(withDefaults({ subject: d.settlementEmailSubject, body: d.settlementEmailBody }));
+        }
+      })
+      .catch(() => { /* keep the default template */ });
+  }, []);
+
   // Strip the ?new deep-link param so a refresh doesn't reopen the dialog.
   useEffect(() => {
     if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("new") != null) {
@@ -1974,8 +2220,13 @@ export default function InterviewsPage() {
 
   const memberName = (m: Member) => `${m.firstName} ${m.lastName}`;
 
-  /** Create (or reuse) this year's settlement record + a personalized booking link. */
-  async function generateLink(m: Member) {
+  /**
+   * Ensure this year's settlement record + a live booking link exist for the
+   * member, returning the token. Reuses the member's existing unused token if
+   * there is one; otherwise creates the record (advancing it to link_created)
+   * and mints a fresh token. Also returns the record so callers can patch it.
+   */
+  async function ensureToken(m: Member): Promise<{ record: SettlementRecord; token: BookingToken }> {
     const now = new Date().toISOString();
     let record = settlements.find((s) => s.memberId === m.id && s.year === SETTLEMENT_YEAR);
     if (!record) {
@@ -1992,7 +2243,13 @@ export default function InterviewsPage() {
       await settlementsCol.create(record);
     } else if (record.status === "not_started") {
       await settlementsCol.update(record.id, { status: "link_created" });
+      record = { ...record, status: "link_created" };
     }
+    const existing = bookingTokens
+      .filter((t) => t.memberId === m.id && t.year === SETTLEMENT_YEAR && !t.usedAt)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+    if (existing) return { record, token: existing };
+
     const token: BookingToken = {
       id: newId(),
       token: generateToken(),
@@ -2006,6 +2263,12 @@ export default function InterviewsPage() {
       updatedAt: now,
     };
     await bookingTokensCol.create(token);
+    return { record, token };
+  }
+
+  /** Create (or reuse) this year's settlement record + a personalized booking link. */
+  async function generateLink(m: Member) {
+    await ensureToken(m);
   }
 
   async function generateAll(ms: Member[]) {
@@ -2015,6 +2278,70 @@ export default function InterviewsPage() {
       );
       if (!hasToken) await generateLink(m);
     }
+  }
+
+  /**
+   * Email a member their booking link. Ensures a link exists, sends through the
+   * configured Gmail account, and on a real send stamps the record with when it
+   * was emailed + the Message-ID. Falls back to a mailto: compose window when
+   * email isn't configured or the send fails (matching the agenda flow).
+   *
+   * `silent` suppresses the mailto: fallback — used by the bulk send so it can
+   * stop and report "configure email" once instead of opening many windows.
+   * Returns whether the link was actually sent by the server.
+   */
+  async function emailLink(
+    m: Member, tpl: SettlementEmailTemplate, opts?: { silent?: boolean },
+  ): Promise<boolean> {
+    if (!m.email) return false;
+    const { record, token } = await ensureToken(m);
+    const url = `${window.location.origin}/book/${token.token}`;
+    // Substitute {name}/{link} per recipient from the (possibly edited) template.
+    const { subject, body } = renderSettlementEmail(tpl, { name: m.firstName, link: url });
+
+    try {
+      const res = await fetch("/api/email/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: m.email, subject, body }),
+      });
+      if (res.ok) {
+        const { messageId } = await res.json();
+        const now = new Date().toISOString();
+        const patch: Partial<SettlementRecord> = { linkSentAt: now };
+        if (messageId) patch.linkEmailMessageId = messageId;
+        if (record.status === "not_started") patch.status = "link_created";
+        await settlementsCol.update(record.id, patch);
+        return true;
+      }
+      // notConfigured (409) or another error — fall through to mailto below.
+    } catch {
+      /* network error — fall back to mailto below */
+    }
+
+    if (!opts?.silent) {
+      window.location.assign(
+        `mailto:${m.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`,
+      );
+    }
+    return false;
+  }
+
+  /** Email the selected members their booking links, in the order given. */
+  async function emailSelected(ms: Member[], tpl: SettlementEmailTemplate) {
+    let sent = 0;
+    for (const m of ms) {
+      if (!m.email) continue;
+      const ok = await emailLink(m, tpl, { silent: true });
+      if (ok) {
+        sent += 1;
+      } else if (sent === 0) {
+        // First member failed with no server send — email likely isn't
+        // configured. Stop rather than silently doing nothing for everyone.
+        throw new Error("Email isn't set up yet. Add a Gmail address in Settings → Email, then try again.");
+      }
+    }
+    return sent;
   }
 
   async function setSettlementStatus(
@@ -2169,6 +2496,9 @@ export default function InterviewsPage() {
           interviews={interviews}
           onGenerate={(m) => { void generateLink(m); }}
           onGenerateAll={(ms) => { void generateAll(ms); }}
+          emailTemplate={emailTemplate}
+          onEmail={(m, tpl) => emailLink(m, tpl)}
+          onEmailSelected={(ms, tpl) => emailSelected(ms, tpl)}
           onSetStatus={(m, r, s) => { void setSettlementStatus(m, r, s); }}
           onSetDeclared={(m, r, d) => { void setDeclared(m, r, d); }}
         />

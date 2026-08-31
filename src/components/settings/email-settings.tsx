@@ -6,6 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { DEFAULT_SETTLEMENT_EMAIL } from "@/lib/settlement-email";
 
 interface EmailConfig {
   gmailAddress: string;
@@ -28,6 +30,9 @@ export function EmailSettingsCard() {
   const [testing, setTesting] = useState(false);
   const [error, setError] = useState("");
   const [testMsg, setTestMsg] = useState("");
+  // Settlement link email template — blank falls back to the built-in default.
+  const [settlementSubject, setSettlementSubject] = useState(DEFAULT_SETTLEMENT_EMAIL.subject);
+  const [settlementBody, setSettlementBody] = useState(DEFAULT_SETTLEMENT_EMAIL.body);
 
   useEffect(() => {
     fetch("/api/settings/email")
@@ -36,6 +41,8 @@ export function EmailSettingsCard() {
         if (data.error) return setError(data.error);
         setConfig(data);
         setAddress(data.gmailAddress ?? "");
+        if (data.settlementEmailSubject) setSettlementSubject(data.settlementEmailSubject);
+        if (data.settlementEmailBody) setSettlementBody(data.settlementEmailBody);
       })
       .catch(() => setError("Couldn't load email settings."));
   }, []);
@@ -50,6 +57,8 @@ export function EmailSettingsCard() {
           gmailAddress: address,
           // Only send the password when the user typed a new one.
           ...(appPassword ? { appPassword } : {}),
+          settlementEmailSubject: settlementSubject,
+          settlementEmailBody: settlementBody,
         }),
       });
       const data = await res.json();
@@ -143,6 +152,46 @@ export function EmailSettingsCard() {
               {saved && <span className="text-sm text-green-600 flex items-center gap-1"><Check className="h-4 w-4" /> Saved</span>}
               {testMsg && <span className="text-sm text-green-600 flex items-center gap-1"><Check className="h-4 w-4" /> {testMsg}</span>}
               {error && <span className="text-sm text-destructive">{error}</span>}
+            </div>
+
+            {/* Tithing-settlement link email — the message sent when a member is
+                emailed their booking link. Saved with the button above; can also
+                be tweaked per-send from the Tithing Settlement tab. */}
+            <div className="space-y-3 border-t border-border pt-4">
+              <div className="flex items-center justify-between gap-2">
+                <Label className="text-sm font-medium">Tithing settlement link email</Label>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={() => {
+                    setSettlementSubject(DEFAULT_SETTLEMENT_EMAIL.subject);
+                    setSettlementBody(DEFAULT_SETTLEMENT_EMAIL.body);
+                    setSaved(false);
+                  }}
+                >
+                  Reset to default
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Sent when you email a member their settlement booking link. Use{" "}
+                <code className="rounded bg-muted px-1 py-0.5">{"{name}"}</code> for the
+                member&rsquo;s first name and{" "}
+                <code className="rounded bg-muted px-1 py-0.5">{"{link}"}</code> for their
+                personal booking link — both are filled in per recipient when the email is sent.
+              </p>
+              <div className="space-y-1.5">
+                <Label htmlFor="settlement-subject" className="text-xs">Subject</Label>
+                <Input id="settlement-subject" value={settlementSubject}
+                  onChange={(e) => { setSettlementSubject(e.target.value); setSaved(false); }}
+                  placeholder={DEFAULT_SETTLEMENT_EMAIL.subject} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="settlement-body" className="text-xs">Message</Label>
+                <Textarea id="settlement-body" value={settlementBody} rows={9}
+                  onChange={(e) => { setSettlementBody(e.target.value); setSaved(false); }}
+                  placeholder={DEFAULT_SETTLEMENT_EMAIL.body} />
+              </div>
             </div>
           </>
         )}
