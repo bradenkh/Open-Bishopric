@@ -25,9 +25,13 @@ interface DayGroup {
 interface BookingInfo {
   memberName: string;
   purpose: string;
+  /** True when the link books for a household of more than one. */
+  household?: boolean;
   year?: number;
   durationMins?: number;
   days?: DayGroup[];
+  /** The booked slot, present once the household's link has been used. */
+  scheduled?: { date: string; time: string; interviewer: string };
   state: "used" | "expired" | null;
 }
 
@@ -169,7 +173,8 @@ export default function BookingPage() {
           <div className="space-y-1">
             <p className="text-lg font-semibold">You’re booked!</p>
             <p className="text-sm text-muted-foreground">
-              {info?.memberName}, your tithing settlement is scheduled for{" "}
+              {info?.household ? "Your household’s" : `${info?.memberName}, your`} tithing
+              settlement is scheduled for{" "}
               <strong>{formatDate(confirmed.date)}</strong> at{" "}
               <strong>{formatTime(confirmed.time)}</strong> with{" "}
               <strong>{confirmed.interviewer}</strong>.
@@ -186,11 +191,32 @@ export default function BookingPage() {
   if (info?.state === "used") {
     return (
       <Shell>
-        <Card className="text-center space-y-2">
+        <Card className="space-y-3 text-center">
           <CheckCircle2 className="mx-auto h-10 w-10 text-green-500" />
-          <p className="text-sm text-muted-foreground">
-            This link has already been used to book a time. If that wasn’t you or you
-            need to reschedule, please contact the bishopric.
+          <div className="space-y-1">
+            <p className="text-sm font-semibold">
+              {info.household ? "Your household is already scheduled" : "You’re already scheduled"}
+            </p>
+            {info.scheduled ? (
+              <p className="text-sm text-muted-foreground">
+                Your tithing settlement is set for{" "}
+                <strong>{formatDate(info.scheduled.date)}</strong> at{" "}
+                <strong>{formatTime(info.scheduled.time)}</strong>
+                {info.scheduled.interviewer ? (
+                  <>
+                    {" "}with <strong>{info.scheduled.interviewer}</strong>
+                  </>
+                ) : null}
+                .
+              </p>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                This link has already been used to book a time.
+              </p>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            If that wasn’t you or you need to reschedule, please contact the bishopric.
           </p>
         </Card>
       </Shell>
@@ -213,9 +239,20 @@ export default function BookingPage() {
     <Shell>
       <Card className="space-y-2">
         <p className="text-sm">
-          Hi <strong>{info?.memberName}</strong> — pick a time for your
-          {info?.year ? ` ${info.year}` : ""} tithing settlement
-          {info?.durationMins ? ` (${info.durationMins} min)` : ""}.
+          {info?.household ? (
+            <>
+              Pick a time for your household’s
+              {info?.year ? ` ${info.year}` : ""} tithing settlement
+              {info?.durationMins ? ` (${info.durationMins} min)` : ""}. One time covers
+              your household — whoever books first sets it for everyone.
+            </>
+          ) : (
+            <>
+              Hi <strong>{info?.memberName}</strong> — pick a time for your
+              {info?.year ? ` ${info.year}` : ""} tithing settlement
+              {info?.durationMins ? ` (${info.durationMins} min)` : ""}.
+            </>
+          )}
         </p>
         <p className="text-xs text-muted-foreground">
           {totalSlots > 0

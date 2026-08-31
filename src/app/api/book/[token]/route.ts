@@ -47,6 +47,35 @@ function tokenState(t: BookingToken): "used" | "expired" | null {
   return null;
 }
 
+/**
+ * The members this link's single appointment covers. Newer tokens carry the
+ * household directly; older per-member tokens fall back to their one member.
+ */
+function householdMembers(t: BookingToken): { id: string; name: string }[] {
+  if (t.householdMembers?.length) return t.householdMembers;
+  if (t.memberId) return [{ id: t.memberId, name: t.memberName }];
+  return [];
+}
+
+/** Whether this link books for a household of more than one. */
+function isHousehold(t: BookingToken): boolean {
+  return householdMembers(t).length > 1;
+}
+
+/** Load a single interview row by id, or null. */
+async function loadInterview(
+  admin: ReturnType<typeof createAdminClient>,
+  interviewId?: string,
+): Promise<Interview | null> {
+  if (!interviewId) return null;
+  const { data } = await admin
+    .from("interviews")
+    .select("*")
+    .eq("id", interviewId)
+    .maybeSingle();
+  return data ? fromRow<Interview>(data as Record<string, unknown>) : null;
+}
+
 // ── GET: token details + open slots ──────────────────────────────────────────
 export async function GET(
   _request: NextRequest,
@@ -66,9 +95,24 @@ export async function GET(
 
   const state = tokenState(record);
   if (state) {
+    // On a used link, surface the booked slot so a household member who opens it
+    // afterward sees they're already scheduled, with the details.
+    let scheduled: { date: string; time: string; interviewer: string } | undefined;
+    if (state === "used") {
+      const interview = await loadInterview(admin, record.interviewId);
+      if (interview?.scheduledDate && interview.scheduledTime) {
+        scheduled = {
+          date: interview.scheduledDate,
+          time: interview.scheduledTime,
+          interviewer: interview.interviewer ?? "",
+        };
+      }
+    }
     return NextResponse.json({
       memberName: record.memberName,
       purpose: record.purpose,
+      household: isHousehold(record),
+      scheduled,
       state, // "used" | "expired"
     });
   }
@@ -114,6 +158,7 @@ export async function GET(
   return NextResponse.json({
     memberName: record.memberName,
     purpose: record.purpose,
+    household: isHousehold(record),
     year: record.year,
     durationMins: SETTLEMENT_MINS,
     days: groupSlotsByDate(slots),
@@ -217,100 +262,83 @@ export async function POST(
   });
 }
 
+/** Find a household member's settlement record for the token's year, or null. */
+async function findRecord(
+  admin: ReturnType<typeof createAdminClient>,
+  memberId: string,
+  year: number,
+): Promise<SettlementRecord | null> {
+  const { data } = await admin
+    .from("settlement_records")
+    .select("*")
+    .eq("member_id", memberId)
+    .eq("year", year)
+    .maybeSingle();
+  return data ? fromRow<SettlementRecord>(data as Record<string, unknown>) : null;
+}
+
 /**
- * Advance the member's settlement record to `link_opened` when they open the
- * link. Forward-only: only `not_started` / `link_created` records move; anything
- * already scheduled, completed, or otherwise past this point is left alone. If
- * no record exists yet (link generated outside the normal flow), create one so
- * the open is still reflected on the board.
+ * Advance the whole household's settlement records to `link_opened` when the
+ * shared link is opened. Forward-only: only `not_started` / `link_created`
+ * records move; anything already scheduled or later is left alone. A record
+ * missing for a household member (link generated outside the normal flow) is
+ * created so the open still reflects on the board.
  */
 async function markSettlementOpened(
   admin: ReturnType<typeof createAdminClient>,
   record: BookingToken,
 ): Promise<void> {
-  let existing: SettlementRecord | null = null;
-  if (record.settlementRecordId) {
-    const { data } = await admin
-      .from("settlement_records")
-      .select("*")
-      .eq("id", record.settlementRecordId)
-      .maybeSingle();
-    existing = data ? fromRow<SettlementRecord>(data as Record<string, unknown>) : null;
-  }
-  if (!existing && record.memberId && record.year != null) {
-    const { data } = await admin
-      .from("settlement_records")
-      .select("*")
-      .eq("member_id", record.memberId)
-      .eq("year", record.year)
-      .maybeSingle();
-    existing = data ? fromRow<SettlementRecord>(data as Record<string, unknown>) : null;
-  }
-
-  if (existing) {
-    if (existing.status === "not_started" || existing.status === "link_created") {
-      await settlementRepo.update(admin, existing.id, { status: "link_opened" });
-    }
-    return;
-  }
-
+  const year = record.year ?? nowInAppTz().getFullYear();
   const now = new Date().toISOString();
-  await settlementRepo.create(admin, {
-    id: newId(),
-    memberId: record.memberId,
-    memberName: record.memberName,
-    year: record.year ?? nowInAppTz().getFullYear(),
-    status: "link_opened",
-    createdBy: "self-signup",
-    createdAt: now,
-    updatedAt: now,
-  });
+  for (const person of householdMembers(record)) {
+    const existing = await findRecord(admin, person.id, year);
+    if (existing) {
+      if (existing.status === "not_started" || existing.status === "link_created") {
+        await settlementRepo.update(admin, existing.id, { status: "link_opened" });
+      }
+      continue;
+    }
+    await settlementRepo.create(admin, {
+      id: newId(),
+      memberId: person.id,
+      memberName: person.name,
+      year,
+      status: "link_opened",
+      createdBy: "self-signup",
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
 }
 
-/** Flip the member's settlement record to `scheduled`, creating it if needed. */
+/**
+ * Flip every household member's settlement record to `scheduled` under the one
+ * appointment, creating any that are missing. This is why the link is one per
+ * household: a single booking covers everyone it lists.
+ */
 async function upsertSettlementScheduled(
   admin: ReturnType<typeof createAdminClient>,
   record: BookingToken,
   interviewId: string,
 ): Promise<void> {
-  // Prefer the record the token points at; else match member + year.
-  let existing: SettlementRecord | null = null;
-  if (record.settlementRecordId) {
-    const { data } = await admin
-      .from("settlement_records")
-      .select("*")
-      .eq("id", record.settlementRecordId)
-      .maybeSingle();
-    existing = data ? fromRow<SettlementRecord>(data as Record<string, unknown>) : null;
-  }
-  if (!existing && record.memberId && record.year != null) {
-    const { data } = await admin
-      .from("settlement_records")
-      .select("*")
-      .eq("member_id", record.memberId)
-      .eq("year", record.year)
-      .maybeSingle();
-    existing = data ? fromRow<SettlementRecord>(data as Record<string, unknown>) : null;
-  }
-
-  if (existing) {
-    await settlementRepo.update(admin, existing.id, {
+  const year = record.year ?? nowInAppTz().getFullYear();
+  const now = new Date().toISOString();
+  for (const person of householdMembers(record)) {
+    const existing = await findRecord(admin, person.id, year);
+    if (existing) {
+      await settlementRepo.update(admin, existing.id, { status: "scheduled", interviewId });
+      continue;
+    }
+    await settlementRepo.create(admin, {
+      id: newId(),
+      memberId: person.id,
+      memberName: person.name,
+      year,
       status: "scheduled",
       interviewId,
+      createdBy: "self-signup",
+      createdAt: now,
+      updatedAt: now,
     });
-    return;
   }
-
-  const now = new Date().toISOString();
-  await settlementRepo.create(admin, {
-    id: newId(),
-    memberId: record.memberId,
-    memberName: record.memberName,
-    year: record.year ?? nowInAppTz().getFullYear(),
-    status: "scheduled",
-    interviewId,
-    createdBy: "self-signup",
-    createdAt: now,
-    updatedAt: now,
-  });
 }

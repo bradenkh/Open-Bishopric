@@ -40,6 +40,9 @@ import {
   DEFAULT_SETTLEMENT_EMAIL, renderSettlementEmail, withDefaults,
   type SettlementEmailTemplate,
 } from "@/lib/settlement-email";
+import {
+  householdKey, headOfHousehold, householdMembersOf, tokenHouseholdKey,
+} from "@/lib/household";
 
 // ── Bishopric helpers ─────────────────────────────────────────────────────────
 
@@ -1268,8 +1271,10 @@ function SettlementView({
     return active.map((m) => {
       const name = `${m.firstName} ${m.lastName}`;
       const record = settlements.find((s) => s.memberId === m.id && s.year === SETTLEMENT_YEAR);
+      // The link is the household's — everyone in the household shares one.
+      const key = householdKey(m);
       const token = bookingTokens
-        .filter((t) => t.memberId === m.id && t.year === SETTLEMENT_YEAR && !t.usedAt)
+        .filter((t) => !t.usedAt && t.year === SETTLEMENT_YEAR && tokenHouseholdKey(t) === key)
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
       const interview = record?.interviewId
         ? interviews.find((i) => i.id === record.interviewId)
@@ -1393,8 +1398,9 @@ function SettlementView({
   const previewRecipient = composeRecipients[0];
   const previewLink = previewRecipient
     ? (() => {
+        const key = householdKey(previewRecipient);
         const t = bookingTokens
-          .filter((bt) => bt.memberId === previewRecipient.id && bt.year === SETTLEMENT_YEAR && !bt.usedAt)
+          .filter((bt) => !bt.usedAt && bt.year === SETTLEMENT_YEAR && tokenHouseholdKey(bt) === key)
           .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
         return t ? bookingUrl(t.token) : `${bookingUrl("your-personal-link")}`;
       })()
@@ -2220,15 +2226,17 @@ export default function InterviewsPage() {
 
   const memberName = (m: Member) => `${m.firstName} ${m.lastName}`;
 
+  /** This year's settlement record for a member, or undefined. */
+  const recordFor = (memberId: string) =>
+    settlements.find((s) => s.memberId === memberId && s.year === SETTLEMENT_YEAR);
+
   /**
-   * Ensure this year's settlement record + a live booking link exist for the
-   * member, returning the token. Reuses the member's existing unused token if
-   * there is one; otherwise creates the record (advancing it to link_created)
-   * and mints a fresh token. Also returns the record so callers can patch it.
+   * Ensure this member has this year's settlement record, advancing a fresh
+   * one to `link_created`. Returns the record (existing or newly created).
    */
-  async function ensureToken(m: Member): Promise<{ record: SettlementRecord; token: BookingToken }> {
+  async function ensureRecord(m: Member): Promise<SettlementRecord> {
     const now = new Date().toISOString();
-    let record = settlements.find((s) => s.memberId === m.id && s.year === SETTLEMENT_YEAR);
+    let record = recordFor(m.id);
     if (!record) {
       record = {
         id: newId(),
@@ -2245,36 +2253,70 @@ export default function InterviewsPage() {
       await settlementsCol.update(record.id, { status: "link_created" });
       record = { ...record, status: "link_created" };
     }
+    return record;
+  }
+
+  /**
+   * Ensure a live booking link exists for the member's HOUSEHOLD, returning it
+   * alongside the member's own settlement record.
+   *
+   * Tithing settlement is booked one appointment per household, so the whole
+   * household shares one link: a settlement record is ensured for every active
+   * household member (so each shows on the board), and a single token — anchored
+   * on the head of household and carrying every member the one appointment covers
+   * — is reused if it already exists, else minted. Returns the passed member's
+   * own record so callers (e.g. emailing) can patch the right row.
+   */
+  async function ensureToken(
+    m: Member,
+  ): Promise<{ records: Map<string, SettlementRecord>; token: BookingToken }> {
+    const now = new Date().toISOString();
+    const pool = members.filter((x) => x.isActive);
+    const house = householdMembersOf(m, pool);
+    const head = headOfHousehold(house);
+    const key = householdKey(head);
+
+    // A settlement record for every household member, keyed by member id so the
+    // caller can stamp the right rows (e.g. who was emailed).
+    const records = new Map<string, SettlementRecord>();
+    for (const person of house) {
+      records.set(person.id, await ensureRecord(person));
+    }
+
+    // Reuse the household's existing unused link if there is one.
     const existing = bookingTokens
-      .filter((t) => t.memberId === m.id && t.year === SETTLEMENT_YEAR && !t.usedAt)
+      .filter((t) => !t.usedAt && t.year === SETTLEMENT_YEAR && tokenHouseholdKey(t) === key)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
-    if (existing) return { record, token: existing };
+    if (existing) return { records, token: existing };
 
     const token: BookingToken = {
       id: newId(),
       token: generateToken(),
-      memberId: m.id,
-      memberName: memberName(m),
+      memberId: head.id,
+      memberName: memberName(head),
       purpose: "tithing_settlement",
       year: SETTLEMENT_YEAR,
-      settlementRecordId: record.id,
+      settlementRecordId: records.get(head.id)?.id,
+      householdId: key,
+      householdMembers: house.map((x) => ({ id: x.id, name: memberName(x) })),
       createdBy: user?.uid ?? "mock",
       createdAt: now,
       updatedAt: now,
     };
     await bookingTokensCol.create(token);
-    return { record, token };
+    return { records, token };
   }
 
-  /** Create (or reuse) this year's settlement record + a personalized booking link. */
+  /** Create (or reuse) this year's settlement records + the household's link. */
   async function generateLink(m: Member) {
     await ensureToken(m);
   }
 
   async function generateAll(ms: Member[]) {
     for (const m of ms) {
+      const key = householdKey(m);
       const hasToken = bookingTokens.some(
-        (t) => t.memberId === m.id && t.year === SETTLEMENT_YEAR && !t.usedAt,
+        (t) => !t.usedAt && t.year === SETTLEMENT_YEAR && tokenHouseholdKey(t) === key,
       );
       if (!hasToken) await generateLink(m);
     }
@@ -2290,11 +2332,19 @@ export default function InterviewsPage() {
    * stop and report "configure email" once instead of opening many windows.
    * Returns whether the link was actually sent by the server.
    */
-  async function emailLink(
-    m: Member, tpl: SettlementEmailTemplate, opts?: { silent?: boolean },
+  /**
+   * Send one member the household's booking link (`token` already resolved) and,
+   * on a real send, stamp their own settlement record with when it was emailed.
+   * `record` is that member's row so the "Emailed …" signal lands on it.
+   */
+  async function sendLinkEmail(
+    m: Member,
+    token: BookingToken,
+    record: SettlementRecord | undefined,
+    tpl: SettlementEmailTemplate,
+    opts?: { silent?: boolean },
   ): Promise<boolean> {
     if (!m.email) return false;
-    const { record, token } = await ensureToken(m);
     const url = `${window.location.origin}/book/${token.token}`;
     // Substitute {name}/{link} per recipient from the (possibly edited) template.
     const { subject, body } = renderSettlementEmail(tpl, { name: m.firstName, link: url });
@@ -2310,8 +2360,8 @@ export default function InterviewsPage() {
         const now = new Date().toISOString();
         const patch: Partial<SettlementRecord> = { linkSentAt: now };
         if (messageId) patch.linkEmailMessageId = messageId;
-        if (record.status === "not_started") patch.status = "link_created";
-        await settlementsCol.update(record.id, patch);
+        if (record && record.status === "not_started") patch.status = "link_created";
+        if (record) await settlementsCol.update(record.id, patch);
         return true;
       }
       // notConfigured (409) or another error — fall through to mailto below.
@@ -2327,12 +2377,41 @@ export default function InterviewsPage() {
     return false;
   }
 
-  /** Email the selected members their booking links, in the order given. */
+  /**
+   * Email a member their household's booking link. Ensures the household's link
+   * (and everyone's settlement record) exists, then sends. Falls back to a
+   * mailto: compose window when email isn't configured or the send fails.
+   *
+   * `silent` suppresses the mailto: fallback — used by the bulk send so it can
+   * stop and report "configure email" once instead of opening many windows.
+   */
+  async function emailLink(
+    m: Member, tpl: SettlementEmailTemplate, opts?: { silent?: boolean },
+  ): Promise<boolean> {
+    if (!m.email) return false;
+    const { records, token } = await ensureToken(m);
+    return sendLinkEmail(m, token, records.get(m.id), tpl, opts);
+  }
+
+  /**
+   * Email the selected members their booking links. The link is per household,
+   * so each household's link is ensured exactly once (a bulk loop can't see a
+   * token minted moments earlier in the same tick) and then sent to each of its
+   * selected members, all with the same link.
+   */
   async function emailSelected(ms: Member[], tpl: SettlementEmailTemplate) {
     let sent = 0;
+    // householdKey → the ensured link + this year's record for each member.
+    const ensured = new Map<string, { token: BookingToken; records: Map<string, SettlementRecord> }>();
     for (const m of ms) {
       if (!m.email) continue;
-      const ok = await emailLink(m, tpl, { silent: true });
+      const key = householdKey(m);
+      let house = ensured.get(key);
+      if (!house) {
+        house = await ensureToken(m);
+        ensured.set(key, house);
+      }
+      const ok = await sendLinkEmail(m, house.token, house.records.get(m.id), tpl, { silent: true });
       if (ok) {
         sent += 1;
       } else if (sent === 0) {

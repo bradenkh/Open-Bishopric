@@ -25,7 +25,12 @@ export interface Member {
   email?: string;
   phone?: string;
   address?: string;
+  /** Groups members into one household — everyone sharing a value is one
+   *  household (and receives the same tithing-settlement booking link). */
   householdId?: string;
+  /** Marks the head of household — the representative for the household's
+   *  shared booking link and single settlement appointment. */
+  isHeadOfHousehold?: boolean;
   isActive: boolean;
   notes?: string;
   createdAt: string;
@@ -660,12 +665,18 @@ export interface SettlementRecord {
 export interface BookingToken {
   id: string;
   token: string;
+  /** The head of household the link is anchored on (its representative). */
   memberId?: string;
   memberName: string;
   /** What the link books. v1 always "tithing_settlement". */
   purpose: string;
   year?: number;
   settlementRecordId?: string;
+  /** The household this link books for — everyone sharing it books one slot. */
+  householdId?: string;
+  /** The members the single appointment covers. All are marked scheduled when
+   *  any of them books, so the public booking API never needs the members table. */
+  householdMembers?: { id: string; name: string }[];
   /** ISO timestamp; the link is dead after this (optional). */
   expiresAt?: string;
   /** ISO timestamp of the first time the link was opened (null = never opened). */
