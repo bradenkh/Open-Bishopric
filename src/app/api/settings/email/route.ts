@@ -16,7 +16,7 @@ export async function GET() {
 
   const { data, error } = await createAdminClient()
     .from("app_settings")
-    .select("gmail_address, gmail_app_password")
+    .select("gmail_address, gmail_app_password, settlement_email_subject, settlement_email_body")
     .eq("id", "default")
     .maybeSingle();
 
@@ -25,6 +25,9 @@ export async function GET() {
   return NextResponse.json({
     gmailAddress: data?.gmail_address ?? "",
     connected: Boolean(data?.gmail_address && data?.gmail_app_password),
+    // Empty string = not customized; the client falls back to the built-in copy.
+    settlementEmailSubject: data?.settlement_email_subject ?? "",
+    settlementEmailBody: data?.settlement_email_body ?? "",
   });
 }
 
@@ -37,6 +40,10 @@ export async function PUT(request: NextRequest) {
   // appPassword is optional on update: omit it to keep the current one; send an
   // empty string to clear it. Any other string replaces it.
   const appPassword: string | undefined = body.appPassword;
+  // Settlement email template — each field is optional; omit to leave as-is, send
+  // an empty string to clear it back to the built-in default.
+  const settlementEmailSubject: unknown = body.settlementEmailSubject;
+  const settlementEmailBody: unknown = body.settlementEmailBody;
 
   const patch: Record<string, string> = {};
   if (typeof gmailAddress === "string") patch.gmail_address = gmailAddress.trim();
@@ -44,6 +51,8 @@ export async function PUT(request: NextRequest) {
     // Google shows app passwords with spaces ("abcd efgh ijkl mnop"); strip them.
     patch.gmail_app_password = appPassword.replace(/\s+/g, "");
   }
+  if (typeof settlementEmailSubject === "string") patch.settlement_email_subject = settlementEmailSubject;
+  if (typeof settlementEmailBody === "string") patch.settlement_email_body = settlementEmailBody;
 
   const { error } = await createAdminClient()
     .from("app_settings")
