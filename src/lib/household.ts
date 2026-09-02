@@ -54,6 +54,19 @@ export function householdLabel(head: Member, size: number): string {
   return size > 1 ? `the ${head.lastName} household` : fullName(head);
 }
 
+/**
+ * The parents of a household — the head of house and the spouse of head, as
+ * flagged on the roster. Settlement emails go to the parents. Falls back to the
+ * head (and then to everyone) when no parent is flagged, so a household is never
+ * left with no one to email.
+ */
+export function householdParents(members: Member[]): Member[] {
+  const parents = members.filter((m) => m.isHouseholdParent);
+  if (parents.length) return parents;
+  const head = members.find((m) => m.isHeadOfHousehold);
+  return head ? [head] : members;
+}
+
 /** The household key a booking token covers, tolerating legacy per-member tokens
  *  that predate household fields (their key is their member/household of one). */
 export function tokenHouseholdKey(t: {

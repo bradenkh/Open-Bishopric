@@ -12,6 +12,10 @@
 --   * members.is_head_of_household — marks the head of each household. Data is
 --     supplied on the roster; when absent the app falls back to a deterministic
 --     head so a household of one keeps working exactly as before.
+--   * members.is_household_parent — marks the household's parents (head of house
+--     + spouse of head). Settlement emails go to the parents, not to children.
+--   * members.age — the member's age from the roster, kept for upcoming
+--     age-aware features (e.g. youth vs adult handling).
 --
 -- Booking tokens gain the household context they need so the public booking API
 -- (service role) can mark every household member scheduled without reading the
@@ -25,9 +29,11 @@
 -- migrations. Never destructive.
 -- ============================================================================
 
--- ── Head of household on the roster ──────────────────────────────────────────
+-- ── Household roster fields ──────────────────────────────────────────────────
 alter table public.members
-  add column if not exists is_head_of_household boolean not null default false;
+  add column if not exists is_head_of_household boolean not null default false,
+  add column if not exists is_household_parent  boolean not null default false,
+  add column if not exists age                  integer;
 
 -- ── Household context on the booking link ────────────────────────────────────
 alter table public.booking_tokens

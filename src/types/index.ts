@@ -31,6 +31,11 @@ export interface Member {
   /** Marks the head of household — the representative for the household's
    *  shared booking link and single settlement appointment. */
   isHeadOfHousehold?: boolean;
+  /** Marks a household parent (head of house + spouse of head). Settlement
+   *  emails go to the parents, not to children. */
+  isHouseholdParent?: boolean;
+  /** The member's age from the roster. Kept for upcoming age-aware features. */
+  age?: number;
   isActive: boolean;
   notes?: string;
   createdAt: string;
