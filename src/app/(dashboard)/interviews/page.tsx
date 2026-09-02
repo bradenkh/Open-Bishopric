@@ -42,6 +42,7 @@ import {
 } from "@/lib/settlement-email";
 import {
   householdKey, headOfHousehold, householdMembersOf, tokenHouseholdKey,
+  householdParents, householdLabel,
 } from "@/lib/household";
 
 // ── Bishopric helpers ─────────────────────────────────────────────────────────
@@ -1124,8 +1125,15 @@ function AvailabilityView({
 type SettlementSegment = "all" | "not_started" | "link" | "scheduled" | "done";
 
 interface SettlementRowState {
+  /** The head of household — drives link/appointment and status controls. */
   member: Member;
+  /** Household label, e.g. "the Smith household" (or a person's name). */
   name: string;
+  householdId: string;
+  /** Every active member of the household. */
+  householdMembers: Member[];
+  /** The parents (head + spouse) — the settlement-email recipients. */
+  parents: Member[];
   record?: SettlementRecord;
   token?: BookingToken;
   interview?: Interview;
@@ -1170,9 +1178,9 @@ function csvCell(v?: string): string {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-/** Build and download a CSV of every member's settlement status + booking link. */
+/** Build and download a CSV of every household's settlement status + booking link. */
 function downloadSettlementCsv(rows: SettlementRowState[]) {
-  const header = ["Name", "Email", "Phone", "Status", "Emailed", "Opened", "Booking Link", "Scheduled"];
+  const header = ["Household", "Parents", "Parent Emails", "Members", "Status", "Emailed", "Opened", "Booking Link", "Scheduled"];
   const lines = rows.map((r) => {
     const opened = r.token?.openedAt ? `Yes (${r.token.openCount ?? 1}x)` : r.token ? "No" : "";
     const emailed = r.record?.linkSentAt ? r.record.linkSentAt.slice(0, 10) : "";
@@ -1180,7 +1188,10 @@ function downloadSettlementCsv(rows: SettlementRowState[]) {
     const sched = r.interview?.scheduledDate
       ? [r.interview.scheduledDate, r.interview.scheduledTime, r.interview.interviewer].filter(Boolean).join(" ")
       : "";
-    return [r.name, r.member.email, r.member.phone, SETTLEMENT_STATUS_LABELS[r.status], emailed, opened, link, sched]
+    const parents = r.parents.map((p) => `${p.firstName} ${p.lastName}`).join("; ");
+    const parentEmails = r.parents.map((p) => p.email).filter(Boolean).join("; ");
+    return [r.name, parents, parentEmails, String(r.householdMembers.length),
+      SETTLEMENT_STATUS_LABELS[r.status], emailed, opened, link, sched]
       .map(csvCell)
       .join(",");
   });
@@ -1259,28 +1270,44 @@ function SettlementView({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [emailedId, setEmailedId] = useState<string | null>(null);
   const [emailMsg, setEmailMsg] = useState<string | null>(null);
-  // Compose dialog: opened for one member (row button) or the selected set.
+  // Compose dialog: opened for one household (row button) or the selected set.
   const [composeOpen, setComposeOpen] = useState(false);
   const [composeRecipients, setComposeRecipients] = useState<Member[]>([]);
+  // Set when composing for a single household (row button): its id, for the
+  // "Sent" flash and message. Null when composing the whole selected set.
+  const [composeHouseholdId, setComposeHouseholdId] = useState<string | null>(null);
+  const [composeHouseholdName, setComposeHouseholdName] = useState<string>("");
   const [draftSubject, setDraftSubject] = useState(emailTemplate.subject);
   const [draftBody, setDraftBody] = useState(emailTemplate.body);
   const [composeSending, setComposeSending] = useState(false);
 
   const rows: SettlementRowState[] = useMemo(() => {
     const active = members.filter((m) => m.isActive);
-    return active.map((m) => {
-      const name = `${m.firstName} ${m.lastName}`;
-      const record = settlements.find((s) => s.memberId === m.id && s.year === SETTLEMENT_YEAR);
-      // The link is the household's — everyone in the household shares one.
+    // Group the active roster into households (one row per household).
+    const groups = new Map<string, Member[]>();
+    for (const m of active) {
       const key = householdKey(m);
+      (groups.get(key) ?? groups.set(key, []).get(key)!).push(m);
+    }
+    const out: SettlementRowState[] = [];
+    for (const [key, houseMembers] of groups) {
+      const head = headOfHousehold(houseMembers);
+      const parents = householdParents(houseMembers);
+      const name = householdLabel(head, houseMembers.length);
+      // The household's canonical record is the head's; booking marks the rest.
+      const record = settlements.find((s) => s.memberId === head.id && s.year === SETTLEMENT_YEAR);
       const token = bookingTokens
         .filter((t) => !t.usedAt && t.year === SETTLEMENT_YEAR && tokenHouseholdKey(t) === key)
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
       const interview = record?.interviewId
         ? interviews.find((i) => i.id === record.interviewId)
         : undefined;
-      return { member: m, name, record, token, interview, status: record?.status ?? "not_started" };
-    });
+      out.push({
+        member: head, name, householdId: key, householdMembers: houseMembers, parents,
+        record, token, interview, status: record?.status ?? "not_started",
+      });
+    }
+    return out.sort((a, b) => a.name.localeCompare(b.name));
   }, [members, settlements, bookingTokens, interviews]);
 
   const total = rows.length;
@@ -1319,9 +1346,12 @@ function SettlementView({
     }
   }
 
-  // A row worth emailing: still awaiting a booking and the member has an email.
+  // A household worth emailing: still awaiting a booking and it has at least one
+  // parent with an email on file.
   const emailable = (r: SettlementRowState) =>
-    !!r.member.email && r.status !== "scheduled" && r.status !== "completed";
+    r.parents.some((p) => p.email) && r.status !== "scheduled" && r.status !== "completed";
+  /** The parents of a household who actually have an email — the send targets. */
+  const recipientsOf = (r: SettlementRowState) => r.parents.filter((p) => p.email);
 
   function toggleSelected(id: string) {
     setSelected((prev) => {
@@ -1348,10 +1378,16 @@ function SettlementView({
     });
   }
 
-  /** Open the compose dialog for a set of recipients, pre-filled from the saved template. */
-  function openCompose(recipients: Member[]) {
+  /**
+   * Open the compose dialog for a set of recipients, pre-filled from the saved
+   * template. `household` (id + name) is set when emailing a single household
+   * from its row, so the send can flash "Sent" on that row and message it.
+   */
+  function openCompose(recipients: Member[], household?: { id: string; name: string }) {
     if (recipients.length === 0) return;
     setComposeRecipients(recipients);
+    setComposeHouseholdId(household?.id ?? null);
+    setComposeHouseholdName(household?.name ?? "");
     setDraftSubject(emailTemplate.subject);
     setDraftBody(emailTemplate.body);
     setEmailMsg(null);
@@ -1359,7 +1395,10 @@ function SettlementView({
   }
 
   function openComposeSelected() {
-    const toSend = rows.filter((r) => selected.has(r.member.id) && r.member.email).map((r) => r.member);
+    // Recipients are the parents of every selected household still worth emailing.
+    const toSend = rows
+      .filter((r) => selected.has(r.member.id) && emailable(r))
+      .flatMap(recipientsOf);
     openCompose(toSend);
   }
 
@@ -1367,23 +1406,26 @@ function SettlementView({
   async function sendCompose() {
     const tpl: SettlementEmailTemplate = { subject: draftSubject, body: draftBody };
     const recipients = composeRecipients;
+    const householdId = composeHouseholdId;
+    const householdName = composeHouseholdName;
     setComposeSending(true);
     setEmailMsg(null);
     try {
-      if (recipients.length === 1) {
-        const m = recipients[0];
-        const ok = await onEmail(m, tpl);
-        setComposeOpen(false);
-        if (ok) {
-          setEmailedId(m.id);
-          setTimeout(() => setEmailedId((c) => (c === m.id ? null : c)), 1800);
-          setEmailMsg(`Emailed ${m.firstName}'s link.`);
+      // One address → onEmail; several (both parents, or a whole selection) →
+      // onEmailSelected. Both ensure the shared household link before sending.
+      const sent = recipients.length === 1
+        ? (await onEmail(recipients[0], tpl)) ? 1 : 0
+        : await onEmailSelected(recipients, tpl);
+      setComposeOpen(false);
+      if (householdId) {
+        if (sent > 0) {
+          setEmailedId(householdId);
+          setTimeout(() => setEmailedId((c) => (c === householdId ? null : c)), 1800);
+          setEmailMsg(`Emailed ${householdName} (${sent} parent${sent === 1 ? "" : "s"}).`);
         }
       } else {
-        const sent = await onEmailSelected(recipients, tpl);
         setSelected(new Set());
-        setComposeOpen(false);
-        setEmailMsg(`Emailed ${sent} link${sent === 1 ? "" : "s"}.`);
+        setEmailMsg(`Emailed ${sent} parent${sent === 1 ? "" : "s"} across the selected households.`);
       }
     } catch (e) {
       setEmailMsg(e instanceof Error ? e.message : "Failed to send emails.");
@@ -1439,7 +1481,7 @@ function SettlementView({
               <div>
                 <p className="text-sm font-semibold">{SETTLEMENT_YEAR} Tithing Settlement</p>
                 <p className="text-xs text-muted-foreground">
-                  {completedN} of {total} complete · {remaining.length} to go
+                  {completedN} of {total} households complete · {remaining.length} to go
                 </p>
               </div>
               <div className="flex gap-2 shrink-0">
@@ -1486,9 +1528,9 @@ function SettlementView({
           >
             <Send className="h-3.5 w-3.5 shrink-0" />
             {openedNotBooked > 0 ? (
-              <span><strong>{openedNotBooked}</strong> opened their link but haven&apos;t booked yet — good time to follow up.</span>
+              <span><strong>{openedNotBooked}</strong> {openedNotBooked === 1 ? "household" : "households"} opened their link but haven&apos;t booked yet — good time to follow up.</span>
             ) : (
-              <span><strong>{linkedN}</strong> {linkedN === 1 ? "person has" : "people have"} a link but haven&apos;t opened it yet.</span>
+              <span><strong>{linkedN}</strong> {linkedN === 1 ? "household has" : "households have"} a link but haven&apos;t opened it yet.</span>
             )}
           </button>
         )}
@@ -1528,7 +1570,7 @@ function SettlementView({
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search members…"
+            placeholder="Search households…"
             className="h-9 pl-8 text-sm"
           />
         </div>
@@ -1542,16 +1584,16 @@ function SettlementView({
             className="h-4 w-4 accent-primary"
             checked={allSelected}
             onChange={toggleSelectAll}
-            aria-label="Select all members with an email"
+            aria-label="Select all households with a parent email"
           />
-          Select all shown ({selectableIds.length}) with an email
+          Select all shown ({selectableIds.length}) with a parent email
         </label>
       )}
 
       {/* Roster */}
       {filtered.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
-          No members match.
+          No households match.
         </div>
       ) : (
         <div className="rounded-xl border border-border bg-card divide-y divide-border overflow-hidden">
@@ -1570,7 +1612,7 @@ function SettlementView({
                   type="checkbox"
                   className="h-4 w-4 shrink-0"
                   disabled
-                  title={r.member.email ? "Already booked or complete" : "No email on file"}
+                  title={r.parents.some((p) => p.email) ? "Already booked or complete" : "No parent email on file"}
                   aria-label={`${r.name} can't be emailed`}
                 />
               )}
@@ -1579,6 +1621,14 @@ function SettlementView({
               </div>
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium truncate">{r.name}</p>
+                {/* Who gets the email + household size */}
+                <p className="flex items-center gap-1 text-[11px] text-muted-foreground truncate">
+                  <User className="h-3 w-3 shrink-0" />
+                  {r.parents.length
+                    ? r.parents.map((p) => p.firstName).join(" & ")
+                    : "No parents on file"}
+                  {r.householdMembers.length > 1 ? ` · ${r.householdMembers.length} in household` : ""}
+                </p>
                 {/* Booked slot, once scheduled */}
                 {r.interview?.scheduledDate && (
                   <p className="flex items-center gap-1 text-[11px] text-muted-foreground truncate">
@@ -1633,16 +1683,16 @@ function SettlementView({
                     size="sm"
                     variant="ghost"
                     className="h-8 gap-1 text-xs"
-                    disabled={!r.member.email}
-                    title={r.member.email ? undefined : "No email on file"}
-                    onClick={() => openCompose([r.member])}
+                    disabled={!r.parents.some((p) => p.email)}
+                    title={r.parents.some((p) => p.email) ? undefined : "No parent email on file"}
+                    onClick={() => openCompose(recipientsOf(r), { id: r.householdId, name: r.name })}
                   >
                     {emailedId === r.member.id ? (
                       <Check className="h-3.5 w-3.5 text-green-600" />
                     ) : (
                       <Mail className="h-3.5 w-3.5" />
                     )}
-                    {emailedId === r.member.id ? "Sent" : "Email link"}
+                    {emailedId === r.member.id ? "Sent" : "Email parents"}
                   </Button>
                 </>
               )}
@@ -1683,9 +1733,11 @@ function SettlementView({
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>
-              {composeRecipients.length === 1
-                ? `Email ${composeRecipients[0].firstName} their settlement link`
-                : `Email ${composeRecipients.length} members their settlement links`}
+              {composeHouseholdId
+                ? `Email ${composeHouseholdName} their settlement link`
+                : composeRecipients.length === 1
+                  ? `Email ${composeRecipients[0].firstName} their settlement link`
+                  : `Email ${composeRecipients.length} parents their settlement link`}
             </DialogTitle>
           </DialogHeader>
 
@@ -2453,12 +2505,23 @@ export default function InterviewsPage() {
   }
 
   // ── Settlement counts (for the tab badge / header) ──────────────────────────
-  const activeMemberCount = members.filter((m) => m.isActive).length;
-  const settlementDone = members.filter((m) => {
-    const r = settlements.find((s) => s.memberId === m.id && s.year === SETTLEMENT_YEAR);
-    return m.isActive && (r?.status === "completed" || r?.status === "exempt");
-  }).length;
-  const settlementRemaining = activeMemberCount - settlementDone;
+  // Settlement is tracked per household — count households, not individuals.
+  const settlementHouseholds = (() => {
+    const active = members.filter((m) => m.isActive);
+    const groups = new Map<string, Member[]>();
+    for (const m of active) {
+      const key = householdKey(m);
+      (groups.get(key) ?? groups.set(key, []).get(key)!).push(m);
+    }
+    let done = 0;
+    for (const [, houseMembers] of groups) {
+      const head = headOfHousehold(houseMembers);
+      const r = settlements.find((s) => s.memberId === head.id && s.year === SETTLEMENT_YEAR);
+      if (r?.status === "completed" || r?.status === "exempt") done += 1;
+    }
+    return { total: groups.size, done };
+  })();
+  const settlementRemaining = settlementHouseholds.total - settlementHouseholds.done;
 
   const TAB_CONFIG: { view: PageView; label: string; count?: number }[] = [
     { view: "calendar",     label: "Calendar" },
