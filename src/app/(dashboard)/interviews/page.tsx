@@ -685,7 +685,7 @@ function ListView({ interviews, onSelect }: ListViewProps) {
 
 // ── Calendar (week) View ────────────────────────────────────────────────────────
 
-const HOUR_PX = 44; // vertical pixels per hour in the week grid
+const HOUR_PX = 64; // vertical pixels per hour in the week grid
 
 function startOfWeek(d: Date): Date {
   const x = new Date(d);
@@ -2087,6 +2087,9 @@ export default function InterviewsPage() {
   const [editing,    setEditing]    = useState<Interview | null>(null);
   const [form,       setForm]       = useState(EMPTY_FORM);
   const [saving,     setSaving]     = useState(false);
+  // Two-step delete: the detail dialog reveals a confirm before removing.
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting,   setDeleting]   = useState(false);
 
   const [blockForm,     setBlockForm]     = useState(EMPTY_BLOCK);
   const [exceptionForm, setExceptionForm] = useState(EMPTY_EXCEPTION);
@@ -2131,6 +2134,19 @@ export default function InterviewsPage() {
     if (!selected) return;
     patch(selected.id, updates);
     setSelected(null);
+  }
+
+  /** Remove an interview entirely — clears it from the board and the calendar. */
+  async function handleDelete() {
+    if (!selected) return;
+    setDeleting(true);
+    try {
+      await interviewsCol.remove(selected.id);
+      setSelected(null);
+      setConfirmingDelete(false);
+    } finally {
+      setDeleting(false);
+    }
   }
 
   /** Drag-and-drop between columns, applying the side effects each move implies. */
@@ -2661,7 +2677,7 @@ export default function InterviewsPage() {
       )}
 
       {/* ── Detail dialog ── */}
-      <Dialog open={!!selected} onOpenChange={(open) => !open && setSelected(null)}>
+      <Dialog open={!!selected} onOpenChange={(open) => { if (!open) { setSelected(null); setConfirmingDelete(false); } }}>
         <DialogContent className="max-h-[90vh] overflow-y-auto">
           {selected && (
             <>
@@ -2723,6 +2739,34 @@ export default function InterviewsPage() {
                   onClose={() => setSelected(null)}
                   onEdit={() => openEdit(selected)}
                 />
+
+                {/* Delete — removes the card from the board and the calendar. */}
+                <div className="border-t pt-3">
+                  {confirmingDelete ? (
+                    <div className="flex flex-col gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3">
+                      <p className="text-sm">
+                        Delete <span className="font-medium">{selected.memberName}</span>&apos;s interview? This can&apos;t be undone.
+                      </p>
+                      <div className="flex justify-end gap-2">
+                        <Button variant="ghost" size="sm" onClick={() => setConfirmingDelete(false)} disabled={deleting}>
+                          Cancel
+                        </Button>
+                        <Button variant="destructive" size="sm" onClick={() => { void handleDelete(); }} disabled={deleting}>
+                          <Trash2 className="h-3.5 w-3.5" /> {deleting ? "Deleting…" : "Delete"}
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                      onClick={() => setConfirmingDelete(true)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" /> Delete interview
+                    </Button>
+                  )}
+                </div>
               </div>
             </>
           )}
