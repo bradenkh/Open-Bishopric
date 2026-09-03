@@ -249,9 +249,7 @@ export function generateSlots({
       const gridStart = blockStart + phase;
       const preferredStart = preferredSlotStart(block, gridStart, blockEnd, durationMins);
 
-      // Packing state: whether this interviewer has any booking today, and which
-      // of their bookings fall inside this block (for the adjacency test).
-      const hasBookingToday = booked.length > 0;
+      // The interviewer's bookings that fall inside this block (adjacency test).
       const blockBookings = booked.filter(([bs]) => bs >= blockStart && bs < blockEnd);
 
       for (let start = gridStart; start + durationMins <= blockEnd; start += durationMins) {
@@ -262,12 +260,12 @@ export function generateSlots({
         const conflict = booked.some(([bs, be]) => start < be && end > bs);
         if (conflict) continue;
 
-        // Smart packing: once the day has a booking, keep the schedule
-        // contiguous — a slot must be flush against a booking in this block,
-        // or (if the block is still empty) be the window's preferred slot, so
-        // the first self-booking lands on the preferred time and the rest pack
-        // around it.
-        if (packAdjacent && hasBookingToday) {
+        // Smart packing: expose only one bookable slot per block at a time,
+        // growing outward as it fills. While the block is empty, only the
+        // window's preferred slot is offered; once something is booked, only
+        // the slots flush against a booking open up — so members book the
+        // preferred time first and the rest pack contiguously around it.
+        if (packAdjacent) {
           const ok = blockBookings.length > 0
             ? blockBookings.some(([bs, be]) => end === bs || start === be)
             : start === preferredStart;
