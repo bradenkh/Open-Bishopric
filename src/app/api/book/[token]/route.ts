@@ -72,10 +72,13 @@ function isHousehold(t: BookingToken): boolean {
 async function bishopBlocks(
   admin: ReturnType<typeof createAdminClient>,
   blocks: AvailabilityBlock[],
-): Promise<AvailabilityBlock[]> {
+): Promise<{ blocks: AvailabilityBlock[]; bishopId?: string }> {
   const profiles = await listProfiles(admin);
   const bishop = profiles.find((p) => p.role === "bishop");
-  return bishop ? blocks.filter((b) => b.memberId === bishop.uid) : blocks;
+  return {
+    blocks: bishop ? blocks.filter((b) => b.memberId === bishop.uid) : blocks,
+    bishopId: bishop?.uid,
+  };
 }
 
 /** Load a single interview row by id, or null. */
@@ -160,12 +163,16 @@ export async function GET(
     interviewsRepo.list(admin),
   ]);
 
+  const bishop = await bishopBlocks(admin, blocks);
   const slots = generateSlots({
     durationMins: SETTLEMENT_MINS,
     // Members only ever see the bishop's openings for settlement.
-    blocks: await bishopBlocks(admin, blocks),
+    blocks: bishop.blocks,
     exceptions,
     interviews,
+    // Anything on the bishop's calendar (incl. must-be-bishop interviews) closes
+    // the slot it sits in.
+    bishopMemberId: bishop.bishopId,
     // Keep each interviewer's day contiguous as members self-book.
     packAdjacent: true,
     // Offer each window's preferred time first.
@@ -216,12 +223,14 @@ export async function POST(
     availabilityExceptionsRepo.list(admin),
     interviewsRepo.list(admin),
   ]);
+  const bishop = await bishopBlocks(admin, blocks);
   const slots = generateSlots({
     durationMins: SETTLEMENT_MINS,
     // Same bishop-only windows the GET offered, so the re-check matches.
-    blocks: await bishopBlocks(admin, blocks),
+    blocks: bishop.blocks,
     exceptions,
     interviews,
+    bishopMemberId: bishop.bishopId,
     // Keep each interviewer's day contiguous as members self-book.
     packAdjacent: true,
     // Offer each window's preferred time first.
