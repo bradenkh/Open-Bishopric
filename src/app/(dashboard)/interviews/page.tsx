@@ -957,6 +957,9 @@ function CalendarView({ interviews, availability, exceptions, onSelect }: Calend
                 </div>
               );
             })}
+            {/* Clearance so the final segment's bottom hour label (centered on
+                the boundary) isn't clipped by the card's overflow-hidden. */}
+            <div className="h-3 shrink-0" />
           </div>
         </div>
 
@@ -1732,7 +1735,7 @@ function SettlementView({
 
       {/* Compose dialog — pre-filled from the saved template, editable per send. */}
       <Dialog open={composeOpen} onOpenChange={(open) => { if (!open) setComposeOpen(false); }}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+        <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>
               {composeHouseholdId
@@ -2678,7 +2681,7 @@ export default function InterviewsPage() {
 
       {/* ── Detail dialog ── */}
       <Dialog open={!!selected} onOpenChange={(open) => { if (!open) { setSelected(null); setConfirmingDelete(false); } }}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-h-[85dvh] overflow-y-auto">
           {selected && (
             <>
               <DialogHeader>
@@ -2775,7 +2778,7 @@ export default function InterviewsPage() {
 
       {/* ── New / edit dialog ── */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-h-[85dvh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editing ? "Edit Interview" : "New Interview"}</DialogTitle>
           </DialogHeader>
