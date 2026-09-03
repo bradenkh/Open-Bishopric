@@ -18,11 +18,11 @@ export const DEFAULT_SETTLEMENT_EMAIL: SettlementEmailTemplate = {
   body: [
     "Hi {name},",
     "",
-    "It's time to schedule your tithing settlement with the bishopric. You can pick a time that works for you using your personal link below:",
+    "It's time to schedule your household's tithing settlement with the bishopric. You can pick a time that works using the link below:",
     "",
     "{link}",
     "",
-    "Just choose an open slot — no sign-in needed. Thank you!",
+    "One time covers your whole household — just choose an open slot, no sign-in needed. If someone in your household has already booked, the link will show your scheduled time. Thank you!",
   ].join("\n"),
 };
 

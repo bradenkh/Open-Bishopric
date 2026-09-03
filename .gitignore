@@ -39,3 +39,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Ward roster PII — LCR HTML exports and the parsed roster (never commit real
+# member names/emails/phones). See scripts/parse-roster.mjs.
+*.local.json
+scripts/roster.local.json
+*Create_a_Report*.html
+*Create_a_Report*.pdf
