@@ -845,7 +845,7 @@ function CalendarView({ interviews, availability, exceptions, onSelect }: Calend
       </div>
 
       {/* Grid */}
-      <div className="overflow-hidden rounded-xl border border-border bg-card">
+      <div className="overflow-hidden rounded-xl border border-border bg-card min-h-[420px]">
         <div className="overflow-x-auto">
           <div style={{ minWidth: 480 }}>
             {/* Day headers */}
@@ -1307,7 +1307,9 @@ function SettlementView({
         record, token, interview, status: record?.status ?? "not_started",
       });
     }
-    return out.sort((a, b) => a.name.localeCompare(b.name));
+    return out.sort((a, b) =>
+      a.member.lastName.localeCompare(b.member.lastName) ||
+      a.member.firstName.localeCompare(b.member.firstName));
   }, [members, settlements, bookingTokens, interviews]);
 
   const total = rows.length;

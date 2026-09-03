@@ -6,10 +6,11 @@ import {
   availabilityExceptionsRepo,
   interviewsRepo,
   settlementRepo,
+  listProfiles,
 } from "@/lib/db";
 import { generateSlots, groupSlotsByDate, nowInAppTz } from "@/lib/availability";
 import { INTERVIEW_DURATION_MINS } from "@/types";
-import type { BookingToken, Interview, SettlementRecord } from "@/types";
+import type { AvailabilityBlock, BookingToken, Interview, SettlementRecord } from "@/types";
 
 /**
  * Public, token-authenticated booking endpoint. NO login required — the
@@ -60,6 +61,21 @@ function householdMembers(t: BookingToken): { id: string; name: string }[] {
 /** Whether this link books for a household of more than one. */
 function isHousehold(t: BookingToken): boolean {
   return householdMembers(t).length > 1;
+}
+
+/**
+ * Restrict settlement availability to the bishop. Tithing settlement is held by
+ * the bishop, so members self-booking should only ever see his open windows —
+ * never a counselor's. Falls back to every block when no bishop profile exists
+ * (a misconfiguration) so the page isn't silently empty.
+ */
+async function bishopBlocks(
+  admin: ReturnType<typeof createAdminClient>,
+  blocks: AvailabilityBlock[],
+): Promise<AvailabilityBlock[]> {
+  const profiles = await listProfiles(admin);
+  const bishop = profiles.find((p) => p.role === "bishop");
+  return bishop ? blocks.filter((b) => b.memberId === bishop.uid) : blocks;
 }
 
 /** Load a single interview row by id, or null. */
@@ -146,7 +162,8 @@ export async function GET(
 
   const slots = generateSlots({
     durationMins: SETTLEMENT_MINS,
-    blocks,
+    // Members only ever see the bishop's openings for settlement.
+    blocks: await bishopBlocks(admin, blocks),
     exceptions,
     interviews,
     // Keep each interviewer's day contiguous as members self-book.
@@ -201,7 +218,8 @@ export async function POST(
   ]);
   const slots = generateSlots({
     durationMins: SETTLEMENT_MINS,
-    blocks,
+    // Same bishop-only windows the GET offered, so the re-check matches.
+    blocks: await bishopBlocks(admin, blocks),
     exceptions,
     interviews,
     // Keep each interviewer's day contiguous as members self-book.
