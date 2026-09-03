@@ -2144,7 +2144,18 @@ export default function InterviewsPage() {
     if (!selected) return;
     setDeleting(true);
     try {
+      // If this was a booked tithing-settlement appointment, deleting it frees
+      // the household to rebook: send the record back to "link created" and
+      // unlink the (now-gone) interview. `null` clears the DB column — an
+      // `undefined` patch would be skipped by the row mapper.
+      const linkedSettlement = settlements.find((s) => s.interviewId === selected.id);
       await interviewsCol.remove(selected.id);
+      if (linkedSettlement) {
+        await settlementsCol.update(linkedSettlement.id, {
+          status: "link_created",
+          interviewId: null,
+        } as unknown as Partial<SettlementRecord>);
+      }
       setSelected(null);
       setConfirmingDelete(false);
     } finally {
