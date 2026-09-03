@@ -164,6 +164,22 @@ interface GenerateArgs {
    * Off by default: the bishopric picker keeps a plain chronological grid.
    */
   preferredFirst?: boolean;
+  /**
+   * The bishop's member id. His availability additionally treats every
+   * must-be-bishop interview as busy (only he conducts those), so a self-booked
+   * settlement slot never collides with a temple-recommend / worthiness he
+   * already has on the calendar — even if that interview's interviewer label
+   * differs from his availability name.
+   */
+  bishopMemberId?: string;
+  /**
+   * Extra busy windows keyed by member id, merged with each member's interview
+   * bookings before slots are cut. Reserved for the upcoming meetings feature:
+   * when a member is assigned to a ward/stake council (or any meeting) that sits
+   * on their calendar, pass it here and their slots during it close — no change
+   * to slot generation needed. Empty today.
+   */
+  busyByMember?: Record<string, BusyRange[]>;
 }
 
 function isWithinException(
@@ -176,21 +192,63 @@ function isWithinException(
   );
 }
 
-/** Booked [start, end) ranges, in minutes, for a member on a given date. */
+/** A busy window on a specific date, in minutes since midnight. */
+export interface BusyRange {
+  /** YYYY-MM-DD */
+  date: string;
+  /** minutes since midnight */
+  start: number;
+  /** minutes since midnight */
+  end: number;
+}
+
+/** Normalize a person's name for tolerant comparison (trim, collapse inner
+ *  whitespace, case-fold) so "Bishop  Phillips" and "bishop phillips" match. */
+function normalizeName(name?: string): string {
+  return (name ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+/**
+ * Whether a scheduled interview occupies a block owner's calendar. Coupled by
+ * person rather than exact string, so an interview reliably closes the slot it
+ * sits in:
+ *   - the interviewer label matches the block's member (case/spacing tolerant), or
+ *   - the interview must be conducted by the bishop and this block is the
+ *     bishop's — only he holds those, so it occupies his calendar even if the
+ *     interviewer label is phrased differently (or left blank).
+ *
+ * This is the single choke point for "is this member busy then". When meetings
+ * (ward/stake council, etc.) land on a member's calendar, feed them through
+ * `busyByMember` on generateSlots rather than widening this function.
+ */
+function interviewOccupies(
+  interview: Interview,
+  block: Pick<AvailabilityBlock, "memberId" | "memberName">,
+  bishopMemberId?: string,
+): boolean {
+  const who = normalizeName(interview.interviewer);
+  if (who && who === normalizeName(block.memberName)) return true;
+  if (bishopMemberId && block.memberId === bishopMemberId && interview.requiresBishop) return true;
+  return false;
+}
+
+/** Booked [start, end) ranges, in minutes, that fill the block owner's calendar
+ *  on a given date. */
 function bookedRanges(
   interviews: Interview[],
-  memberName: string,
+  block: Pick<AvailabilityBlock, "memberId" | "memberName">,
   dateStr: string,
-  ignoreId?: string,
+  ignoreId: string | undefined,
+  bishopMemberId: string | undefined,
 ): [number, number][] {
   return interviews
     .filter(
       (i) =>
         i.id !== ignoreId &&
-        i.interviewer === memberName &&
         i.scheduledDate === dateStr &&
         i.scheduledTime &&
-        i.stage !== "completed",
+        i.stage !== "completed" &&
+        interviewOccupies(i, block, bishopMemberId),
     )
     .map((i) => {
       const start = toMinutes(i.scheduledTime!);
@@ -213,6 +271,8 @@ export function generateSlots({
   ignoreInterviewId,
   packAdjacent = false,
   preferredFirst = false,
+  bishopMemberId,
+  busyByMember,
 }: GenerateArgs): Slot[] {
   if (durationMins <= 0) return [];
 
@@ -235,7 +295,15 @@ export function generateSlots({
       if (!blockAppliesOn(block, date)) continue;
       if (isWithinException(exceptions, block.memberId, dateStr)) continue;
 
-      const booked = bookedRanges(interviews, block.memberName, dateStr, ignoreInterviewId);
+      // Everything filling this member's calendar on this date: their interview
+      // bookings (coupled by person) plus any extra busy windows a caller supplies
+      // (future meetings). Slots overlapping any of these are dropped.
+      const booked = [
+        ...bookedRanges(interviews, block, dateStr, ignoreInterviewId, bishopMemberId),
+        ...(busyByMember?.[block.memberId] ?? [])
+          .filter((r) => r.date === dateStr)
+          .map((r) => [r.start, r.end] as [number, number]),
+      ];
       const blockStart = toMinutes(block.startTime);
       const blockEnd = toMinutes(block.endTime);
 

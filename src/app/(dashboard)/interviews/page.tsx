@@ -207,11 +207,13 @@ interface SlotPickerProps {
   value: { date?: string; time?: string; interviewer?: string };
   onChange: (v: { date: string; time: string; interviewer: string }) => void;
   ignoreInterviewId?: string;
+  /** The bishop's member id, so must-be-bishop interviews close his slots. */
+  bishopMemberId?: string;
 }
 
 function SlotPicker({
   availability, exceptions, interviews, durationMins,
-  restrictToMember, allowedMembers, value, onChange, ignoreInterviewId,
+  restrictToMember, allowedMembers, value, onChange, ignoreInterviewId, bishopMemberId,
 }: SlotPickerProps) {
   const [showManual, setShowManual] = useState(false);
   const [mDate, setMDate] = useState(value.date ?? "");
@@ -225,6 +227,7 @@ function SlotPicker({
     exceptions,
     interviews,
     ignoreInterviewId,
+    bishopMemberId,
   });
   const grouped = groupSlotsByDate(slots);
   const showMember = !restrictToMember;
@@ -1851,6 +1854,7 @@ function StageAdvancePanel({
           value={pick}
           onChange={setPick}
           ignoreInterviewId={interview.id}
+          bishopMemberId={bishop?.id}
         />
 
         {pick.date && pick.time && (
@@ -2871,6 +2875,7 @@ export default function InterviewsPage() {
                 value={{ date: form.scheduledDate, time: form.scheduledTime, interviewer: form.interviewer }}
                 onChange={(v) => setForm((f) => ({ ...f, scheduledDate: v.date, scheduledTime: v.time, interviewer: v.interviewer }))}
                 ignoreInterviewId={editing?.id}
+                bishopMemberId={BISHOP?.id}
               />
             </div>
 

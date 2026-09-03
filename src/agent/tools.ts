@@ -541,6 +541,12 @@ async function bishopName(): Promise<string | undefined> {
   return (data?.display_name as string | undefined) ?? undefined;
 }
 
+/** The bishop's member id (availability blocks key on it), for slot coupling. */
+async function bishopId(): Promise<string | undefined> {
+  const { data } = await db().from("profiles").select("uid").eq("role", "bishop").maybeSingle();
+  return (data?.uid as string | undefined) ?? undefined;
+}
+
 async function clerkName(): Promise<string | undefined> {
   const { data } = await db().from("profiles").select("display_name").eq("role", "clerk").maybeSingle();
   return (data?.display_name as string | undefined) ?? undefined;
@@ -671,6 +677,9 @@ export const findInterviewSlots = tool({
       interviews: (interviewsRes.data ?? []).map((r) => fromRow<Interview>(r)),
       days,
       ignoreInterviewId: interviewId,
+      // Anything on the bishop's calendar (incl. must-be-bishop interviews)
+      // closes the slot it sits in.
+      bishopMemberId: await bishopId(),
       // Suggest each window's preferred time first.
       preferredFirst: true,
     });
