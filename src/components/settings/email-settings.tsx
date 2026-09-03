@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { DEFAULT_SETTLEMENT_EMAIL } from "@/lib/settlement-email";
+import { DEFAULT_SETTLEMENT_EMAIL, DEFAULT_SETTLEMENT_CONFIRMATION } from "@/lib/settlement-email";
 
 interface EmailConfig {
   gmailAddress: string;
@@ -33,6 +33,9 @@ export function EmailSettingsCard() {
   // Settlement link email template — blank falls back to the built-in default.
   const [settlementSubject, setSettlementSubject] = useState(DEFAULT_SETTLEMENT_EMAIL.subject);
   const [settlementBody, setSettlementBody] = useState(DEFAULT_SETTLEMENT_EMAIL.body);
+  // Settlement confirmation email template — sent when a member books their slot.
+  const [confirmationSubject, setConfirmationSubject] = useState(DEFAULT_SETTLEMENT_CONFIRMATION.subject);
+  const [confirmationBody, setConfirmationBody] = useState(DEFAULT_SETTLEMENT_CONFIRMATION.body);
 
   useEffect(() => {
     fetch("/api/settings/email")
@@ -43,6 +46,8 @@ export function EmailSettingsCard() {
         setAddress(data.gmailAddress ?? "");
         if (data.settlementEmailSubject) setSettlementSubject(data.settlementEmailSubject);
         if (data.settlementEmailBody) setSettlementBody(data.settlementEmailBody);
+        if (data.settlementConfirmationSubject) setConfirmationSubject(data.settlementConfirmationSubject);
+        if (data.settlementConfirmationBody) setConfirmationBody(data.settlementConfirmationBody);
       })
       .catch(() => setError("Couldn't load email settings."));
   }, []);
@@ -59,6 +64,8 @@ export function EmailSettingsCard() {
           ...(appPassword ? { appPassword } : {}),
           settlementEmailSubject: settlementSubject,
           settlementEmailBody: settlementBody,
+          settlementConfirmationSubject: confirmationSubject,
+          settlementConfirmationBody: confirmationBody,
         }),
       });
       const data = await res.json();
@@ -191,6 +198,47 @@ export function EmailSettingsCard() {
                 <Textarea id="settlement-body" value={settlementBody} rows={9}
                   onChange={(e) => { setSettlementBody(e.target.value); setSaved(false); }}
                   placeholder={DEFAULT_SETTLEMENT_EMAIL.body} />
+              </div>
+            </div>
+
+            {/* Tithing-settlement confirmation email — sent automatically to the
+                household when a member books their slot through the link. */}
+            <div className="space-y-3 border-t border-border pt-4">
+              <div className="flex items-center justify-between gap-2">
+                <Label className="text-sm font-medium">Tithing settlement confirmation email</Label>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={() => {
+                    setConfirmationSubject(DEFAULT_SETTLEMENT_CONFIRMATION.subject);
+                    setConfirmationBody(DEFAULT_SETTLEMENT_CONFIRMATION.body);
+                    setSaved(false);
+                  }}
+                >
+                  Reset to default
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Sent automatically to the household when a member books their settlement
+                appointment through their link. Use{" "}
+                <code className="rounded bg-muted px-1 py-0.5">{"{name}"}</code>,{" "}
+                <code className="rounded bg-muted px-1 py-0.5">{"{date}"}</code>,{" "}
+                <code className="rounded bg-muted px-1 py-0.5">{"{time}"}</code>, and{" "}
+                <code className="rounded bg-muted px-1 py-0.5">{"{interviewer}"}</code> —
+                all filled in from the booked appointment.
+              </p>
+              <div className="space-y-1.5">
+                <Label htmlFor="confirmation-subject" className="text-xs">Subject</Label>
+                <Input id="confirmation-subject" value={confirmationSubject}
+                  onChange={(e) => { setConfirmationSubject(e.target.value); setSaved(false); }}
+                  placeholder={DEFAULT_SETTLEMENT_CONFIRMATION.subject} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="confirmation-body" className="text-xs">Message</Label>
+                <Textarea id="confirmation-body" value={confirmationBody} rows={8}
+                  onChange={(e) => { setConfirmationBody(e.target.value); setSaved(false); }}
+                  placeholder={DEFAULT_SETTLEMENT_CONFIRMATION.body} />
               </div>
             </div>
           </>

@@ -9,8 +9,14 @@ import {
   listProfiles,
 } from "@/lib/db";
 import { generateSlots, groupSlotsByDate, nowInAppTz } from "@/lib/availability";
+import { isEmailConfigured, sendEmail } from "@/lib/email/gmail";
+import {
+  renderSettlementConfirmation,
+  withConfirmationDefaults,
+} from "@/lib/settlement-email";
+import { formatDate } from "@/lib/utils";
 import { INTERVIEW_DURATION_MINS } from "@/types";
-import type { AvailabilityBlock, BookingToken, Interview, SettlementRecord } from "@/types";
+import type { AvailabilityBlock, BookingToken, Interview, Member, SettlementRecord } from "@/types";
 
 /**
  * Public, token-authenticated booking endpoint. NO login required — the
@@ -279,6 +285,15 @@ export async function POST(
     return NextResponse.json({ error: "Booking failed. Please try again." }, { status: 500 });
   }
 
+  // Email the household a confirmation of the slot they just chose. Best-effort:
+  // the booking is already committed, so a failure here (email not configured, a
+  // send error, no address on file) must never fail the request.
+  try {
+    await sendBookingConfirmation(admin, record, { date, time, interviewer });
+  } catch {
+    // confirmation is non-critical
+  }
+
   return NextResponse.json({
     ok: true,
     memberName: record.memberName,
@@ -287,6 +302,73 @@ export async function POST(
     interviewer,
     durationMins: SETTLEMENT_MINS,
   });
+}
+
+/** Format a "HH:MM" 24-hour time as "4:30 PM" for display in the email. */
+function formatTime(time: string): string {
+  const [h, m] = time.split(":").map(Number);
+  const period = h >= 12 ? "PM" : "AM";
+  const hour = h % 12 === 0 ? 12 : h % 12;
+  return `${hour}:${String(m).padStart(2, "0")} ${period}`;
+}
+
+/**
+ * Send the household a confirmation email for the appointment just booked.
+ *
+ * The link is emailed to the household's parents, so the confirmation goes back
+ * to the same people: every household parent with an email on file, addressed by
+ * first name. Falls back to any household member with an email when none are
+ * flagged as parents (older data). Silent no-op when email isn't configured or
+ * no member has an address. Uses the bishopric's saved confirmation template,
+ * or the built-in default when they haven't customized it.
+ */
+async function sendBookingConfirmation(
+  admin: ReturnType<typeof createAdminClient>,
+  record: BookingToken,
+  slot: { date: string; time: string; interviewer: string },
+): Promise<void> {
+  if (!(await isEmailConfigured())) return;
+
+  const ids = householdMembers(record).map((p) => p.id);
+  if (ids.length === 0) return;
+
+  const { data } = await admin.from("members").select("*").in("id", ids);
+  const members = (data ?? []).map((r) => fromRow<Member>(r as Record<string, unknown>));
+
+  // Prefer the household's parents (who receive the invite); fall back to anyone
+  // in the household with an address so a confirmation still goes out.
+  const withEmail = members.filter((m) => m.email?.trim());
+  const parents = withEmail.filter((m) => m.isHouseholdParent);
+  const recipients = parents.length ? parents : withEmail;
+  if (recipients.length === 0) return;
+
+  const { data: settings } = await admin
+    .from("app_settings")
+    .select("settlement_confirmation_subject, settlement_confirmation_body")
+    .eq("id", "default")
+    .maybeSingle();
+  const template = withConfirmationDefaults({
+    subject: settings?.settlement_confirmation_subject,
+    body: settings?.settlement_confirmation_body,
+  });
+
+  const date = formatDate(slot.date);
+  const time = formatTime(slot.time);
+
+  // De-dupe by address in case two parents share one email.
+  const sent = new Set<string>();
+  for (const m of recipients) {
+    const to = m.email!.trim();
+    if (sent.has(to.toLowerCase())) continue;
+    sent.add(to.toLowerCase());
+    const { subject, body } = renderSettlementConfirmation(template, {
+      name: m.firstName,
+      date,
+      time,
+      interviewer: slot.interviewer,
+    });
+    await sendEmail({ to, subject, body });
+  }
 }
 
 /** Find a household member's settlement record for the token's year, or null. */
