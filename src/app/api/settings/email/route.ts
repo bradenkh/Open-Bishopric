@@ -16,7 +16,9 @@ export async function GET() {
 
   const { data, error } = await createAdminClient()
     .from("app_settings")
-    .select("gmail_address, gmail_app_password, settlement_email_subject, settlement_email_body")
+    .select(
+      "gmail_address, gmail_app_password, settlement_email_subject, settlement_email_body, settlement_confirmation_subject, settlement_confirmation_body",
+    )
     .eq("id", "default")
     .maybeSingle();
 
@@ -28,6 +30,8 @@ export async function GET() {
     // Empty string = not customized; the client falls back to the built-in copy.
     settlementEmailSubject: data?.settlement_email_subject ?? "",
     settlementEmailBody: data?.settlement_email_body ?? "",
+    settlementConfirmationSubject: data?.settlement_confirmation_subject ?? "",
+    settlementConfirmationBody: data?.settlement_confirmation_body ?? "",
   });
 }
 
@@ -44,6 +48,8 @@ export async function PUT(request: NextRequest) {
   // an empty string to clear it back to the built-in default.
   const settlementEmailSubject: unknown = body.settlementEmailSubject;
   const settlementEmailBody: unknown = body.settlementEmailBody;
+  const settlementConfirmationSubject: unknown = body.settlementConfirmationSubject;
+  const settlementConfirmationBody: unknown = body.settlementConfirmationBody;
 
   const patch: Record<string, string> = {};
   if (typeof gmailAddress === "string") patch.gmail_address = gmailAddress.trim();
@@ -53,6 +59,8 @@ export async function PUT(request: NextRequest) {
   }
   if (typeof settlementEmailSubject === "string") patch.settlement_email_subject = settlementEmailSubject;
   if (typeof settlementEmailBody === "string") patch.settlement_email_body = settlementEmailBody;
+  if (typeof settlementConfirmationSubject === "string") patch.settlement_confirmation_subject = settlementConfirmationSubject;
+  if (typeof settlementConfirmationBody === "string") patch.settlement_confirmation_body = settlementConfirmationBody;
 
   const { error } = await createAdminClient()
     .from("app_settings")

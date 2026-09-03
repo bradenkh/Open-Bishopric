@@ -53,3 +53,61 @@ export function withDefaults(partial?: Partial<SettlementEmailTemplate> | null):
     body: partial?.body?.trim() ? partial.body : DEFAULT_SETTLEMENT_EMAIL.body,
   };
 }
+
+// ── Booking confirmation ──────────────────────────────────────────────────────
+
+/**
+ * The confirmation sent after a member self-books their household's settlement
+ * appointment through their link. Uses the same template shape as the invite,
+ * with `{name}`, `{date}`, `{time}`, and `{interviewer}` substituted at send
+ * time. The bishopric can override the copy in Settings → Email; when they
+ * haven't, this default is used.
+ */
+export const DEFAULT_SETTLEMENT_CONFIRMATION: SettlementEmailTemplate = {
+  subject: "Your tithing settlement is booked",
+  body: [
+    "Hi {name},",
+    "",
+    "Your household's tithing settlement is scheduled for {date} at {time} with {interviewer}.",
+    "",
+    "One appointment covers your whole household. If you need to change the time, just reply to this email and we'll help you reschedule. Thank you!",
+  ].join("\n"),
+};
+
+/** The placeholders a confirmation template may use, for help text / previews. */
+export const SETTLEMENT_CONFIRMATION_PLACEHOLDERS = ["{name}", "{date}", "{time}", "{interviewer}"] as const;
+
+export interface SettlementConfirmationVars {
+  /** The member's first name (or a preview stand-in). */
+  name: string;
+  /** The booked date, already formatted for display (e.g. "Dec 3, 2026"). */
+  date: string;
+  /** The booked time, already formatted for display (e.g. "4:30 PM"). */
+  time: string;
+  /** Who the appointment is with. */
+  interviewer: string;
+}
+
+/** Substitute {name}/{date}/{time}/{interviewer} throughout a template. */
+export function renderSettlementConfirmation(
+  template: SettlementEmailTemplate,
+  vars: SettlementConfirmationVars,
+): SettlementEmailTemplate {
+  const fill = (s: string) =>
+    s
+      .replaceAll("{name}", vars.name)
+      .replaceAll("{date}", vars.date)
+      .replaceAll("{time}", vars.time)
+      .replaceAll("{interviewer}", vars.interviewer);
+  return { subject: fill(template.subject), body: fill(template.body) };
+}
+
+/** A stored confirmation template with blank fields falls back to the defaults. */
+export function withConfirmationDefaults(
+  partial?: Partial<SettlementEmailTemplate> | null,
+): SettlementEmailTemplate {
+  return {
+    subject: partial?.subject?.trim() ? partial.subject : DEFAULT_SETTLEMENT_CONFIRMATION.subject,
+    body: partial?.body?.trim() ? partial.body : DEFAULT_SETTLEMENT_CONFIRMATION.body,
+  };
+}
