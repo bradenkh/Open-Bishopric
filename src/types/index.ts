@@ -511,7 +511,7 @@ export const INTERVIEW_DURATION_MINS: Record<InterviewType, number> = {
   temple_recommend_youth: 10,
   calling:                10,
   ministering:            10,
-  tithing_settlement:     10,
+  tithing_settlement:     15,
   youth:                  15,
   worthiness:             30,
   other:                  15,
