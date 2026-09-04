@@ -46,6 +46,8 @@ export interface SendEmailInput {
   body: string;
   /** The Message-ID being replied to, to thread the message (optional). */
   inReplyTo?: string;
+  /** An iCalendar (.ics) document to attach as a calendar event (optional). */
+  ics?: string;
 }
 
 export interface SendEmailResult {
@@ -76,6 +78,17 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
     text: input.body,
     ...(input.inReplyTo
       ? { inReplyTo: input.inReplyTo, references: input.inReplyTo }
+      : {}),
+    ...(input.ics
+      ? {
+          attachments: [
+            {
+              filename: "tithing-settlement.ics",
+              content: input.ics,
+              contentType: "text/calendar; charset=utf-8; method=PUBLISH",
+            },
+          ],
+        }
       : {}),
   });
 

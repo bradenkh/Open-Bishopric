@@ -41,13 +41,11 @@ See `.env.example`. The Supabase values come from your project's
 
 ### Database schema
 
-The schema, RLS policies, and seed data are in `supabase/`:
+The schema and RLS policies are in `supabase/`:
 
 - `supabase/migrations/0001_initial_schema.sql` — all tables, RLS, and the
   `profiles` trigger. It is **idempotent**: it drops and recreates our objects,
   so it can be applied repeatedly to get a fresh schema.
-- `supabase/seed.sql` — demo ward data. Generated from `src/lib/mock-data.ts`
-  via `npm run db:seed:gen`; edit the mock data and regenerate to change it.
 
 ### Auth model (invite-only)
 

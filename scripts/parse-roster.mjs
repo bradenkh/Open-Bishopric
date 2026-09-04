@@ -5,8 +5,11 @@
  *   node scripts/parse-roster.mjs <export.html> [out.json]
  *
  * The report must include these columns: Preferred Name, Full Name, Age, Head of
- * House, Spouse of Head of House, Individual Phone, Individual E-mail. Save the
- * report page from LCR as HTML ("Web Page, Complete" / "Single File").
+ * House, Spouse of Head of House, Individual Phone, Individual E-mail. Include a
+ * Gender (or Sex) column too and the parents' settlement emails are addressed by
+ * courtesy title (Brother/Sister); leave it out and members simply have no
+ * gender. Columns are matched by header name, so their order doesn't matter.
+ * Save the report page from LCR as HTML ("Web Page, Complete" / "Single File").
  *
  * Household model (see src/lib/household.ts):
  *   - householdId          = the head of house's stable LCR person uuid; every
@@ -46,21 +49,60 @@ function cellValue(td) {
   return td.text.replace(/\s+/g, " ").trim();
 }
 
+// ── Locate columns by header name (order-independent) ────────────────────────
+// The header row's cells label the columns; match on their normalized text so a
+// Gender column (or any reordering) is handled without hard-coded positions.
+const norm = (s) => s.replace(/\s+/g, " ").trim().toLowerCase();
+const headerCells = rows[0].querySelectorAll("th, td");
+const headers = headerCells.map((c) => norm(c.text));
+const colOf = (...names) => {
+  for (const n of names) {
+    const i = headers.indexOf(n);
+    if (i !== -1) return i;
+  }
+  return -1;
+};
+const idx = {
+  pref: colOf("preferred name"),
+  full: colOf("full name"),
+  age: colOf("age"),
+  head: colOf("head of house"),
+  spouse: colOf("spouse of head of house"),
+  phone: colOf("individual phone"),
+  email: colOf("individual e-mail", "individual email"),
+  gender: colOf("gender", "sex"),
+};
+const missing = ["pref", "full", "head", "spouse", "email"].filter((k) => idx[k] === -1);
+if (missing.length) {
+  console.error(`Export is missing required column(s): ${missing.join(", ")}. Header row: ${headers.join(" | ")}`);
+  process.exit(1);
+}
+
+// LCR reports gender as "Male"/"Female" (or "M"/"F"); normalize to our enum.
+function normGender(g) {
+  const s = norm(g || "");
+  if (s === "male" || s === "m") return "male";
+  if (s === "female" || s === "f") return "female";
+  return undefined;
+}
+
 // ── Extract one raw record per data row ──────────────────────────────────────
+const at = (tds, i) => (i === -1 || !tds[i] ? "" : cellValue(tds[i]));
 const raw = [];
 for (const tr of rows.slice(1)) {
   const tds = tr.querySelectorAll("td");
-  if (tds.length < 7) continue;
+  if (tds.length < headerCells.length) continue;
   const btn = tds[0].querySelector("button");
   raw.push({
     uuid: btn?.getAttribute("data-member-card-person-uuid") || null,
-    pref: cellValue(tds[0]),
-    full: cellValue(tds[1]),
-    age: cellValue(tds[2]),
-    head: cellValue(tds[3]),
-    spouse: cellValue(tds[4]),
-    phone: cellValue(tds[5]),
-    email: cellValue(tds[6]),
+    pref: at(tds, idx.pref),
+    full: at(tds, idx.full),
+    age: at(tds, idx.age),
+    head: at(tds, idx.head),
+    spouse: at(tds, idx.spouse),
+    phone: at(tds, idx.phone),
+    email: at(tds, idx.email),
+    gender: at(tds, idx.gender),
   });
 }
 
@@ -105,6 +147,7 @@ const members = raw.map((r) => {
     isHeadOfHousehold: r.pref === r.head,
     isHouseholdParent: parentUuids.has(r.uuid),
     age: ageNum,
+    gender: normGender(r.gender),
     isActive: true,
     createdAt: now,
     updatedAt: now,
@@ -124,4 +167,5 @@ writeFileSync(outPath, JSON.stringify(withId, null, 1));
 console.log(`Parsed ${withId.length} members in ${households.size} households.`);
 console.log(`  parents: ${parents.length} (${parentsWithEmail.length} with an email)`);
 console.log(`  with email: ${withId.filter((m) => m.email).length}, with phone: ${withId.filter((m) => m.phone).length}`);
+console.log(`  with gender: ${withId.filter((m) => m.gender).length}${idx.gender === -1 ? " (no Gender/Sex column in the export)" : ""}`);
 console.log(`Wrote ${outPath}`);

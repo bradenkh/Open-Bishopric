@@ -18,6 +18,10 @@ export interface BishopricMember {
   role: BishopricRole;
 }
 
+/** A member's gender, as recorded on the ward roster. Drives the courtesy
+ *  title (Brother/Sister) used to address them in settlement emails. */
+export type Gender = "male" | "female";
+
 export interface Member {
   id: string;
   firstName: string;
@@ -25,6 +29,9 @@ export interface Member {
   email?: string;
   phone?: string;
   address?: string;
+  /** Gender from the roster. Optional — absent for members imported before
+   *  gender was captured; such members are addressed without a courtesy title. */
+  gender?: Gender;
   /** Groups members into one household — everyone sharing a value is one
    *  household (and receives the same tithing-settlement booking link). */
   householdId?: string;
@@ -682,6 +689,14 @@ export interface BookingToken {
   /** The members the single appointment covers. All are marked scheduled when
    *  any of them books, so the public booking API never needs the members table. */
   householdMembers?: { id: string; name: string }[];
+  /**
+   * Whether the link books the whole household or just one member:
+   *   "household"  — the default; the appointment covers every householdMember.
+   *   "individual" — the link carries a single member and books only them, for
+   *                  a household member who needs their own separate slot.
+   * Absent on tokens minted before this existed ⇒ treat as "household".
+   */
+  scope?: "household" | "individual";
   /** ISO timestamp; the link is dead after this (optional). */
   expiresAt?: string;
   /** ISO timestamp of the first time the link was opened (null = never opened). */
