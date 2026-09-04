@@ -58,10 +58,32 @@ function foldLine(line: string): string {
   return parts.join("\r\n");
 }
 
+/** The event's absolute [start, end) instants, from its ward-local wall-clock. */
+function eventRange(ev: IcsEvent): { start: Date; end: Date } {
+  const start = fromZonedTime(`${ev.date}T${ev.time}:00`, APP_TIME_ZONE);
+  return { start, end: new Date(start.getTime() + ev.durationMins * 60_000) };
+}
+
+/**
+ * A Google Calendar "add event" URL for the event — a fallback for recipients
+ * whose mail client doesn't surface the .ics attachment. Times are the same
+ * UTC instants as the .ics, so the two always agree.
+ */
+export function buildGoogleCalendarUrl(ev: IcsEvent): string {
+  const { start, end } = eventRange(ev);
+  const params = new URLSearchParams({
+    action: "TEMPLATE",
+    text: ev.title,
+    dates: `${toIcsUtc(start)}/${toIcsUtc(end)}`,
+  });
+  if (ev.description) params.set("details", ev.description);
+  if (ev.location) params.set("location", ev.location);
+  return `https://calendar.google.com/calendar/render?${params.toString()}`;
+}
+
 /** Build a single-event VCALENDAR document (CRLF-terminated) from an event. */
 export function buildIcs(ev: IcsEvent): string {
-  const start = fromZonedTime(`${ev.date}T${ev.time}:00`, APP_TIME_ZONE);
-  const end = new Date(start.getTime() + ev.durationMins * 60_000);
+  const { start, end } = eventRange(ev);
 
   const lines = [
     "BEGIN:VCALENDAR",

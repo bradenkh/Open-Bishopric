@@ -16,7 +16,7 @@ import {
   withConfirmationDefaults,
 } from "@/lib/settlement-email";
 import { formatDate } from "@/lib/utils";
-import { buildIcs } from "@/lib/ics";
+import { buildIcs, buildGoogleCalendarUrl } from "@/lib/ics";
 import { INTERVIEW_DURATION_MINS } from "@/types";
 import type { AvailabilityBlock, BookingToken, Interview, Member, SettlementRecord } from "@/types";
 
@@ -359,17 +359,19 @@ async function sendBookingConfirmation(
   const date = formatDate(slot.date);
   const time = formatTime(slot.time);
 
-  // A calendar invite (.ics) for the booked slot, attached to every copy so the
-  // household can add the appointment to their calendar. The ward address (when
-  // set) becomes the event location. Best-effort — never block the email on it.
+  // A calendar invite for the booked slot: a .ics attached to every copy, plus a
+  // Google Calendar "add to calendar" link ({calendar}) in the body as a fallback
+  // for clients that don't surface the attachment. The ward address (when set)
+  // becomes the event location. Best-effort — never block the email on it.
   let ics: string | undefined;
+  let calendarUrl = "";
   try {
     const { data: ward } = await admin
       .from("ward_info")
       .select("address")
       .eq("id", "default")
       .maybeSingle();
-    ics = buildIcs({
+    const event = {
       uid: `${interviewId}@open-bishopric`,
       title: "Tithing Settlement",
       description: `Tithing settlement with ${slot.interviewer}.`,
@@ -377,9 +379,12 @@ async function sendBookingConfirmation(
       date: slot.date,
       time: slot.time,
       durationMins: SETTLEMENT_MINS,
-    });
+    };
+    ics = buildIcs(event);
+    calendarUrl = buildGoogleCalendarUrl(event);
   } catch {
     ics = undefined;
+    calendarUrl = "";
   }
 
   // De-dupe by address in case two parents share one email.
@@ -395,6 +400,7 @@ async function sendBookingConfirmation(
       date,
       time,
       interviewer: slot.interviewer,
+      calendar: calendarUrl,
     });
     await sendEmail({ to, subject, body, ics });
   }

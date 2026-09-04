@@ -100,12 +100,14 @@ export const DEFAULT_SETTLEMENT_CONFIRMATION: SettlementEmailTemplate = {
     "",
     "Your household's tithing settlement is scheduled for {date} at {time} with {interviewer}.",
     "",
+    "Add it to your calendar: {calendar}",
+    "",
     "One appointment covers your whole household. If you need to change the time, just reply to this email and we'll help you reschedule. Thank you!",
   ].join("\n"),
 };
 
 /** The placeholders a confirmation template may use, for help text / previews. */
-export const SETTLEMENT_CONFIRMATION_PLACEHOLDERS = ["{title}", "{name}", "{lastName}", "{date}", "{time}", "{interviewer}"] as const;
+export const SETTLEMENT_CONFIRMATION_PLACEHOLDERS = ["{title}", "{name}", "{lastName}", "{date}", "{time}", "{interviewer}", "{calendar}"] as const;
 
 export interface SettlementConfirmationVars {
   /** The member's first name (or a preview stand-in). */
@@ -120,9 +122,11 @@ export interface SettlementConfirmationVars {
   title?: string;
   /** The member's last name, for a "{title} {lastName}" salutation. */
   lastName?: string;
+  /** An "add to calendar" URL for the booked appointment (optional). */
+  calendar?: string;
 }
 
-/** Substitute {title}/{name}/{lastName}/{date}/{time}/{interviewer} throughout a template. */
+/** Substitute {title}/{name}/{lastName}/{date}/{time}/{interviewer}/{calendar} throughout a template. */
 export function renderSettlementConfirmation(
   template: SettlementEmailTemplate,
   vars: SettlementConfirmationVars,
@@ -133,7 +137,8 @@ export function renderSettlementConfirmation(
       .replaceAll("{lastName}", vars.lastName ?? "")
       .replaceAll("{date}", vars.date)
       .replaceAll("{time}", vars.time)
-      .replaceAll("{interviewer}", vars.interviewer);
+      .replaceAll("{interviewer}", vars.interviewer)
+      .replaceAll("{calendar}", vars.calendar ?? "");
   return { subject: fill(template.subject), body: fill(template.body) };
 }
 

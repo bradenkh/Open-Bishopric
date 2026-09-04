@@ -233,12 +233,15 @@ export function EmailSettingsCard() {
                 <code className="rounded bg-muted px-1 py-0.5">{"{name}"}</code> (first name),{" "}
                 <code className="rounded bg-muted px-1 py-0.5">{"{lastName}"}</code>,{" "}
                 <code className="rounded bg-muted px-1 py-0.5">{"{date}"}</code>,{" "}
-                <code className="rounded bg-muted px-1 py-0.5">{"{time}"}</code>, and{" "}
-                <code className="rounded bg-muted px-1 py-0.5">{"{interviewer}"}</code> —{" "}
+                <code className="rounded bg-muted px-1 py-0.5">{"{time}"}</code>,{" "}
+                <code className="rounded bg-muted px-1 py-0.5">{"{interviewer}"}</code>, and{" "}
+                <code className="rounded bg-muted px-1 py-0.5">{"{calendar}"}</code> (an
+                add-to-calendar link) —{" "}
                 <code className="rounded bg-muted px-1 py-0.5">{"{title}"}</code>,{" "}
                 <code className="rounded bg-muted px-1 py-0.5">{"{name}"}</code>, and{" "}
                 <code className="rounded bg-muted px-1 py-0.5">{"{lastName}"}</code> from the
-                member, the rest from the booked appointment.
+                member, the rest from the booked appointment. An .ics calendar file is also
+                attached automatically.
               </p>
               <div className="space-y-1.5">
                 <Label htmlFor="confirmation-subject" className="text-xs">Subject</Label>
