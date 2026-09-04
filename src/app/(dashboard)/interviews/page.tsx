@@ -1385,12 +1385,29 @@ function SettlementView({
     }
   }
 
-  // A household worth emailing: still awaiting a booking and it has at least one
-  // parent with an email on file.
+  /**
+   * Who gets the household's shared link: the parents with an email on file,
+   * falling back to any household member with an email when no parent has one
+   * (mirrors the booking-confirmation send). De-duped by address, since family
+   * members often share one household email. Empty when nobody has an email.
+   */
+  const recipientsOf = (r: SettlementRowState) => {
+    const withEmail = (list: Member[]) => {
+      const seen = new Set<string>();
+      return list.filter((m) => {
+        const e = m.email?.trim().toLowerCase();
+        if (!e || seen.has(e)) return false;
+        seen.add(e);
+        return true;
+      });
+    };
+    const parents = withEmail(r.parents);
+    return parents.length ? parents : withEmail(r.householdMembers);
+  };
+  // A household worth emailing: still awaiting a booking and someone in it has an
+  // email on file.
   const emailable = (r: SettlementRowState) =>
-    r.parents.some((p) => p.email) && r.status !== "scheduled" && r.status !== "completed";
-  /** The parents of a household who actually have an email — the send targets. */
-  const recipientsOf = (r: SettlementRowState) => r.parents.filter((p) => p.email);
+    recipientsOf(r).length > 0 && r.status !== "scheduled" && r.status !== "completed";
 
   function toggleSelected(id: string) {
     setSelected((prev) => {
@@ -1488,11 +1505,11 @@ function SettlementView({
         if (sent > 0) {
           setEmailedId(householdId);
           setTimeout(() => setEmailedId((c) => (c === householdId ? null : c)), 1800);
-          setEmailMsg(`Emailed ${householdName} (${sent} parent${sent === 1 ? "" : "s"}).`);
+          setEmailMsg(`Emailed ${householdName} (${sent} recipient${sent === 1 ? "" : "s"}).`);
         }
       } else {
         setSelected(new Set());
-        setEmailMsg(`Emailed ${sent} parent${sent === 1 ? "" : "s"} across the selected households.`);
+        setEmailMsg(`Emailed ${sent} recipient${sent === 1 ? "" : "s"} across the selected households.`);
       }
     } catch (e) {
       setEmailMsg(e instanceof Error ? e.message : "Failed to send emails.");
@@ -1662,9 +1679,9 @@ function SettlementView({
             className="h-4 w-4 accent-primary"
             checked={allSelected}
             onChange={toggleSelectAll}
-            aria-label="Select all households with a parent email"
+            aria-label="Select all households with an email on file"
           />
-          Select all shown ({selectableIds.length}) with a parent email
+          Select all shown ({selectableIds.length}) with an email on file
         </label>
       )}
 
@@ -1707,7 +1724,7 @@ function SettlementView({
                   type="checkbox"
                   className="h-4 w-4 shrink-0"
                   disabled
-                  title={r.parents.some((p) => p.email) ? "Already booked or complete" : "No parent email on file"}
+                  title={recipientsOf(r).length > 0 ? "Already booked or complete" : "No email on file for the household"}
                   aria-label={`${r.name} can't be emailed`}
                 />
               )}
@@ -1778,8 +1795,8 @@ function SettlementView({
                     size="sm"
                     variant="ghost"
                     className="h-8 gap-1 text-xs"
-                    disabled={!r.parents.some((p) => p.email)}
-                    title={r.parents.some((p) => p.email) ? "Email the household's parents their shared link" : "No parent email on file"}
+                    disabled={recipientsOf(r).length === 0}
+                    title={recipientsOf(r).length > 0 ? "Email the household their shared link" : "No email on file for anyone in the household"}
                     onClick={() => openCompose(recipientsOf(r), { id: r.householdId, name: r.name })}
                   >
                     {emailedId === r.member.id ? (
@@ -1924,7 +1941,7 @@ function SettlementView({
                   ? `Email ${composeHouseholdName} their settlement link`
                   : composeRecipients.length === 1
                     ? `Email ${composeRecipients[0].firstName} their settlement link`
-                    : `Email ${composeRecipients.length} parents their settlement link`}
+                    : `Email ${composeRecipients.length} recipients their settlement link`}
             </DialogTitle>
           </DialogHeader>
 
