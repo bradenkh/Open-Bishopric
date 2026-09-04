@@ -1165,6 +1165,9 @@ interface SettlementViewProps {
   onEmailSelected: (members: Member[], tpl: SettlementEmailTemplate) => Promise<number>;
   onSetStatus: (member: Member, record: SettlementRecord | undefined, status: SettlementStatus) => void;
   onSetDeclared: (member: Member, record: SettlementRecord | undefined, declared: DeclaredTithingStatus) => void;
+  /** Cancel the appointment booked under `interviewId`: delete the interview,
+   *  reactivate its booking link, and revert every settlement record it covered. */
+  onUnschedule: (interviewId: string) => void;
 }
 
 function bookingUrl(token: string): string {
@@ -1273,7 +1276,7 @@ function BreakdownBar({ rows }: { rows: SettlementRowState[] }) {
 function SettlementView({
   members, settlements, bookingTokens, interviews, onGenerate, onGenerateAll,
   onGenerateIndividual, emailTemplate, onEmail, onEmailIndividual, onEmailSelected,
-  onSetStatus, onSetDeclared,
+  onSetStatus, onSetDeclared, onUnschedule,
 }: SettlementViewProps) {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -1809,6 +1812,19 @@ function SettlementView({
                 </>
               )}
 
+              {/* Unschedule — cancel a booked appointment and reopen the link */}
+              {r.status === "scheduled" && r.interview && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-8 gap-1 text-xs text-muted-foreground hover:text-destructive"
+                  title="Cancel this appointment and reopen the household's link to rebook"
+                  onClick={() => onUnschedule(r.interview!.id)}
+                >
+                  <CalendarOff className="h-3.5 w-3.5" /> Unschedule
+                </Button>
+              )}
+
               {/* Status control */}
               <Select value={r.status} onValueChange={(v) => onSetStatus(r.member, r.record, v as SettlementStatus)}>
                 <SelectTrigger className="h-8 w-[130px] text-xs shrink-0"><SelectValue /></SelectTrigger>
@@ -1893,6 +1909,20 @@ function SettlementView({
                         <Badge className={cn("text-[10px] shrink-0", SETTLEMENT_STATUS_COLORS[mStatus])}>
                           {SETTLEMENT_STATUS_LABELS[mStatus]}
                         </Badge>
+
+                        {/* Unschedule an individually-booked member. Members on the
+                            household appointment are unscheduled from the row above. */}
+                        {booked && mRec?.interviewId && mRec.interviewId !== r.interview?.id && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 gap-1 text-[11px] text-muted-foreground hover:text-destructive"
+                            title="Cancel this member's appointment and reopen their individual link"
+                            onClick={() => onUnschedule(mRec.interviewId!)}
+                          >
+                            <CalendarOff className="h-3 w-3" /> Unschedule
+                          </Button>
+                        )}
 
                         {!booked && (
                           <>
@@ -2785,6 +2815,28 @@ export default function InterviewsPage() {
     }
   }
 
+  /**
+   * Unschedule the appointment booked under `interviewId`: remove the interview,
+   * reactivate its booking link(s) so the same link can rebook, and revert every
+   * settlement record it covered back to "link created" (a live link, no slot).
+   * Keying on the interview means it correctly reverts either a whole household
+   * (shared appointment) or a single member (individual link) as appropriate.
+   */
+  async function unschedule(interviewId: string) {
+    await interviewsCol.remove(interviewId);
+    // `null` clears the DB column — an `undefined` patch is skipped by the mapper.
+    for (const t of bookingTokens.filter((t) => t.interviewId === interviewId)) {
+      await bookingTokensCol.update(t.id, {
+        usedAt: null, interviewId: null,
+      } as unknown as Partial<BookingToken>);
+    }
+    for (const s of settlements.filter((s) => s.interviewId === interviewId)) {
+      await settlementsCol.update(s.id, {
+        status: "link_created", interviewId: null,
+      } as unknown as Partial<SettlementRecord>);
+    }
+  }
+
   async function setDeclared(
     m: Member, record: SettlementRecord | undefined, declared: DeclaredTithingStatus,
   ) {
@@ -2941,6 +2993,7 @@ export default function InterviewsPage() {
           onEmailSelected={(ms, tpl) => emailSelected(ms, tpl)}
           onSetStatus={(m, r, s) => { void setSettlementStatus(m, r, s); }}
           onSetDeclared={(m, r, d) => { void setDeclared(m, r, d); }}
+          onUnschedule={(interviewId) => { void unschedule(interviewId); }}
         />
       )}
 
