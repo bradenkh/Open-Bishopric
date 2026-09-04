@@ -182,10 +182,17 @@ export function EmailSettingsCard() {
               </div>
               <p className="text-xs text-muted-foreground">
                 Sent when you email a member their settlement booking link. Use{" "}
-                <code className="rounded bg-muted px-1 py-0.5">{"{name}"}</code> for the
-                member&rsquo;s first name and{" "}
+                <code className="rounded bg-muted px-1 py-0.5">{"{title}"}</code> for their
+                courtesy title (Brother/Sister),{" "}
+                <code className="rounded bg-muted px-1 py-0.5">{"{name}"}</code> for their
+                first name,{" "}
+                <code className="rounded bg-muted px-1 py-0.5">{"{lastName}"}</code> for their
+                last name, and{" "}
                 <code className="rounded bg-muted px-1 py-0.5">{"{link}"}</code> for their
-                personal booking link — both are filled in per recipient when the email is sent.
+                personal booking link — all filled in per recipient when the email is sent.
+                Each parent is emailed individually, so a household&rsquo;s two parents get the
+                same message addressed to each of them. When a member&rsquo;s gender isn&rsquo;t on
+                file, <code className="rounded bg-muted px-1 py-0.5">{"{title}"}</code> is left blank.
               </p>
               <div className="space-y-1.5">
                 <Label htmlFor="settlement-subject" className="text-xs">Subject</Label>
@@ -222,11 +229,16 @@ export function EmailSettingsCard() {
               <p className="text-xs text-muted-foreground">
                 Sent automatically to the household when a member books their settlement
                 appointment through their link. Use{" "}
-                <code className="rounded bg-muted px-1 py-0.5">{"{name}"}</code>,{" "}
+                <code className="rounded bg-muted px-1 py-0.5">{"{title}"}</code> (Brother/Sister),{" "}
+                <code className="rounded bg-muted px-1 py-0.5">{"{name}"}</code> (first name),{" "}
+                <code className="rounded bg-muted px-1 py-0.5">{"{lastName}"}</code>,{" "}
                 <code className="rounded bg-muted px-1 py-0.5">{"{date}"}</code>,{" "}
                 <code className="rounded bg-muted px-1 py-0.5">{"{time}"}</code>, and{" "}
-                <code className="rounded bg-muted px-1 py-0.5">{"{interviewer}"}</code> —
-                all filled in from the booked appointment.
+                <code className="rounded bg-muted px-1 py-0.5">{"{interviewer}"}</code> —{" "}
+                <code className="rounded bg-muted px-1 py-0.5">{"{title}"}</code>,{" "}
+                <code className="rounded bg-muted px-1 py-0.5">{"{name}"}</code>, and{" "}
+                <code className="rounded bg-muted px-1 py-0.5">{"{lastName}"}</code> from the
+                member, the rest from the booked appointment.
               </p>
               <div className="space-y-1.5">
                 <Label htmlFor="confirmation-subject" className="text-xs">Subject</Label>

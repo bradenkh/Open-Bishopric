@@ -37,7 +37,7 @@ import {
   toMinutes, fromMinutes, toDateStr, durationOf, blockAppliesOn, type Slot,
 } from "@/lib/availability";
 import {
-  DEFAULT_SETTLEMENT_EMAIL, renderSettlementEmail, withDefaults,
+  DEFAULT_SETTLEMENT_EMAIL, renderSettlementEmail, settlementTitle, withDefaults,
   type SettlementEmailTemplate,
 } from "@/lib/settlement-email";
 import {
@@ -1458,7 +1458,12 @@ function SettlementView({
   const preview = previewRecipient
     ? renderSettlementEmail(
         { subject: draftSubject, body: draftBody },
-        { name: previewRecipient.firstName, link: previewLink },
+        {
+          name: previewRecipient.firstName,
+          lastName: previewRecipient.lastName,
+          title: settlementTitle(previewRecipient.gender),
+          link: previewLink,
+        },
       )
     : null;
 
@@ -2434,8 +2439,14 @@ export default function InterviewsPage() {
   ): Promise<boolean> {
     if (!m.email) return false;
     const url = `${window.location.origin}/book/${token.token}`;
-    // Substitute {name}/{link} per recipient from the (possibly edited) template.
-    const { subject, body } = renderSettlementEmail(tpl, { name: m.firstName, link: url });
+    // Substitute {title}/{name}/{lastName}/{link} per recipient from the
+    // (possibly edited) template — so each parent is addressed individually.
+    const { subject, body } = renderSettlementEmail(tpl, {
+      name: m.firstName,
+      lastName: m.lastName,
+      title: settlementTitle(m.gender),
+      link: url,
+    });
 
     try {
       const res = await fetch("/api/email/send", {

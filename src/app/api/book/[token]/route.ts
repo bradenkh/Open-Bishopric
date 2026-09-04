@@ -12,6 +12,7 @@ import { generateSlots, groupSlotsByDate, nowInAppTz } from "@/lib/availability"
 import { isEmailConfigured, sendEmail } from "@/lib/email/gmail";
 import {
   renderSettlementConfirmation,
+  settlementTitle,
   withConfirmationDefaults,
 } from "@/lib/settlement-email";
 import { formatDate } from "@/lib/utils";
@@ -316,8 +317,9 @@ function formatTime(time: string): string {
  * Send the household a confirmation email for the appointment just booked.
  *
  * The link is emailed to the household's parents, so the confirmation goes back
- * to the same people: every household parent with an email on file, addressed by
- * first name. Falls back to any household member with an email when none are
+ * to the same people: every household parent with an email on file, addressed
+ * individually by courtesy title (Brother/Sister). Falls back to any household
+ * member with an email when none are
  * flagged as parents (older data). Silent no-op when email isn't configured or
  * no member has an address. Uses the bishopric's saved confirmation template,
  * or the built-in default when they haven't customized it.
@@ -363,6 +365,8 @@ async function sendBookingConfirmation(
     sent.add(to.toLowerCase());
     const { subject, body } = renderSettlementConfirmation(template, {
       name: m.firstName,
+      lastName: m.lastName,
+      title: settlementTitle(m.gender),
       date,
       time,
       interviewer: slot.interviewer,
