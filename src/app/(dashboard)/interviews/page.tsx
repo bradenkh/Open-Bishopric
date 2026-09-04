@@ -5,7 +5,7 @@ import {
   Plus, CalendarClock, Clock, User, GripVertical, CalendarPlus,
   CheckCircle2, AlertTriangle, Pencil, RotateCcw,
   CalendarDays, CalendarOff, Trash2, Check, Link2, Copy, Repeat, Search, Send,
-  ChevronLeft, ChevronRight, List, Columns3, Download, Eye, Star, Mail, Loader2,
+  ChevronLeft, ChevronRight, ChevronDown, List, Columns3, Download, Eye, Star, Mail, Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1153,10 +1153,14 @@ interface SettlementViewProps {
   interviews: Interview[];
   onGenerate: (member: Member) => void;
   onGenerateAll: (members: Member[]) => void;
+  /** Generate (or reuse) an individual, single-member link for one household member. */
+  onGenerateIndividual: (member: Member) => void;
   /** The saved template used to pre-fill the compose dialog. */
   emailTemplate: SettlementEmailTemplate;
-  /** Email one member their booking link with the given template. */
+  /** Email one member their (household) booking link with the given template. */
   onEmail: (member: Member, tpl: SettlementEmailTemplate) => Promise<boolean>;
+  /** Email one member their own individual link with the given template. */
+  onEmailIndividual: (member: Member, tpl: SettlementEmailTemplate) => Promise<boolean>;
   /** Email the given members their links; resolves with how many were sent. */
   onEmailSelected: (members: Member[], tpl: SettlementEmailTemplate) => Promise<number>;
   onSetStatus: (member: Member, record: SettlementRecord | undefined, status: SettlementStatus) => void;
@@ -1268,7 +1272,8 @@ function BreakdownBar({ rows }: { rows: SettlementRowState[] }) {
 
 function SettlementView({
   members, settlements, bookingTokens, interviews, onGenerate, onGenerateAll,
-  emailTemplate, onEmail, onEmailSelected, onSetStatus, onSetDeclared,
+  onGenerateIndividual, emailTemplate, onEmail, onEmailIndividual, onEmailSelected,
+  onSetStatus, onSetDeclared,
 }: SettlementViewProps) {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -1276,6 +1281,8 @@ function SettlementView({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [emailedId, setEmailedId] = useState<string | null>(null);
   const [emailMsg, setEmailMsg] = useState<string | null>(null);
+  // Households whose individual-member breakdown is expanded.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // Compose dialog: opened for one household (row button) or the selected set.
   const [composeOpen, setComposeOpen] = useState(false);
   const [composeRecipients, setComposeRecipients] = useState<Member[]>([]);
@@ -1283,6 +1290,10 @@ function SettlementView({
   // "Sent" flash and message. Null when composing the whole selected set.
   const [composeHouseholdId, setComposeHouseholdId] = useState<string | null>(null);
   const [composeHouseholdName, setComposeHouseholdName] = useState<string>("");
+  // Set when composing an individual member's own link (from an expanded row):
+  // the member's id, so the send routes through onEmailIndividual and flashes
+  // "Sent" on that member's sub-row. Null for household / selected sends.
+  const [composeIndividualId, setComposeIndividualId] = useState<string | null>(null);
   const [draftSubject, setDraftSubject] = useState(emailTemplate.subject);
   const [draftBody, setDraftBody] = useState(emailTemplate.body);
   const [composeSending, setComposeSending] = useState(false);
@@ -1303,7 +1314,7 @@ function SettlementView({
       // The household's canonical record is the head's; booking marks the rest.
       const record = settlements.find((s) => s.memberId === head.id && s.year === SETTLEMENT_YEAR);
       const token = bookingTokens
-        .filter((t) => !t.usedAt && t.year === SETTLEMENT_YEAR && tokenHouseholdKey(t) === key)
+        .filter((t) => !t.usedAt && t.year === SETTLEMENT_YEAR && t.scope !== "individual" && tokenHouseholdKey(t) === key)
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
       const interview = record?.interviewId
         ? interviews.find((i) => i.id === record.interviewId)
@@ -1317,6 +1328,26 @@ function SettlementView({
       a.member.lastName.localeCompare(b.member.lastName) ||
       a.member.firstName.localeCompare(b.member.firstName));
   }, [members, settlements, bookingTokens, interviews]);
+
+  // Per-member helpers for the expanded household breakdown (individual links).
+  const memberRecordOf = (m: Member) =>
+    settlements.find((s) => s.memberId === m.id && s.year === SETTLEMENT_YEAR);
+  const individualTokenOf = (m: Member) =>
+    bookingTokens
+      .filter((t) => !t.usedAt && t.year === SETTLEMENT_YEAR && t.scope === "individual" && t.memberId === m.id)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+  const memberStatusOf = (m: Member): SettlementStatus => memberRecordOf(m)?.status ?? "not_started";
+  const memberInterviewOf = (rec?: SettlementRecord) =>
+    rec?.interviewId ? interviews.find((i) => i.id === rec.interviewId) : undefined;
+
+  function toggleExpanded(id: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   const total = rows.length;
   // A member with a link (created or opened) who hasn't booked yet.
@@ -1396,6 +1427,21 @@ function SettlementView({
     setComposeRecipients(recipients);
     setComposeHouseholdId(household?.id ?? null);
     setComposeHouseholdName(household?.name ?? "");
+    setComposeIndividualId(null);
+    setDraftSubject(emailTemplate.subject);
+    setDraftBody(emailTemplate.body);
+    setEmailMsg(null);
+    setComposeOpen(true);
+  }
+
+  /** Open the compose dialog to email one household member their own individual
+   *  link (from the expanded breakdown), routed through onEmailIndividual. */
+  function openComposeIndividual(m: Member) {
+    if (!m.email) return;
+    setComposeRecipients([m]);
+    setComposeHouseholdId(null);
+    setComposeHouseholdName("");
+    setComposeIndividualId(m.id);
     setDraftSubject(emailTemplate.subject);
     setDraftBody(emailTemplate.body);
     setEmailMsg(null);
@@ -1416,9 +1462,22 @@ function SettlementView({
     const recipients = composeRecipients;
     const householdId = composeHouseholdId;
     const householdName = composeHouseholdName;
+    const individualId = composeIndividualId;
     setComposeSending(true);
     setEmailMsg(null);
     try {
+      // Individual send → the member's own link via onEmailIndividual.
+      if (individualId) {
+        const m = recipients[0];
+        const ok = await onEmailIndividual(m, tpl);
+        setComposeOpen(false);
+        if (ok) {
+          setEmailedId(m.id);
+          setTimeout(() => setEmailedId((c) => (c === m.id ? null : c)), 1800);
+          setEmailMsg(`Emailed ${m.firstName} their individual link.`);
+        }
+        return;
+      }
       // One address → onEmail; several (both parents, or a whole selection) →
       // onEmailSelected. Both ensure the shared household link before sending.
       const sent = recipients.length === 1
@@ -1448,9 +1507,15 @@ function SettlementView({
   const previewRecipient = composeRecipients[0];
   const previewLink = previewRecipient
     ? (() => {
+        // Individual compose previews the member's own link; household compose
+        // previews the household's shared link.
+        if (composeIndividualId) {
+          const t = individualTokenOf(previewRecipient);
+          return t ? bookingUrl(t.token) : bookingUrl("their-personal-link");
+        }
         const key = householdKey(previewRecipient);
         const t = bookingTokens
-          .filter((bt) => !bt.usedAt && bt.year === SETTLEMENT_YEAR && tokenHouseholdKey(bt) === key)
+          .filter((bt) => !bt.usedAt && bt.year === SETTLEMENT_YEAR && bt.scope !== "individual" && tokenHouseholdKey(bt) === key)
           .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
         return t ? bookingUrl(t.token) : `${bookingUrl("your-personal-link")}`;
       })()
@@ -1610,8 +1675,25 @@ function SettlementView({
         </div>
       ) : (
         <div className="rounded-xl border border-border bg-card divide-y divide-border overflow-hidden">
-          {filtered.map((r) => (
-            <div key={r.member.id} className="flex flex-wrap items-center gap-3 p-3">
+          {filtered.map((r) => {
+            const isExpandable = r.householdMembers.length > 1;
+            const isExpanded = expanded.has(r.householdId);
+            return (
+            <div key={r.member.id}>
+            <div className="flex flex-wrap items-center gap-3 p-3">
+              {isExpandable ? (
+                <button
+                  type="button"
+                  onClick={() => toggleExpanded(r.householdId)}
+                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent"
+                  aria-expanded={isExpanded}
+                  aria-label={isExpanded ? `Collapse ${r.name}` : `Expand ${r.name} to see household members`}
+                >
+                  {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                </button>
+              ) : (
+                <span className="h-6 w-6 shrink-0" aria-hidden />
+              )}
               {emailable(r) ? (
                 <input
                   type="checkbox"
@@ -1697,7 +1779,7 @@ function SettlementView({
                     variant="ghost"
                     className="h-8 gap-1 text-xs"
                     disabled={!r.parents.some((p) => p.email)}
-                    title={r.parents.some((p) => p.email) ? undefined : "No parent email on file"}
+                    title={r.parents.some((p) => p.email) ? "Email the household's parents their shared link" : "No parent email on file"}
                     onClick={() => openCompose(recipientsOf(r), { id: r.householdId, name: r.name })}
                   >
                     {emailedId === r.member.id ? (
@@ -1705,7 +1787,7 @@ function SettlementView({
                     ) : (
                       <Mail className="h-3.5 w-3.5" />
                     )}
-                    {emailedId === r.member.id ? "Sent" : "Email parents"}
+                    {emailedId === r.member.id ? "Sent" : "Email household"}
                   </Button>
                 </>
               )}
@@ -1737,7 +1819,97 @@ function SettlementView({
                 </Select>
               )}
             </div>
-          ))}
+
+            {/* Expanded household breakdown — per-member individual links. */}
+            {isExpanded && (
+              <div className="space-y-2 border-t border-dashed border-border bg-muted/20 py-2.5 pl-12 pr-3">
+                <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Household members — generate or email an individual link if someone needs their own appointment
+                </p>
+                {r.householdMembers
+                  .slice()
+                  .sort((a, b) =>
+                    a.lastName.localeCompare(b.lastName) || a.firstName.localeCompare(b.firstName))
+                  .map((m) => {
+                    const mRec = memberRecordOf(m);
+                    const mStatus = memberStatusOf(m);
+                    const mToken = individualTokenOf(m);
+                    const mInterview = memberInterviewOf(mRec);
+                    const booked = mStatus === "scheduled" || mStatus === "completed";
+                    return (
+                      <div key={m.id} className="flex flex-wrap items-center gap-2">
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-xs font-medium">
+                            {m.firstName} {m.lastName}
+                            {m.isHouseholdParent && (
+                              <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">parent</span>
+                            )}
+                            {!m.email && (
+                              <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">· no email</span>
+                            )}
+                          </p>
+                          {mInterview?.scheduledDate && (
+                            <p className="flex items-center gap-1 truncate text-[10px] text-muted-foreground">
+                              <CalendarClock className="h-3 w-3 shrink-0" />
+                              {formatDate(mInterview.scheduledDate)}
+                              {mInterview.scheduledTime ? ` · ${formatTime(mInterview.scheduledTime)}` : ""}
+                              {mInterview.interviewer ? ` · ${mInterview.interviewer}` : ""}
+                            </p>
+                          )}
+                          {mToken && !booked && (
+                            <p className={cn(
+                              "flex items-center gap-1 truncate text-[10px]",
+                              mToken.openedAt ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground",
+                            )}>
+                              <Eye className="h-3 w-3 shrink-0" />
+                              {mToken.openedAt ? `Opened ${timeAgo(mToken.openedAt)} · not booked` : "Individual link not opened yet"}
+                            </p>
+                          )}
+                          {mRec?.linkSentAt && !booked && (
+                            <p className="flex items-center gap-1 truncate text-[10px] text-muted-foreground">
+                              <Mail className="h-3 w-3 shrink-0" />
+                              Individual link emailed {timeAgo(mRec.linkSentAt)}
+                            </p>
+                          )}
+                        </div>
+
+                        <Badge className={cn("text-[10px] shrink-0", SETTLEMENT_STATUS_COLORS[mStatus])}>
+                          {SETTLEMENT_STATUS_LABELS[mStatus]}
+                        </Badge>
+
+                        {!booked && (
+                          <>
+                            {mToken ? (
+                              <Button size="sm" variant="ghost" className="h-7 gap-1 text-[11px]" onClick={() => copy(mToken)}>
+                                {copiedId === mToken.id ? <Check className="h-3 w-3 text-green-600" /> : <Copy className="h-3 w-3" />}
+                                {copiedId === mToken.id ? "Copied" : "Copy individual link"}
+                              </Button>
+                            ) : (
+                              <Button size="sm" variant="ghost" className="h-7 gap-1 text-[11px]" onClick={() => onGenerateIndividual(m)}>
+                                <Link2 className="h-3 w-3" /> Generate individual link
+                              </Button>
+                            )}
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 gap-1 text-[11px]"
+                              disabled={!m.email}
+                              title={m.email ? "Email this member their own individual link" : "No email on file"}
+                              onClick={() => openComposeIndividual(m)}
+                            >
+                              {emailedId === m.id ? <Check className="h-3 w-3 text-green-600" /> : <Mail className="h-3 w-3" />}
+                              {emailedId === m.id ? "Sent" : "Email individual link"}
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
+            </div>
+            );
+          })}
         </div>
       )}
 
@@ -1746,17 +1918,21 @@ function SettlementView({
         <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>
-              {composeHouseholdId
-                ? `Email ${composeHouseholdName} their settlement link`
-                : composeRecipients.length === 1
-                  ? `Email ${composeRecipients[0].firstName} their settlement link`
-                  : `Email ${composeRecipients.length} parents their settlement link`}
+              {composeIndividualId && composeRecipients[0]
+                ? `Email ${composeRecipients[0].firstName} their individual settlement link`
+                : composeHouseholdId
+                  ? `Email ${composeHouseholdName} their settlement link`
+                  : composeRecipients.length === 1
+                    ? `Email ${composeRecipients[0].firstName} their settlement link`
+                    : `Email ${composeRecipients.length} parents their settlement link`}
             </DialogTitle>
           </DialogHeader>
 
           <div className="space-y-3">
             <p className="text-xs text-muted-foreground">
-              <code className="rounded bg-muted px-1 py-0.5">{"{name}"}</code> and{" "}
+              <code className="rounded bg-muted px-1 py-0.5">{"{title}"}</code>,{" "}
+              <code className="rounded bg-muted px-1 py-0.5">{"{name}"}</code>,{" "}
+              <code className="rounded bg-muted px-1 py-0.5">{"{lastName}"}</code>, and{" "}
               <code className="rounded bg-muted px-1 py-0.5">{"{link}"}</code> are filled in for
               each recipient when sent. Edits here apply to this send only — change the saved
               default in Settings → Email.
@@ -2376,9 +2552,10 @@ export default function InterviewsPage() {
       records.set(person.id, await ensureRecord(person));
     }
 
-    // Reuse the household's existing unused link if there is one.
+    // Reuse the household's existing unused link if there is one (never an
+    // individual, single-member link — that books only one person).
     const existing = bookingTokens
-      .filter((t) => !t.usedAt && t.year === SETTLEMENT_YEAR && tokenHouseholdKey(t) === key)
+      .filter((t) => !t.usedAt && t.year === SETTLEMENT_YEAR && t.scope !== "individual" && tokenHouseholdKey(t) === key)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
     if (existing) return { records, token: existing };
 
@@ -2392,6 +2569,7 @@ export default function InterviewsPage() {
       settlementRecordId: records.get(head.id)?.id,
       householdId: key,
       householdMembers: house.map((x) => ({ id: x.id, name: memberName(x) })),
+      scope: "household",
       createdBy: user?.uid ?? "mock",
       createdAt: now,
       updatedAt: now,
@@ -2400,9 +2578,63 @@ export default function InterviewsPage() {
     return { records, token };
   }
 
+  /**
+   * Ensure a live INDIVIDUAL booking link exists for a single household member,
+   * returning it alongside that member's settlement record. Unlike the household
+   * link, an individual link carries only this member, so booking it marks only
+   * them scheduled. Reuses the member's existing unused individual link if any.
+   */
+  async function ensureIndividualToken(
+    m: Member,
+  ): Promise<{ record: SettlementRecord; token: BookingToken }> {
+    const now = new Date().toISOString();
+    const record = await ensureRecord(m);
+
+    const existing = bookingTokens
+      .filter((t) => !t.usedAt && t.year === SETTLEMENT_YEAR && t.scope === "individual" && t.memberId === m.id)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+    if (existing) return { record, token: existing };
+
+    const token: BookingToken = {
+      id: newId(),
+      token: generateToken(),
+      memberId: m.id,
+      memberName: memberName(m),
+      purpose: "tithing_settlement",
+      year: SETTLEMENT_YEAR,
+      settlementRecordId: record.id,
+      householdId: householdKey(m),
+      householdMembers: [{ id: m.id, name: memberName(m) }],
+      scope: "individual",
+      createdBy: user?.uid ?? "mock",
+      createdAt: now,
+      updatedAt: now,
+    };
+    await bookingTokensCol.create(token);
+    return { record, token };
+  }
+
   /** Create (or reuse) this year's settlement records + the household's link. */
   async function generateLink(m: Member) {
     await ensureToken(m);
+  }
+
+  /** Create (or reuse) an individual, single-member link for one member. */
+  async function generateIndividualLink(m: Member) {
+    await ensureIndividualToken(m);
+  }
+
+  /**
+   * Email one household member their own individual link. Ensures the member's
+   * individual link (and settlement record) exists, then sends it, falling back
+   * to a mailto: compose window when email isn't configured or the send fails.
+   */
+  async function emailIndividualLink(
+    m: Member, tpl: SettlementEmailTemplate,
+  ): Promise<boolean> {
+    if (!m.email) return false;
+    const { record, token } = await ensureIndividualToken(m);
+    return sendLinkEmail(m, token, record, tpl);
   }
 
   async function generateAll(ms: Member[]) {
@@ -2685,8 +2917,10 @@ export default function InterviewsPage() {
           interviews={interviews}
           onGenerate={(m) => { void generateLink(m); }}
           onGenerateAll={(ms) => { void generateAll(ms); }}
+          onGenerateIndividual={(m) => { void generateIndividualLink(m); }}
           emailTemplate={emailTemplate}
           onEmail={(m, tpl) => emailLink(m, tpl)}
+          onEmailIndividual={(m, tpl) => emailIndividualLink(m, tpl)}
           onEmailSelected={(ms, tpl) => emailSelected(ms, tpl)}
           onSetStatus={(m, r, s) => { void setSettlementStatus(m, r, s); }}
           onSetDeclared={(m, r, d) => { void setDeclared(m, r, d); }}

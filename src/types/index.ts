@@ -689,6 +689,14 @@ export interface BookingToken {
   /** The members the single appointment covers. All are marked scheduled when
    *  any of them books, so the public booking API never needs the members table. */
   householdMembers?: { id: string; name: string }[];
+  /**
+   * Whether the link books the whole household or just one member:
+   *   "household"  — the default; the appointment covers every householdMember.
+   *   "individual" — the link carries a single member and books only them, for
+   *                  a household member who needs their own separate slot.
+   * Absent on tokens minted before this existed ⇒ treat as "household".
+   */
+  scope?: "household" | "individual";
   /** ISO timestamp; the link is dead after this (optional). */
   expiresAt?: string;
   /** ISO timestamp of the first time the link was opened (null = never opened). */
