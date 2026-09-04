@@ -99,6 +99,27 @@ key lives), never exposed to the browser.
 - If email isn't configured, sending an agenda request **falls back to a
   `mailto:` link**, so nothing breaks before setup.
 
+## Calendar feed (Google Calendar)
+
+The interview board can be mirrored into Google Calendar — or any calendar app —
+as a **read-only iCalendar feed**. It's **one-way** (app → calendar): scheduled
+interviews flow to the calendar automatically; edits made in the calendar never
+touch the app. This keeps the same no-OAuth simplicity as email — the feed is
+protected by an unguessable token in its URL rather than a Google login.
+
+**Enable it:** go to **Settings → Calendar** and click **Generate feed link**.
+Then in Google Calendar (web) → next to **Other calendars** click **+** → **From
+URL**, paste the link, and **Add calendar**. Google polls subscribed calendars
+every few hours, so new appointments take a little while to appear.
+
+- The token *is* the credential — anyone with the link can read the ward's
+  scheduled appointments, so share it only within the bishopric. **Regenerate**
+  rotates it (invalidating the old link); **Disable feed** turns it off entirely.
+- The token lives in the server-only, RLS-locked `app_settings` table (same home
+  as the Gmail and AI credentials) and is served by
+  `src/app/api/calendar/[token]/route.ts`. Feed rendering (RFC 5545, with a
+  `America/New_York` `VTIMEZONE`) is in `src/lib/calendar/ics.ts`.
+
 ## Database setup & schema changes
 
 Migrations are tracked and applied automatically. A `schema_migrations` table
