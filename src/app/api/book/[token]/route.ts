@@ -16,6 +16,7 @@ import {
   withConfirmationDefaults,
 } from "@/lib/settlement-email";
 import { formatDate } from "@/lib/utils";
+import { buildIcs } from "@/lib/ics";
 import { INTERVIEW_DURATION_MINS } from "@/types";
 import type { AvailabilityBlock, BookingToken, Interview, Member, SettlementRecord } from "@/types";
 
@@ -290,7 +291,7 @@ export async function POST(
   // the booking is already committed, so a failure here (email not configured, a
   // send error, no address on file) must never fail the request.
   try {
-    await sendBookingConfirmation(admin, record, { date, time, interviewer });
+    await sendBookingConfirmation(admin, record, { date, time, interviewer }, interviewId);
   } catch {
     // confirmation is non-critical
   }
@@ -328,6 +329,7 @@ async function sendBookingConfirmation(
   admin: ReturnType<typeof createAdminClient>,
   record: BookingToken,
   slot: { date: string; time: string; interviewer: string },
+  interviewId: string,
 ): Promise<void> {
   if (!(await isEmailConfigured())) return;
 
@@ -357,6 +359,29 @@ async function sendBookingConfirmation(
   const date = formatDate(slot.date);
   const time = formatTime(slot.time);
 
+  // A calendar invite (.ics) for the booked slot, attached to every copy so the
+  // household can add the appointment to their calendar. The ward address (when
+  // set) becomes the event location. Best-effort — never block the email on it.
+  let ics: string | undefined;
+  try {
+    const { data: ward } = await admin
+      .from("ward_info")
+      .select("address")
+      .eq("id", "default")
+      .maybeSingle();
+    ics = buildIcs({
+      uid: `${interviewId}@open-bishopric`,
+      title: "Tithing Settlement",
+      description: `Tithing settlement with ${slot.interviewer}.`,
+      location: ward?.address?.trim() || undefined,
+      date: slot.date,
+      time: slot.time,
+      durationMins: SETTLEMENT_MINS,
+    });
+  } catch {
+    ics = undefined;
+  }
+
   // De-dupe by address in case two parents share one email.
   const sent = new Set<string>();
   for (const m of recipients) {
@@ -371,7 +396,7 @@ async function sendBookingConfirmation(
       time,
       interviewer: slot.interviewer,
     });
-    await sendEmail({ to, subject, body });
+    await sendEmail({ to, subject, body, ics });
   }
 }
 
