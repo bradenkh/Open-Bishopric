@@ -3,8 +3,6 @@ import type {
   AppUser,
   Announcement,
   AgendaSolicitation,
-  AvailabilityBlock,
-  AvailabilityException,
   CalendarBooking,
   Calling,
   Interview,
@@ -12,7 +10,6 @@ import type {
   Member,
   RosterGroup,
   SettlementRecord,
-  BookingToken,
   Task,
   UserRole,
   WardInfo,
@@ -74,12 +71,9 @@ export const callingsRepo = repo<Calling>("callings", { column: "created_at", as
 export const meetingsRepo = repo<Meeting>("meetings", { column: "date" });
 export const announcementsRepo = repo<Announcement>("announcements", { column: "created_at", ascending: false });
 export const interviewsRepo = repo<Interview>("interviews", { column: "created_at", ascending: false });
-export const availabilityRepo = repo<AvailabilityBlock>("availability_blocks", { column: "weekday" });
-export const availabilityExceptionsRepo = repo<AvailabilityException>("availability_exceptions", { column: "start_date" });
 export const tasksRepo = repo<Task>("tasks", { column: "created_at", ascending: false });
 export const solicitationsRepo = repo<AgendaSolicitation>("agenda_solicitations", { column: "created_at", ascending: false });
 export const settlementRepo = repo<SettlementRecord>("settlement_records", { column: "member_name" });
-export const bookingTokensRepo = repo<BookingToken>("booking_tokens", { column: "created_at", ascending: false });
 export const calendarBookingsRepo = repo<CalendarBooking>("calendar_bookings", { column: "start_at", ascending: false });
 
 // ── Roster groups: ordered org chart. Rows carry id/position the model omits. ──

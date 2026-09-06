@@ -28,9 +28,6 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import {
   announcementsRepo,
-  availabilityExceptionsRepo,
-  availabilityRepo,
-  bookingTokensRepo,
   calendarBookingsRepo,
   callingsRepo,
   interviewsRepo,
@@ -47,11 +44,8 @@ import type {
   Announcement,
   AgendaSolicitation,
   AppUser,
-  AvailabilityBlock,
-  AvailabilityException,
   BishopricMember,
   BishopricRole,
-  BookingToken,
   CalendarBooking,
   Calling,
   Interview,
@@ -93,12 +87,8 @@ interface DataContextValue {
   announcements: Collection<Announcement>;
   /** Pre-meeting agenda requests sent to organization leaders. */
   solicitations: Collection<AgendaSolicitation>;
-  availability: Collection<AvailabilityBlock>;
-  exceptions: Collection<AvailabilityException>;
   /** Ward-wide tithing-settlement records (one per member per year). */
   settlements: Collection<SettlementRecord>;
-  /** Personalized self-signup booking links. */
-  bookingTokens: Collection<BookingToken>;
   /** Appointments ingested from the bishop's subscribed Google Calendar. */
   calendarBookings: Collection<CalendarBooking>;
 
@@ -189,10 +179,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [solicitations, setSolicitations] = useState<AgendaSolicitation[]>([]);
-  const [availability, setAvailability] = useState<AvailabilityBlock[]>([]);
-  const [exceptions, setExceptions] = useState<AvailabilityException[]>([]);
   const [settlements, setSettlements] = useState<SettlementRecord[]>([]);
-  const [bookingTokens, setBookingTokens] = useState<BookingToken[]>([]);
   const [calendarBookings, setCalendarBookings] = useState<CalendarBooking[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
@@ -231,10 +218,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       meetingsData,
       announcementsData,
       solicitationsData,
-      availabilityData,
-      exceptionsData,
       settlementsData,
-      bookingTokensData,
       calendarBookingsData,
       tasksData,
       membersData,
@@ -247,10 +231,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       meetingsRepo.list(db),
       announcementsRepo.list(db),
       solicitationsRepo.list(db),
-      availabilityRepo.list(db),
-      availabilityExceptionsRepo.list(db),
       settlementRepo.list(db),
-      bookingTokensRepo.list(db),
       calendarBookingsRepo.list(db),
       tasksRepo.list(db),
       membersRepo.list(db),
@@ -263,10 +244,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     setMeetings(meetingsData);
     setAnnouncements(announcementsData);
     setSolicitations(solicitationsData);
-    setAvailability(availabilityData);
-    setExceptions(exceptionsData);
     setSettlements(settlementsData);
-    setBookingTokens(bookingTokensData);
     setCalendarBookings(calendarBookingsData);
     setTasks(tasksData);
     setMembers(membersData);
@@ -454,10 +432,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       meetings: makeCollection(db, meetingsRepo, meetings, setMeetings),
       announcements: makeCollection(db, announcementsRepo, announcements, setAnnouncements),
       solicitations: makeCollection(db, solicitationsRepo, solicitations, setSolicitations),
-      availability: makeCollection(db, availabilityRepo, availability, setAvailability),
-      exceptions: makeCollection(db, availabilityExceptionsRepo, exceptions, setExceptions),
       settlements: makeCollection(db, settlementRepo, settlements, setSettlements),
-      bookingTokens: makeCollection(db, bookingTokensRepo, bookingTokens, setBookingTokens),
       calendarBookings: makeCollection(db, calendarBookingsRepo, calendarBookings, setCalendarBookings),
       members,
       profiles,
@@ -484,10 +459,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       meetings,
       announcements,
       solicitations,
-      availability,
-      exceptions,
       settlements,
-      bookingTokens,
       calendarBookings,
       members,
       profiles,

@@ -2,7 +2,6 @@ import { tool } from "ai";
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { fromRow } from "@/lib/db/mappers";
-import { generateSlots } from "@/lib/availability";
 import { parseBulletin, defaultBulletin, upcomingSunday } from "@/lib/bulletin";
 import { isAnnouncementActive } from "@/lib/announcements";
 import { listAgentNotes } from "@/lib/agent-notes";
@@ -12,8 +11,6 @@ import { INTERVIEW_DURATION_MINS } from "@/types";
 import type {
   AgendaItem,
   Announcement,
-  AvailabilityBlock,
-  AvailabilityException,
   Calling,
   Interview,
   InterviewType,
@@ -542,11 +539,6 @@ async function bishopName(): Promise<string | undefined> {
 }
 
 /** The bishop's member id (availability blocks key on it), for slot coupling. */
-async function bishopId(): Promise<string | undefined> {
-  const { data } = await db().from("profiles").select("uid").eq("role", "bishop").maybeSingle();
-  return (data?.uid as string | undefined) ?? undefined;
-}
-
 async function clerkName(): Promise<string | undefined> {
   const { data } = await db().from("profiles").select("display_name").eq("role", "clerk").maybeSingle();
   return (data?.display_name as string | undefined) ?? undefined;
@@ -612,7 +604,7 @@ export const getInterviewers = tool({
 
 export const createInterview = tool({
   description:
-    "Add a person to the list of interviews to schedule. Creates the interview in the appropriate scheduling column; it can then be scheduled with `findInterviewSlots` + `scheduleInterview`.",
+    "Add a person to the list of interviews to schedule. Creates the interview in the appropriate scheduling column; a time can then be set with `scheduleInterview`. (Members self-book most interviews through Google booking pages.)",
   inputSchema: z.object({
     memberName: z.string().describe("Name of the person to be interviewed"),
     type: z.enum(INTERVIEW_TYPES).optional().default("temple_recommend"),
@@ -643,67 +635,9 @@ export const createInterview = tool({
   },
 });
 
-export const findInterviewSlots = tool({
-  description:
-    "Find open appointment slots for an interview over the next few weeks, based on the bishopric's availability and existing bookings. Pass the interviewId to size slots to that interview. Returns conflict-free slots with the interviewer for each.",
-  inputSchema: z.object({
-    interviewId: z.string().describe("The interview to find slots for (from getInterviews/createInterview)"),
-    days: z.number().optional().default(28).describe("How many days ahead to search"),
-    limitCount: z.number().optional().default(20),
-  }),
-  execute: async ({ interviewId, days = 28, limitCount = 20 }) => {
-    const { data: row, error: iErr } = await db().from("interviews").select("*").eq("id", interviewId).maybeSingle();
-    if (iErr) throw iErr;
-    if (!row) return { error: "No interview found with that id." };
-    const interview = fromRow<Interview>(row);
-
-    const [blocksRes, exceptionsRes, interviewsRes] = await Promise.all([
-      db().from("availability_blocks").select("*"),
-      db().from("availability_exceptions").select("*"),
-      db().from("interviews").select("*"),
-    ]);
-    if (blocksRes.error) throw blocksRes.error;
-    if (exceptionsRes.error) throw exceptionsRes.error;
-    if (interviewsRes.error) throw interviewsRes.error;
-
-    const durationMins = interview.durationMins ?? INTERVIEW_DURATION_MINS[interview.type];
-    const restrictToMember = interview.requiresBishop ? await bishopName() : undefined;
-
-    const slots = generateSlots({
-      memberName: restrictToMember,
-      durationMins,
-      blocks: (blocksRes.data ?? []).map((r) => fromRow<AvailabilityBlock>(r)),
-      exceptions: (exceptionsRes.data ?? []).map((r) => fromRow<AvailabilityException>(r)),
-      interviews: (interviewsRes.data ?? []).map((r) => fromRow<Interview>(r)),
-      days,
-      ignoreInterviewId: interviewId,
-      // Anything on the bishop's calendar (incl. must-be-bishop interviews)
-      // closes the slot it sits in.
-      bishopMemberId: await bishopId(),
-      // Suggest each window's preferred time first.
-      preferredFirst: true,
-    });
-
-    return {
-      durationMins,
-      requiresBishop: interview.requiresBishop ?? false,
-      slots: slots.slice(0, limitCount).map((s) => ({
-        date: s.date,
-        time: s.time,
-        endTime: s.endTime,
-        interviewer: s.memberName,
-      })),
-      note:
-        slots.length === 0
-          ? "No open slots — the bishopric may need to add availability on the Interviews → Availability tab, or schedule manually."
-          : undefined,
-    };
-  },
-});
-
 export const scheduleInterview = tool({
   description:
-    "Book an interview into a specific date/time with an interviewer (use a slot from findInterviewSlots). By default it moves to 'pending confirmation' until both sides confirm; set markConfirmed to book it as fully scheduled. Rejects times that overlap another booking for the same interviewer.",
+    "Book an interview into a specific date/time with an interviewer. By default it moves to 'pending confirmation' until both sides confirm; set markConfirmed to book it as fully scheduled. Rejects times that overlap another booking for the same interviewer.",
   inputSchema: z.object({
     interviewId: z.string(),
     date: z.string().describe("ISO date YYYY-MM-DD"),
@@ -1404,7 +1338,7 @@ export const sendTaskReminder = tool({
 
 export const emailInterviewTimes = tool({
   description:
-    "Email a member proposed interview time(s) and ask them to reply with what works. Use after findInterviewSlots to send options for scheduling. Stores the message id so the member's reply is matched back to this interview by the inbound poll. Requires email to be configured.",
+    "Email a member proposed interview time(s) and ask them to reply with what works. Stores the message id so the member's reply is matched back to this interview by the inbound poll. Requires email to be configured.",
   inputSchema: z.object({
     interviewId: z.string().describe("The interview to schedule (from getInterviews)"),
     proposedTimes: z.array(z.string()).min(1).describe("Human-readable time options, e.g. 'Tuesday, Sep 2 at 7:00 PM'"),
@@ -1538,97 +1472,6 @@ export const forgetPreference = tool({
 
 // ── Interview availability: time off (out of town, etc.) ──────────────────────
 
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-
-/**
- * Resolve a bishopric member by name to their profile id, which is what an
- * availability exception keys on (it must match that member's availability
- * blocks). Prefers an exact name match, falling back to a unique substring.
- */
-async function resolveBishopricMember(
-  name: string,
-): Promise<{ id: string; name: string } | { error: string }> {
-  const { data, error } = await db().from("profiles").select("id, display_name");
-  if (error) throw error;
-  const profiles = (data ?? []) as { id: string; display_name: string }[];
-  const q = name.trim().toLowerCase();
-  const exact = profiles.filter((p) => p.display_name?.toLowerCase() === q);
-  const matches = exact.length ? exact : profiles.filter((p) => p.display_name?.toLowerCase().includes(q));
-  const known = profiles.map((p) => p.display_name).filter(Boolean).join(", ") || "none";
-  if (matches.length === 0) {
-    return { error: `No bishopric member named "${name}". Known members: ${known}.` };
-  }
-  if (matches.length > 1) {
-    return { error: `"${name}" matches multiple members: ${matches.map((p) => p.display_name).join(", ")}. Be more specific.` };
-  }
-  return { id: matches[0].id, name: matches[0].display_name };
-}
-
-export const getAvailabilityExceptions = tool({
-  description:
-    "List the date ranges when bishopric members are marked unavailable for interviews (out of town, etc.). Use to see who's away, or to get an entry's id before clearing it.",
-  inputSchema: z.object({
-    memberName: z.string().optional().describe("Filter to a single bishopric member by name"),
-  }),
-  execute: async ({ memberName }) => {
-    let query = db().from("availability_exceptions").select("*").order("start_date");
-    if (memberName) query = query.ilike("member_name", `%${memberName}%`);
-    const { data, error } = await query;
-    if (error) throw error;
-    return (data ?? []).map((r) => fromRow<AvailabilityException>(r));
-  },
-});
-
-export const markMemberUnavailable = tool({
-  description:
-    "Mark a bishopric member unavailable for interviews over a date range (e.g. they'll be out of town). This removes them from the interview slots findInterviewSlots offers for those days. For a first-person request ('I'll be away'), use the signed-in member's name. Dates are YYYY-MM-DD; omit endDate for a single day.",
-  inputSchema: z.object({
-    memberName: z.string().describe("Bishopric member who will be unavailable"),
-    startDate: z.string().describe("First unavailable day, YYYY-MM-DD"),
-    endDate: z.string().optional().describe("Last unavailable day, YYYY-MM-DD (defaults to startDate)"),
-    reason: z.string().optional().describe("Why they're unavailable, e.g. 'out of town'"),
-  }),
-  execute: async ({ memberName, startDate, endDate, reason }) => {
-    const end = endDate || startDate;
-    if (!ISO_DATE.test(startDate) || !ISO_DATE.test(end)) {
-      return { error: "Dates must be in YYYY-MM-DD format." };
-    }
-    if (end < startDate) {
-      return { error: "endDate can't be before startDate." };
-    }
-    const resolved = await resolveBishopricMember(memberName);
-    if ("error" in resolved) return resolved;
-
-    const { data, error } = await db()
-      .from("availability_exceptions")
-      .insert({
-        id: crypto.randomUUID(),
-        member_id: resolved.id,
-        member_name: resolved.name,
-        start_date: startDate,
-        end_date: end,
-        reason: reason?.trim() || null,
-      })
-      .select()
-      .single();
-    if (error) throw error;
-    return fromRow<AvailabilityException>(data);
-  },
-});
-
-export const clearAvailabilityException = tool({
-  description:
-    "Remove a time-off entry by id (get the id from getAvailabilityExceptions), e.g. when a member's plans change and they'll be available after all.",
-  inputSchema: z.object({
-    id: z.string().describe("The availability-exception id to remove"),
-  }),
-  execute: async ({ id }) => {
-    const { error } = await db().from("availability_exceptions").delete().eq("id", id);
-    if (error) throw error;
-    return { ok: true, id };
-  },
-});
-
 export const agentTools = {
   getMembers,
   getTasks,
@@ -1642,19 +1485,14 @@ export const agentTools = {
   // Roster / org chart (Chart tab)
   getRoster,
   importRoster,
-  // Interviews
+  // Interviews (tracked manually; self-scheduling is via Google booking pages)
   getInterviews,
   getInterviewers,
   createInterview,
-  findInterviewSlots,
   scheduleInterview,
   updateInterview,
   advanceInterview,
   deleteInterview,
-  // Interview availability (time off)
-  getAvailabilityExceptions,
-  markMemberUnavailable,
-  clearAvailabilityException,
   // Sacrament meeting bulletins
   getSacramentBulletin,
   updateSacramentBulletin,

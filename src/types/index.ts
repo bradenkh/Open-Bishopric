@@ -524,89 +524,6 @@ export const INTERVIEW_DURATION_MINS: Record<InterviewType, number> = {
   other:                  15,
 };
 
-// ── Interview availability ─────────────────────────────────────────────────────
-
-export const WEEKDAY_LABELS = [
-  "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
-] as const;
-
-/**
- * How a weekly availability window repeats.
- *   weekly        — every matching weekday (the original behavior; default).
- *   biweekly      — every other matching weekday (shorthand for every_n_weeks=2).
- *   every_n_weeks — every `intervalWeeks` weeks, phased from `anchorDate`.
- *   nth_weekday   — the `nth` occurrence of the weekday each month
- *                   (1–5, or -1 for the last), e.g. "first Sunday of the month".
- */
-export type AvailabilityRecurrence =
-  | "weekly"
-  | "biweekly"
-  | "nth_weekday"
-  | "every_n_weeks";
-
-export const RECURRENCE_LABELS: Record<AvailabilityRecurrence, string> = {
-  weekly:        "Every week",
-  biweekly:      "Every other week",
-  nth_weekday:   "Monthly (nth weekday)",
-  every_n_weeks: "Every N weeks",
-};
-
-/** Labels for the nth-weekday selector (1-indexed; -1 = last). */
-export const NTH_LABELS: Record<number, string> = {
-  1: "First",
-  2: "Second",
-  3: "Third",
-  4: "Fourth",
-  5: "Fifth",
-  [-1]: "Last",
-};
-
-/**
- * A recurring window when a bishopric member can hold interviews —
- * e.g. "Bishop Anderson, Tuesdays 18:00–19:00". Sliced into bookable slots
- * sized to each interview's length. The recurrence fields let a window repeat
- * less often than weekly (biweekly, every N weeks, or a monthly nth-weekday).
- */
-export interface AvailabilityBlock {
-  id: string;
-  memberId: string;
-  memberName: string;
-  /** 0 = Sunday … 6 = Saturday. */
-  weekday: number;
-  /** 24-hour "HH:MM". */
-  startTime: string;
-  endTime: string;
-  /**
-   * The window's preferred appointment time ("HH:MM"), e.g. 19:00 for a
-   * 18:00–20:00 window. The scheduler phases the slot grid so this time is a
-   * bookable boundary and offers it first, filling the neighbouring slots
-   * (18:45, 19:15, …) only once the preferred slot is taken. Omitted ⇒ the
-   * window has no preference and behaves as before (earliest slot first).
-   */
-  preferredTime?: string;
-  /** How the window repeats. Defaults to "weekly" (existing rows). */
-  recurrence?: AvailabilityRecurrence;
-  /** For biweekly / every_n_weeks: the week interval (biweekly ⇒ 2). */
-  intervalWeeks?: number;
-  /** For nth_weekday: which occurrence in the month (1–5, or -1 for last). */
-  nth?: number;
-  /** YYYY-MM-DD phase anchor for interval math (defaults to a fixed epoch). */
-  anchorDate?: string;
-}
-
-/**
- * A date range when a member is unavailable (out of town, etc.), overriding
- * their recurring availability. Both endpoints inclusive (ISO YYYY-MM-DD).
- */
-export interface AvailabilityException {
-  id: string;
-  memberId: string;
-  memberName: string;
-  startDate: string;
-  endDate: string;
-  reason?: string;
-}
-
 // ── Google Calendar subscription (ingested bookings) ───────────────────────────
 
 /** How an ingested booking was linked to a ward member. */
@@ -704,49 +621,6 @@ export interface SettlementRecord {
   linkSentAt?: string;
   /** Gmail Message-ID of the link email, for reference. */
   linkEmailMessageId?: string;
-  createdBy?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-/**
- * A personalized, unguessable self-signup link. The `token` is the credential:
- * a member follows /book/<token> and the service-role booking API validates it,
- * lists open slots, and books — no login required, RLS untouched.
- */
-export interface BookingToken {
-  id: string;
-  token: string;
-  /** The head of household the link is anchored on (its representative). */
-  memberId?: string;
-  memberName: string;
-  /** What the link books. v1 always "tithing_settlement". */
-  purpose: string;
-  year?: number;
-  settlementRecordId?: string;
-  /** The household this link books for — everyone sharing it books one slot. */
-  householdId?: string;
-  /** The members the single appointment covers. All are marked scheduled when
-   *  any of them books, so the public booking API never needs the members table. */
-  householdMembers?: { id: string; name: string }[];
-  /**
-   * Whether the link books the whole household or just one member:
-   *   "household"  — the default; the appointment covers every householdMember.
-   *   "individual" — the link carries a single member and books only them, for
-   *                  a household member who needs their own separate slot.
-   * Absent on tokens minted before this existed ⇒ treat as "household".
-   */
-  scope?: "household" | "individual";
-  /** ISO timestamp; the link is dead after this (optional). */
-  expiresAt?: string;
-  /** ISO timestamp of the first time the link was opened (null = never opened). */
-  openedAt?: string;
-  /** How many times the link has been opened. */
-  openCount?: number;
-  /** ISO timestamp set once the link has been used to book. */
-  usedAt?: string;
-  /** The interview created when the link was used. */
-  interviewId?: string;
   createdBy?: string;
   createdAt: string;
   updatedAt: string;
