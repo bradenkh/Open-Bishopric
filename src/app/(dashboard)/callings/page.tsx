@@ -711,7 +711,10 @@ function CallingCard({
             {calling.memberName ? initials : <User className="h-3.5 w-3.5" />}
           </div>
           <div className="min-w-0 flex-1">
-            <p className="text-xs font-semibold leading-tight truncate">
+            <p
+              className="text-xs font-semibold leading-tight line-clamp-2 break-words"
+              title={calling.memberName || undefined}
+            >
               {calling.memberName || <span className="italic font-normal text-muted-foreground">Vacant</span>}
             </p>
             <p className="text-[11px] text-muted-foreground leading-tight truncate">
@@ -888,7 +891,7 @@ function KanbanView({ callings, onSelect, onMove, onDelete }: KanbanViewProps) {
           const colors       = STAGE_COLUMN_COLORS[stage];
 
           return (
-            <div key={stage} className="flex flex-col" style={{ width: 192 }}>
+            <div key={stage} className="flex flex-col" style={{ width: 224 }}>
               {/* Connector arrow between columns (except last) */}
               {stageIdx > 0 && (
                 <div className="absolute" /> // spacer handled by gap
