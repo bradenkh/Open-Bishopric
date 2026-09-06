@@ -1,19 +1,38 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, Check, Copy, CalendarClock, RefreshCw, Trash2 } from "lucide-react";
+import {
+  Loader2, Check, Copy, CalendarClock, RefreshCw, Trash2, Rss, Save,
+} from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 /**
- * Calendar feed panel. Turns the interview board into a read-only iCalendar
- * feed the bishopric can subscribe to from Google Calendar (or any calendar
- * app). The unguessable token in the URL is the credential — so the URL is
- * shown only to signed-in bishopric members, and can be rotated (invalidating
- * the old URL) or disabled entirely. One-way: the app never reads the calendar.
+ * Calendar settings — two panels reflecting the calendar strategy.
+ *
+ * 1. Subscribe to the bishop's calendar (current): the app reads the bishop's
+ *    Google Calendar via its secret iCal address and ingests the appointments
+ *    members self-book through Google's booking pages. One-way, read-only.
+ *
+ * 2. Outbound feed (legacy): the older direction — the app mirroring its own
+ *    interview board out to Google as a subscribe-by-URL feed. Kept for now while
+ *    the strategy transitions.
  */
 export function CalendarSettingsCard() {
+  // ── Inbound subscription state ──────────────────────────────────────────────
+  const [icalUrl, setIcalUrl] = useState("");
+  const [savedUrl, setSavedUrl] = useState("");
+  const [savingUrl, setSavingUrl] = useState(false);
+  const [urlSaved, setUrlSaved] = useState(false);
+  const [syncedAt, setSyncedAt] = useState<string | null>(null);
+  const [counts, setCounts] = useState<{ matched: number; unmatched: number } | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState("");
+  const [syncError, setSyncError] = useState("");
+
+  // ── Outbound feed state ─────────────────────────────────────────────────────
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -21,121 +40,231 @@ export function CalendarSettingsCard() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    fetch("/api/settings/calendar")
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.error) setError(data.error);
-        else setToken(data.token ?? null);
+    Promise.all([
+      fetch("/api/settings/calendar").then((r) => r.json()),
+      fetch("/api/calendar/sync").then((r) => r.json()).catch(() => null),
+    ])
+      .then(([settings, sync]) => {
+        if (settings.error) setError(settings.error);
+        else {
+          setToken(settings.token ?? null);
+          setIcalUrl(settings.icalUrl ?? "");
+          setSavedUrl(settings.icalUrl ?? "");
+        }
+        if (sync && !sync.error) {
+          setSyncedAt(sync.syncedAt ?? null);
+          setCounts({ matched: sync.matched ?? 0, unmatched: sync.unmatched ?? 0 });
+        }
       })
       .catch(() => setError("Couldn't load calendar settings."))
       .finally(() => setLoading(false));
   }, []);
 
-  // The full subscribe URL. The ".ics" suffix is cosmetic — the route strips it —
-  // but it helps some clients recognize the feed.
   const feedUrl =
     token && typeof window !== "undefined"
       ? `${window.location.origin}/api/calendar/${token}.ics`
       : "";
 
-  const generate = async () => {
-    setBusy(true); setError("");
+  // ── Inbound actions ─────────────────────────────────────────────────────────
+  const saveUrl = async () => {
+    setSavingUrl(true); setSyncError("");
     try {
-      const res = await fetch("/api/settings/calendar", { method: "POST" });
+      const res = await fetch("/api/settings/calendar", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ icalUrl }),
+      });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Failed to generate feed");
-      setToken(data.token);
+      if (!res.ok) throw new Error(data.error ?? "Failed to save the URL");
+      setSavedUrl(data.icalUrl ?? "");
+      setUrlSaved(true);
+      setTimeout(() => setUrlSaved(false), 2000);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to generate feed");
+      setSyncError(e instanceof Error ? e.message : "Failed to save the URL");
     } finally {
-      setBusy(false);
+      setSavingUrl(false);
     }
   };
 
-  const disable = async () => {
-    if (!confirm("Disable the calendar feed? Anyone already subscribed will stop receiving updates, and the current link will stop working.")) return;
-    setBusy(true); setError("");
+  const syncNow = async () => {
+    setSyncing(true); setSyncError(""); setSyncMsg("");
     try {
-      const res = await fetch("/api/settings/calendar", { method: "DELETE" });
+      const res = await fetch("/api/calendar/sync", { method: "POST" });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Failed to disable feed");
-      setToken(null);
+      if (!res.ok) throw new Error(data.error ?? "Sync failed");
+      setSyncedAt(data.syncedAt ?? null);
+      setCounts({ matched: data.matched ?? 0, unmatched: data.unmatched ?? 0 });
+      setSyncMsg(
+        `Read ${data.fetched} appointment${data.fetched === 1 ? "" : "s"} — ` +
+        `${data.matched} matched, ${data.unmatched} unmatched.`,
+      );
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to disable feed");
+      setSyncError(e instanceof Error ? e.message : "Sync failed");
     } finally {
-      setBusy(false);
+      setSyncing(false);
     }
   };
 
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(feedUrl);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      setError("Couldn't copy — select the link and copy manually.");
-    }
-  };
+  const urlDirty = icalUrl.trim() !== savedUrl.trim();
 
   return (
     <Card>
       <CardHeader className="pb-3">
         <CardTitle className="text-base flex items-center gap-2">
-          <CalendarClock className="h-4 w-4 text-primary" /> Calendar feed
+          <CalendarClock className="h-4 w-4 text-primary" /> Calendar
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-4">
-        <p className="text-sm text-muted-foreground">
-          Subscribe to the ward&rsquo;s scheduled interviews from Google Calendar (or
-          any calendar app). It&rsquo;s a one-way, read-only mirror — changes on the
-          interview board flow to your calendar automatically; edits in your
-          calendar never touch the app. Anyone with the link can see the
-          appointments, so share it only within the bishopric.
-        </p>
-
-        {loading ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+      <CardContent className="space-y-6">
+        {/* ── Inbound subscription ─────────────────────────────────────────── */}
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Rss className="h-4 w-4 text-primary" />
+            <p className="font-medium text-sm">Subscribe to the bishop&rsquo;s calendar</p>
           </div>
-        ) : token ? (
-          <>
+          <p className="text-sm text-muted-foreground">
+            Paste the bishop&rsquo;s Google Calendar <span className="font-medium">secret iCal
+            address</span> (Google Calendar → Settings → your calendar →
+            &ldquo;Secret address in iCal format&rdquo;). The app reads the
+            appointments members book through Google&rsquo;s booking pages and
+            links each one to a ward member. It&rsquo;s one-way and read-only —
+            the app never changes your calendar. Google refreshes this feed only
+            every few hours, so new bookings can take a while to appear.
+          </p>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="ical-url" className="text-xs">Secret iCal URL</Label>
             <div className="flex items-center gap-2">
-              <Input value={feedUrl} readOnly onFocus={(e) => e.currentTarget.select()} className="font-mono text-xs" />
-              <Button variant="outline" size="icon" className="shrink-0" onClick={copy} title="Copy link">
-                {copied ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
+              <Input
+                id="ical-url"
+                value={icalUrl}
+                onChange={(e) => setIcalUrl(e.target.value)}
+                placeholder="https://calendar.google.com/calendar/ical/…/basic.ics"
+                className="font-mono text-xs"
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                className="shrink-0 gap-1.5"
+                onClick={saveUrl}
+                disabled={savingUrl || !urlDirty}
+                title="Save URL"
+              >
+                {savingUrl ? <Loader2 className="h-4 w-4 animate-spin" /> : urlSaved ? <Check className="h-4 w-4 text-green-600" /> : <Save className="h-4 w-4" />}
+                Save
               </Button>
             </div>
+          </div>
 
-            <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm text-muted-foreground space-y-1">
-              <p className="font-medium text-foreground">Add to Google Calendar</p>
-              <ol className="list-decimal pl-5 space-y-0.5">
-                <li>Open Google Calendar on the web.</li>
-                <li>Next to <span className="font-medium">Other calendars</span>, click <span className="font-medium">+</span> → <span className="font-medium">From URL</span>.</li>
-                <li>Paste the link above and click <span className="font-medium">Add calendar</span>.</li>
-              </ol>
-              <p className="pt-1">Google refreshes subscribed calendars every several hours, so new appointments may take a little while to appear.</p>
-            </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              className="gap-1.5"
+              onClick={syncNow}
+              disabled={syncing || !savedUrl}
+              title={savedUrl ? "Fetch the latest appointments now" : "Save a URL first"}
+            >
+              {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              Sync now
+            </Button>
+            {syncedAt && (
+              <span className="text-xs text-muted-foreground">
+                Last synced {new Date(syncedAt).toLocaleString()}
+                {counts && ` · ${counts.matched} matched, ${counts.unmatched} unmatched`}
+              </span>
+            )}
+          </div>
 
-            <div className="flex flex-wrap gap-2">
-              <Button variant="outline" size="sm" className="gap-1.5" onClick={generate} disabled={busy}>
-                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                Regenerate link
-              </Button>
-              <Button variant="ghost" size="sm" className="gap-1.5 text-destructive hover:text-destructive" onClick={disable} disabled={busy}>
-                <Trash2 className="h-4 w-4" /> Disable feed
-              </Button>
+          {syncMsg && <p className="text-sm text-green-600">{syncMsg}</p>}
+          {syncError && <p className="text-sm text-destructive">{syncError}</p>}
+        </div>
+
+        <div className="border-t border-border" />
+
+        {/* ── Outbound feed (legacy) ───────────────────────────────────────── */}
+        <div className="space-y-3">
+          <p className="font-medium text-sm">Outbound feed (legacy)</p>
+          <p className="text-sm text-muted-foreground">
+            The older direction — mirror the app&rsquo;s interview board out to
+            Google Calendar as a read-only feed. Being phased out in favor of the
+            subscription above. Anyone with the link can see the appointments, so
+            share it only within the bishopric.
+          </p>
+
+          {loading ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> Loading…
             </div>
-            <p className="text-xs text-muted-foreground">
-              Regenerating creates a new link and immediately invalidates the old one —
-              use it if a link was shared too widely.
-            </p>
-          </>
-        ) : (
-          <Button className="gap-1.5" onClick={generate} disabled={busy}>
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarClock className="h-4 w-4" />}
-            Generate feed link
-          </Button>
-        )}
+          ) : token ? (
+            <>
+              <div className="flex items-center gap-2">
+                <Input value={feedUrl} readOnly onFocus={(e) => e.currentTarget.select()} className="font-mono text-xs" />
+                <Button variant="outline" size="icon" className="shrink-0" onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(feedUrl);
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 2000);
+                  } catch {
+                    setError("Couldn't copy — select the link and copy manually.");
+                  }
+                }} title="Copy link">
+                  {copied ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
+                </Button>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" className="gap-1.5" onClick={async () => {
+                  setBusy(true); setError("");
+                  try {
+                    const res = await fetch("/api/settings/calendar", { method: "POST" });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.error ?? "Failed to generate feed");
+                    setToken(data.token);
+                  } catch (e) {
+                    setError(e instanceof Error ? e.message : "Failed to generate feed");
+                  } finally {
+                    setBusy(false);
+                  }
+                }} disabled={busy}>
+                  {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                  Regenerate link
+                </Button>
+                <Button variant="ghost" size="sm" className="gap-1.5 text-destructive hover:text-destructive" onClick={async () => {
+                  if (!confirm("Disable the outbound feed? Anyone already subscribed will stop receiving updates, and the current link will stop working.")) return;
+                  setBusy(true); setError("");
+                  try {
+                    const res = await fetch("/api/settings/calendar", { method: "DELETE" });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.error ?? "Failed to disable feed");
+                    setToken(null);
+                  } catch (e) {
+                    setError(e instanceof Error ? e.message : "Failed to disable feed");
+                  } finally {
+                    setBusy(false);
+                  }
+                }} disabled={busy}>
+                  <Trash2 className="h-4 w-4" /> Disable feed
+                </Button>
+              </div>
+            </>
+          ) : (
+            <Button variant="outline" className="gap-1.5" onClick={async () => {
+              setBusy(true); setError("");
+              try {
+                const res = await fetch("/api/settings/calendar", { method: "POST" });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error ?? "Failed to generate feed");
+                setToken(data.token);
+              } catch (e) {
+                setError(e instanceof Error ? e.message : "Failed to generate feed");
+              } finally {
+                setBusy(false);
+              }
+            }} disabled={busy}>
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarClock className="h-4 w-4" />}
+              Generate feed link
+            </Button>
+          )}
+        </div>
 
         {error && <p className="text-sm text-destructive">{error}</p>}
       </CardContent>

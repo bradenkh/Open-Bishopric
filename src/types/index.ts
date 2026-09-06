@@ -607,6 +607,46 @@ export interface AvailabilityException {
   reason?: string;
 }
 
+// ── Google Calendar subscription (ingested bookings) ───────────────────────────
+
+/** How an ingested booking was linked to a ward member. */
+export type CalendarMatchMethod = "email" | "name" | "manual";
+
+/** Whether an ingested calendar event is live or has been cancelled. */
+export type CalendarBookingStatus = "active" | "cancelled";
+
+/**
+ * An appointment read from the bishop's subscribed Google Calendar (its secret
+ * iCal feed). The app no longer creates these — members self-book through Google
+ * booking pages, and the resulting events flow in here via `/api/calendar/sync`.
+ * Keyed by the event's iCalendar UID, so re-syncing upserts each row in place.
+ */
+export interface CalendarBooking {
+  /** The event's iCalendar UID — stable across syncs. */
+  id: string;
+  summary?: string;
+  description?: string;
+  location?: string;
+  /** Event start as an ISO timestamp (an absolute instant). */
+  startAt: string;
+  /** Event end as an ISO timestamp, when the feed provides one. */
+  endAt?: string;
+  organizerEmail?: string;
+  /** Guest email addresses on the event (the booking member is usually here). */
+  attendeeEmails?: string[];
+  /** The matched ward member, when the app could link the booking. */
+  memberId?: string;
+  memberName?: string;
+  matchMethod?: CalendarMatchMethod;
+  /** Interview type inferred from the booking page / summary, when recognizable. */
+  interviewType?: InterviewType;
+  status: CalendarBookingStatus;
+  /** When this event last appeared in the feed — a removal-detection hook. */
+  lastSeenAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // ── Tithing settlement ─────────────────────────────────────────────────────────
 
 /**
