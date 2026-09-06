@@ -24,7 +24,7 @@ import type {
   Interview, InterviewType, InterviewStage,
   AvailabilityBlock, AvailabilityException, BishopricMember,
   SettlementRecord, SettlementStatus, DeclaredTithingStatus,
-  BookingToken, Member, AvailabilityRecurrence,
+  BookingToken, Member, AvailabilityRecurrence, CalendarBooking,
 } from "@/types";
 import {
   INTERVIEW_TYPE_LABELS, INTERVIEW_STAGES, INTERVIEW_PIPELINE, INTERVIEW_STAGE_COLORS,
@@ -34,8 +34,9 @@ import {
 import { formatDate, formatDateWithWeekday, cn } from "@/lib/utils";
 import {
   generateSlots, groupSlotsByDate, durationForType, nowInAppTz,
-  toMinutes, fromMinutes, toDateStr, durationOf, blockAppliesOn, type Slot,
+  toMinutes, fromMinutes, toDateStr, durationOf, blockAppliesOn, APP_TIME_ZONE, type Slot,
 } from "@/lib/availability";
+import { toZonedTime } from "date-fns-tz";
 import {
   DEFAULT_SETTLEMENT_EMAIL, renderSettlementEmail, settlementTitle, withDefaults,
   type SettlementEmailTemplate,
@@ -2274,7 +2275,150 @@ function StageAdvancePanel({
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
-type PageView = "calendar" | "board" | "settlement" | "availability";
+// ── Bookings (ingested from the bishop's Google Calendar) ──────────────────────
+
+/** An ingested booking's ward-local date + time, from its absolute start. */
+function bookingWhen(iso: string): { date: string; time: string } {
+  const z = toZonedTime(new Date(iso), APP_TIME_ZONE);
+  return { date: toDateStr(z), time: fromMinutes(z.getHours() * 60 + z.getMinutes()) };
+}
+
+function bookingTypeLabel(b: CalendarBooking): string {
+  return b.interviewType ? INTERVIEW_TYPE_LABELS[b.interviewType] : "Appointment";
+}
+
+interface BookingsViewProps {
+  bookings: CalendarBooking[];
+  members: Member[];
+  onLink: (bookingId: string, memberId: string | null) => void;
+  onSync: () => void;
+  syncing: boolean;
+  syncedAt?: string | null;
+}
+
+/** One booking row: when, what, and who it's linked to (or a picker to link). */
+function BookingRow({
+  booking, members, onLink,
+}: { booking: CalendarBooking; members: Member[]; onLink: BookingsViewProps["onLink"] }) {
+  const { date, time } = bookingWhen(booking.startAt);
+  return (
+    <div className="flex items-center gap-3 rounded-lg border border-border bg-card p-3">
+      <div className="shrink-0 text-center w-14">
+        <div className="text-xs text-muted-foreground">{formatDate(date)}</div>
+        <div className="text-sm font-medium tabular-nums">{formatTime(time)}</div>
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <Badge variant="secondary" className="text-[10px]">{bookingTypeLabel(booking)}</Badge>
+          {booking.matchMethod && (
+            <span className="text-[10px] text-muted-foreground">
+              {booking.matchMethod === "manual" ? "linked by hand" : `matched by ${booking.matchMethod}`}
+            </span>
+          )}
+        </div>
+        <p className="text-sm truncate mt-0.5">{booking.summary ?? "(no title)"}</p>
+        {booking.attendeeEmails?.length ? (
+          <p className="text-xs text-muted-foreground truncate">{booking.attendeeEmails.join(", ")}</p>
+        ) : null}
+      </div>
+      <div className="shrink-0">
+        {booking.memberId ? (
+          <div className="flex items-center gap-1.5">
+            <span className="text-sm font-medium">{booking.memberName}</span>
+            <Button
+              variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground"
+              title="Unlink from member" onClick={() => onLink(booking.id, null)}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        ) : (
+          <Select value="" onValueChange={(v) => onLink(booking.id, v)}>
+            <SelectTrigger className="h-8 w-44 text-xs">
+              <SelectValue placeholder="Link to member…" />
+            </SelectTrigger>
+            <SelectContent>
+              {members
+                .filter((m) => m.isActive)
+                .sort((a, b) => `${a.lastName} ${a.firstName}`.localeCompare(`${b.lastName} ${b.firstName}`))
+                .map((m) => (
+                  <SelectItem key={m.id} value={m.id}>{m.firstName} {m.lastName}</SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** A titled group of booking rows (module-scope so it isn't recreated in render). */
+function BookingSection({
+  title, rows, members, onLink, tone,
+}: {
+  title: string; rows: CalendarBooking[]; members: Member[];
+  onLink: BookingsViewProps["onLink"]; tone?: string;
+}) {
+  return (
+    <div className="space-y-2">
+      <h3 className={cn("text-sm font-semibold flex items-center gap-2", tone)}>
+        {title} <span className="text-xs font-normal text-muted-foreground tabular-nums">({rows.length})</span>
+      </h3>
+      {rows.length === 0
+        ? <p className="text-xs text-muted-foreground italic">None.</p>
+        : <div className="space-y-2">{rows.map((b) => <BookingRow key={b.id} booking={b} members={members} onLink={onLink} />)}</div>}
+    </div>
+  );
+}
+
+/**
+ * Read-only tracking of appointments members self-booked on Google. Bookings are
+ * ingested from the bishop's calendar subscription; those the matcher couldn't
+ * place surface in a "Needs linking" queue for a reviewer to attach by hand.
+ */
+function BookingsView({ bookings, members, onLink, onSync, syncing, syncedAt }: BookingsViewProps) {
+  const active = bookings.filter((b) => b.status !== "cancelled");
+  const byStartAsc = (a: CalendarBooking, b: CalendarBooking) => a.startAt.localeCompare(b.startAt);
+  const byStartDesc = (a: CalendarBooking, b: CalendarBooking) => b.startAt.localeCompare(a.startAt);
+  // Split upcoming/past by ward-local date against TODAY (a module-load anchor),
+  // avoiding an impure clock read during render.
+  const isPast = (b: CalendarBooking) => bookingWhen(b.startAt).date < TODAY;
+
+  const unmatched = active.filter((b) => !b.memberId).sort(byStartAsc);
+  const upcoming = active.filter((b) => b.memberId && !isPast(b)).sort(byStartAsc);
+  const past = active.filter((b) => b.memberId && isPast(b)).sort(byStartDesc);
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center gap-3">
+        <Button size="sm" className="gap-1.5" onClick={onSync} disabled={syncing}>
+          {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+          Sync now
+        </Button>
+        {syncedAt && (
+          <span className="text-xs text-muted-foreground">Last synced {new Date(syncedAt).toLocaleString()}</span>
+        )}
+      </div>
+
+      {bookings.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+          No bookings yet. Set the calendar subscription in Settings → Calendar, then Sync. Appointments members
+          book through Google&rsquo;s booking pages will appear here.
+        </div>
+      ) : (
+        <>
+          {unmatched.length > 0 && (
+            <BookingSection title="Needs linking" rows={unmatched} members={members} onLink={onLink} tone="text-amber-600 dark:text-amber-400" />
+          )}
+          <BookingSection title="Upcoming" rows={upcoming} members={members} onLink={onLink} />
+          <BookingSection title="Past" rows={past} members={members} onLink={onLink} />
+        </>
+      )}
+    </div>
+  );
+}
+
+type PageView = "bookings" | "calendar" | "board" | "settlement" | "availability";
 
 const EMPTY_FORM = {
   memberName: "",
@@ -2313,13 +2457,14 @@ export default function InterviewsPage() {
   const exceptions   = exceptionsCol.items;
   const settlements  = settlementsCol.items;
   const bookingTokens = bookingTokensCol.items;
+  const calendarBookings = data.calendarBookings.items;
   const members      = data.members;
   const bishopric    = data.bishopric;
 
   const INTERVIEWERS = useMemo(() => deriveInterviewers(bishopric), [bishopric]);
   const BISHOP       = useMemo(() => deriveBishop(bishopric), [bishopric]);
 
-  const [view,       setView]       = useState<PageView>("calendar");
+  const [view,       setView]       = useState<PageView>("bookings");
   const [boardMode,  setBoardMode]  = useState<"board" | "list">("board");
   const [selected,   setSelected]   = useState<Interview | null>(null);
   // Deep link from the dashboard: /interviews?new=1 opens the New dialog.
@@ -2371,6 +2516,45 @@ export default function InterviewsPage() {
       window.history.replaceState(null, "", window.location.pathname);
     }
   }, []);
+
+  // ── Calendar-booking ingest (the Bookings tab) ───────────────────────────────
+  const [syncing, setSyncing] = useState(false);
+  const [syncedAt, setSyncedAt] = useState<string | null>(null);
+  useEffect(() => {
+    fetch("/api/calendar/sync")
+      .then((r) => r.json())
+      .then((d) => { if (d && !d.error) setSyncedAt(d.syncedAt ?? null); })
+      .catch(() => { /* not configured yet */ });
+  }, []);
+
+  /** Pull the latest appointments from the bishop's calendar, then refresh. */
+  async function syncBookings() {
+    setSyncing(true);
+    try {
+      const res = await fetch("/api/calendar/sync", { method: "POST" });
+      const d = await res.json().catch(() => null);
+      if (d?.syncedAt) setSyncedAt(d.syncedAt);
+      await data.reloadAll();
+    } catch {
+      /* surfaced on the Settings → Calendar panel; keep the board quiet */
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  /** Manually link an unmatched booking to a member (or unlink with null). */
+  async function linkBooking(bookingId: string, memberId: string | null) {
+    try {
+      await fetch(`/api/calendar/bookings/${bookingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ memberId }),
+      });
+      await data.reloadAll();
+    } catch {
+      /* leave the row as-is on failure */
+    }
+  }
 
   // ── Derived counts ─────────────────────────────────────────────────────────
   const needsScheduling = interviews.filter(
@@ -2895,7 +3079,12 @@ export default function InterviewsPage() {
   })();
   const settlementRemaining = settlementHouseholds.total - settlementHouseholds.done;
 
+  const unmatchedBookings = calendarBookings.filter(
+    (b) => b.status !== "cancelled" && !b.memberId,
+  ).length;
+
   const TAB_CONFIG: { view: PageView; label: string; count?: number }[] = [
+    { view: "bookings",     label: "Bookings",           count: unmatchedBookings },
     { view: "calendar",     label: "Calendar" },
     { view: "board",        label: "Board",              count: needsScheduling + toReview },
     { view: "settlement",   label: "Tithing Settlement", count: settlementRemaining },
@@ -2966,6 +3155,17 @@ export default function InterviewsPage() {
       </div>
 
       {/* ── Views ── */}
+      {view === "bookings" && (
+        <BookingsView
+          bookings={calendarBookings}
+          members={members}
+          onLink={(id, memberId) => { void linkBooking(id, memberId); }}
+          onSync={() => { void syncBookings(); }}
+          syncing={syncing}
+          syncedAt={syncedAt}
+        />
+      )}
+
       {view === "calendar" && (
         <CalendarView
           interviews={interviews}

@@ -31,6 +31,7 @@ import {
   availabilityExceptionsRepo,
   availabilityRepo,
   bookingTokensRepo,
+  calendarBookingsRepo,
   callingsRepo,
   interviewsRepo,
   listProfiles,
@@ -51,6 +52,7 @@ import type {
   BishopricMember,
   BishopricRole,
   BookingToken,
+  CalendarBooking,
   Calling,
   Interview,
   Meeting,
@@ -97,6 +99,8 @@ interface DataContextValue {
   settlements: Collection<SettlementRecord>;
   /** Personalized self-signup booking links. */
   bookingTokens: Collection<BookingToken>;
+  /** Appointments ingested from the bishop's subscribed Google Calendar. */
+  calendarBookings: Collection<CalendarBooking>;
 
   members: Member[];
   /** Everyone with a login. The settings screen manages these. */
@@ -189,6 +193,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const [exceptions, setExceptions] = useState<AvailabilityException[]>([]);
   const [settlements, setSettlements] = useState<SettlementRecord[]>([]);
   const [bookingTokens, setBookingTokens] = useState<BookingToken[]>([]);
+  const [calendarBookings, setCalendarBookings] = useState<CalendarBooking[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [profiles, setProfiles] = useState<AppUser[]>([]);
@@ -230,6 +235,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       exceptionsData,
       settlementsData,
       bookingTokensData,
+      calendarBookingsData,
       tasksData,
       membersData,
       profilesData,
@@ -245,6 +251,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       availabilityExceptionsRepo.list(db),
       settlementRepo.list(db),
       bookingTokensRepo.list(db),
+      calendarBookingsRepo.list(db),
       tasksRepo.list(db),
       membersRepo.list(db),
       listProfiles(db),
@@ -260,6 +267,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     setExceptions(exceptionsData);
     setSettlements(settlementsData);
     setBookingTokens(bookingTokensData);
+    setCalendarBookings(calendarBookingsData);
     setTasks(tasksData);
     setMembers(membersData);
     setProfiles(profilesData);
@@ -450,6 +458,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       exceptions: makeCollection(db, availabilityExceptionsRepo, exceptions, setExceptions),
       settlements: makeCollection(db, settlementRepo, settlements, setSettlements),
       bookingTokens: makeCollection(db, bookingTokensRepo, bookingTokens, setBookingTokens),
+      calendarBookings: makeCollection(db, calendarBookingsRepo, calendarBookings, setCalendarBookings),
       members,
       profiles,
       reloadProfiles,
@@ -479,6 +488,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       exceptions,
       settlements,
       bookingTokens,
+      calendarBookings,
       members,
       profiles,
       reloadProfiles,
