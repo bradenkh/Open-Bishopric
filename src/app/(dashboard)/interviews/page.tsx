@@ -40,6 +40,7 @@ import {
   DEFAULT_SETTLEMENT_EMAIL, renderSettlementEmail, settlementTitle, withDefaults,
   type SettlementEmailTemplate,
 } from "@/lib/settlement-email";
+import { bookingLinkFor } from "@/lib/booking-pages";
 import {
   householdKey, headOfHousehold, householdMembersOf, tokenHouseholdKey,
   householdParents, householdLabel,
@@ -1157,6 +1158,8 @@ interface SettlementViewProps {
   onGenerateIndividual: (member: Member) => void;
   /** The saved template used to pre-fill the compose dialog. */
   emailTemplate: SettlementEmailTemplate;
+  /** When set, the Google booking-page URL used in place of the app's /book link. */
+  bookingUrlOverride?: string;
   /** Email one member their (household) booking link with the given template. */
   onEmail: (member: Member, tpl: SettlementEmailTemplate) => Promise<boolean>;
   /** Email one member their own individual link with the given template. */
@@ -1275,7 +1278,7 @@ function BreakdownBar({ rows }: { rows: SettlementRowState[] }) {
 
 function SettlementView({
   members, settlements, bookingTokens, interviews, onGenerate, onGenerateAll,
-  onGenerateIndividual, emailTemplate, onEmail, onEmailIndividual, onEmailSelected,
+  onGenerateIndividual, emailTemplate, bookingUrlOverride, onEmail, onEmailIndividual, onEmailSelected,
   onSetStatus, onSetDeclared, onUnschedule,
 }: SettlementViewProps) {
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -1380,7 +1383,9 @@ function SettlementView({
 
   async function copy(token: BookingToken) {
     try {
-      await navigator.clipboard.writeText(bookingUrl(token.token));
+      // Copy the Google booking page when configured, so a manually shared link
+      // matches what the invite emails send; otherwise the app's own link.
+      await navigator.clipboard.writeText(bookingUrlOverride ?? bookingUrl(token.token));
       setCopiedId(token.id);
       setTimeout(() => setCopiedId((c) => (c === token.id ? null : c)), 1800);
     } catch {
@@ -1527,6 +1532,9 @@ function SettlementView({
   const previewRecipient = composeRecipients[0];
   const previewLink = previewRecipient
     ? (() => {
+        // When a Google booking page is configured, every recipient gets that
+        // one page (they identify themselves there) — mirroring what's sent.
+        if (bookingUrlOverride) return bookingUrlOverride;
         // Individual compose previews the member's own link; household compose
         // previews the household's shared link.
         if (composeIndividualId) {
@@ -2343,6 +2351,20 @@ export default function InterviewsPage() {
       .catch(() => { /* keep the default template */ });
   }, []);
 
+  // The Google booking-page URL for tithing settlement (Settings → Google
+  // booking pages). When set, invite links point members at Google's booking
+  // page instead of the app's own /book link — the appointment then flows back
+  // in through the calendar subscription. Empty until loaded / if unconfigured.
+  const [settlementBookingUrl, setSettlementBookingUrl] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    fetch("/api/settings/calendar")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d && !d.error) setSettlementBookingUrl(bookingLinkFor("tithing_settlement", d.bookingPageUrls));
+      })
+      .catch(() => { /* no booking page configured — fall back to the app link */ });
+  }, []);
+
   // Strip the ?new deep-link param so a refresh doesn't reopen the dialog.
   useEffect(() => {
     if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("new") != null) {
@@ -2717,7 +2739,9 @@ export default function InterviewsPage() {
     opts?: { silent?: boolean },
   ): Promise<boolean> {
     if (!m.email) return false;
-    const url = `${window.location.origin}/book/${token.token}`;
+    // Prefer the Google booking page for settlement when configured; the app's
+    // own /book link is the fallback until every ward moves to booking pages.
+    const url = settlementBookingUrl ?? `${window.location.origin}/book/${token.token}`;
     // Substitute {title}/{name}/{lastName}/{link} per recipient from the
     // (possibly edited) template — so each parent is addressed individually.
     const { subject, body } = renderSettlementEmail(tpl, {
@@ -2988,6 +3012,7 @@ export default function InterviewsPage() {
           onGenerateAll={(ms) => { void generateAll(ms); }}
           onGenerateIndividual={(m) => { void generateIndividualLink(m); }}
           emailTemplate={emailTemplate}
+          bookingUrlOverride={settlementBookingUrl}
           onEmail={(m, tpl) => emailLink(m, tpl)}
           onEmailIndividual={(m, tpl) => emailIndividualLink(m, tpl)}
           onEmailSelected={(ms, tpl) => emailSelected(ms, tpl)}
