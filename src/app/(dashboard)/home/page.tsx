@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import {
-  ClipboardList, CalendarClock, Church, Calendar, ArrowRight, MessageSquare,
+  ClipboardList, CalendarClock, HandHelping, Calendar, ArrowRight, MessageSquare,
   CalendarPlus, Plus, Settings,
 } from "lucide-react";
 import Link from "next/link";
@@ -53,7 +53,7 @@ export default function DashboardPage() {
   const statCards = [
     { label: "Upcoming Meetings",   value: stats.upcomingMeetings,   icon: ClipboardList,  href: "/agendas",    color: "text-blue-600",   badge: undefined },
     { label: "Interviews to Set",   value: stats.needsScheduling,    icon: CalendarClock,  href: "/interviews", color: "text-amber-600",  badge: stats.upcomingInterviews > 0 ? `${stats.upcomingInterviews} scheduled` : undefined },
-    { label: "Callings In Progress",value: stats.callingsInProgress, icon: Church,         href: "/callings",   color: "text-purple-600", badge: stats.vacantCallings > 0 ? `${stats.vacantCallings} vacant` : undefined },
+    { label: "Callings In Progress",value: stats.callingsInProgress, icon: HandHelping,   href: "/callings",   color: "text-purple-600", badge: stats.vacantCallings > 0 ? `${stats.vacantCallings} vacant` : undefined },
     { label: "Scheduled Interviews",value: stats.upcomingInterviews, icon: Calendar,       href: "/interviews", color: "text-green-600",  badge: undefined },
   ];
 

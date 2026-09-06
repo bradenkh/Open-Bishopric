@@ -8,7 +8,7 @@ import {
   MessageSquare,
   ClipboardList,
   CalendarClock,
-  Church,
+  HandHelping,
   Lectern,
   Settings,
   LogOut,
@@ -25,7 +25,7 @@ const navItems = [
   { href: "/agendas", label: "Agendas", icon: ClipboardList },
   { href: "/sacrament", label: "Sacrament", icon: Lectern },
   { href: "/interviews", label: "Scheduling", icon: CalendarClock },
-  { href: "/callings", label: "Callings", icon: Church },
+  { href: "/callings", label: "Callings", icon: HandHelping },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, MessageSquare, ClipboardList, Lectern, CalendarClock, Church } from "lucide-react";
+import { LayoutDashboard, MessageSquare, ClipboardList, Lectern, CalendarClock, HandHelping } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
@@ -11,7 +11,7 @@ const navItems = [
   { href: "/agendas", label: "Agendas", icon: ClipboardList },
   { href: "/sacrament", label: "Sacrament", icon: Lectern },
   { href: "/interviews", label: "Scheduling", icon: CalendarClock },
-  { href: "/callings", label: "Callings", icon: Church },
+  { href: "/callings", label: "Callings", icon: HandHelping },
 ];
 
 export function BottomNav() {
