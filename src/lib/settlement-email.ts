@@ -2,8 +2,9 @@
  * The email that delivers a member's tithing-settlement booking link.
  *
  * The subject and body are a template: `{title}`, `{name}`, `{lastName}`, and
- * `{link}` are substituted per recipient at send time (the link is that member's
- * personal /book/<token> URL). Because parents are addressed individually, one
+ * `{link}` are substituted per recipient at send time (the link is the ward's
+ * Google Calendar booking page for tithing settlement). Because parents are
+ * addressed individually, one
  * copy can read "Dear Brother Smith," and the other "Dear Sister Smith,".
  * The bishopric can override the copy in Settings → Email; when they haven't,
  * these defaults are used. Kept framework-free so both the settings UI and the
@@ -35,7 +36,7 @@ export const DEFAULT_SETTLEMENT_EMAIL: SettlementEmailTemplate = {
     "",
     "{link}",
     "",
-    "One time covers your whole household — just choose an open slot, no sign-in needed. If someone in your household has already booked, the link will show your scheduled time. Thank you!",
+    "One appointment covers your whole household — just choose an open time on the booking page. Thank you!",
   ].join("\n"),
 };
 
@@ -45,7 +46,7 @@ export const SETTLEMENT_EMAIL_PLACEHOLDERS = ["{title}", "{name}", "{lastName}",
 export interface SettlementEmailVars {
   /** The member's first name (or a preview stand-in). */
   name: string;
-  /** The member's personal booking URL. */
+  /** The ward's Google Calendar settlement booking-page URL. */
   link: string;
   /** Courtesy title (Brother/Sister); "" or omitted when gender is unknown. */
   title?: string;

@@ -66,13 +66,3 @@ export function householdParents(members: Member[]): Member[] {
   const head = members.find((m) => m.isHeadOfHousehold);
   return head ? [head] : members;
 }
-
-/** The household key a booking token covers, tolerating legacy per-member tokens
- *  that predate household fields (their key is their member/household of one). */
-export function tokenHouseholdKey(t: {
-  householdId?: string;
-  memberId?: string;
-  id: string;
-}): string {
-  return t.householdId?.trim() ? t.householdId : t.memberId ?? t.id;
-}

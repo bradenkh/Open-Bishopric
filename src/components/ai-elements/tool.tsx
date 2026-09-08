@@ -23,7 +23,6 @@ const TOOL_LABELS: Record<string, string> = {
   getInterviews: "Reading interviews",
   getInterviewers: "Checking who can interview",
   createInterview: "Adding an interview to schedule",
-  findInterviewSlots: "Finding open interview slots",
   scheduleInterview: "Scheduling the interview",
   updateInterview: "Updating an interview",
   advanceInterview: "Advancing an interview",

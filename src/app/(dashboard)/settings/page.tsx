@@ -15,6 +15,7 @@ import { useData } from "@/contexts/DataContext";
 import { createClient } from "@/lib/supabase/client";
 import { EmailSettingsCard } from "@/components/settings/email-settings";
 import { CalendarSettingsCard } from "@/components/settings/calendar-settings";
+import { BookingPagesCard } from "@/components/settings/booking-pages";
 import type { WardInfo, WardLeader } from "@/types";
 
 const ROLE_OPTIONS: { value: string; label: string }[] = [
@@ -46,6 +47,7 @@ export default function SettingsPage() {
       <WardSettingsCard />
       <EmailSettingsCard />
       <CalendarSettingsCard />
+      <BookingPagesCard />
       <AIAssistantCard />
       <AssistantMemoryCard />
       <UsersCard />
