@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import {
   RotateCcw, Loader2, Trash2, Mail, Send, Search, Download, User, CalendarClock, Check,
+  Plus, CheckCircle2, Star,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,10 +20,10 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useData, newId } from "@/contexts/DataContext";
 import type {
   SettlementRecord, SettlementStatus, DeclaredTithingStatus,
-  Member, CalendarBooking,
+  Member, CalendarBooking, Interview, InterviewType,
 } from "@/types";
 import {
-  INTERVIEW_TYPE_LABELS, SETTLEMENT_STATUS_LABELS, DECLARED_STATUS_LABELS,
+  INTERVIEW_TYPE_LABELS, INTERVIEW_DURATION_MINS, SETTLEMENT_STATUS_LABELS, DECLARED_STATUS_LABELS,
 } from "@/types";
 import { formatDate, cn } from "@/lib/utils";
 import { APP_TIME_ZONE, toDateStr, fromMinutes, nowInAppTz } from "@/lib/availability";
@@ -209,6 +210,243 @@ function BookingsView({ bookings, members, onLink, onSync, syncing, syncedAt }: 
           <BookingSection title="Past" rows={past} members={members} onLink={onLink} />
         </>
       )}
+    </div>
+  );
+}
+
+// ── Interview tracking (the pipeline of interviews to arrange) ─────────────────
+
+// Types the tracking board covers. Tithing settlement has its own dedicated tab.
+const TRACKED_TYPES: InterviewType[] = [
+  "temple_recommend", "temple_recommend_youth", "calling", "ministering", "youth", "worthiness", "other",
+];
+
+type TrackStage = "needs" | "scheduled" | "completed";
+
+interface TrackedRow {
+  interview: Interview;
+  /** The live Google booking that satisfies this interview, if one matched. */
+  booking?: CalendarBooking;
+  stage: TrackStage;
+  /** When it's scheduled — from the matched booking, else the interview's own date. */
+  when?: { date: string; time?: string };
+}
+
+/** A live Google booking that satisfies a tracked interview (same member + type). */
+function matchingBooking(iv: Interview, bookings: CalendarBooking[]): CalendarBooking | undefined {
+  const norm = (s?: string) => (s ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+  const candidates = bookings.filter(
+    (b) => b.status !== "cancelled" && b.interviewType === iv.type && b.memberId,
+  );
+  if (iv.memberId) {
+    const byId = candidates.find((b) => b.memberId === iv.memberId);
+    if (byId) return byId;
+  }
+  return candidates.find((b) => norm(b.memberName) === norm(iv.memberName));
+}
+
+/** Reconcile a tracked interview against ingested bookings into a display row. */
+function trackedRow(iv: Interview, bookings: CalendarBooking[]): TrackedRow {
+  if (iv.stage === "completed") return { interview: iv, stage: "completed" };
+  const booking = matchingBooking(iv, bookings);
+  if (booking) {
+    const w = bookingWhen(booking.startAt);
+    return { interview: iv, booking, stage: "scheduled", when: { date: w.date, time: w.time } };
+  }
+  if (iv.scheduledDate) {
+    return { interview: iv, stage: "scheduled", when: { date: iv.scheduledDate, time: iv.scheduledTime } };
+  }
+  return { interview: iv, stage: "needs" };
+}
+
+interface InterviewsTrackingViewProps {
+  interviews: Interview[];
+  bookings: CalendarBooking[];
+  members: Member[];
+  onCreate: (input: { memberId?: string; memberName: string; type: InterviewType; requiresBishop: boolean; notes?: string }) => void;
+  onComplete: (iv: Interview) => void;
+  onReopen: (iv: Interview) => void;
+  onDelete: (iv: Interview) => void;
+}
+
+interface TrackedActions {
+  onComplete: (iv: Interview) => void;
+  onReopen: (iv: Interview) => void;
+  onDelete: (iv: Interview) => void;
+}
+
+function TrackedCard({
+  row, onComplete, onReopen, onDelete,
+}: { row: TrackedRow } & TrackedActions) {
+  const iv = row.interview;
+  return (
+    <div className="flex items-center gap-3 rounded-lg border border-border bg-card p-3">
+      <div className="h-8 w-8 rounded-full flex items-center justify-center text-xs font-semibold shrink-0 bg-primary/10 text-primary">
+        {getInitials(iv.memberName)}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <p className="text-sm font-medium truncate">{iv.memberName}</p>
+          <Badge variant="secondary" className="text-[10px]">{INTERVIEW_TYPE_LABELS[iv.type]}</Badge>
+          {iv.requiresBishop && (
+            <span className="flex items-center gap-0.5 text-[10px] text-amber-600 dark:text-amber-400" title="Must be with the bishop">
+              <Star className="h-3 w-3" /> bishop
+            </span>
+          )}
+        </div>
+        {row.when && (
+          <p className="flex items-center gap-1 text-[11px] text-muted-foreground truncate mt-0.5">
+            <CalendarClock className="h-3 w-3 shrink-0" />
+            {formatDate(row.when.date)}{row.when.time ? ` · ${formatTime(row.when.time)}` : ""}
+            {row.booking ? " · booked on Google" : ""}
+          </p>
+        )}
+        {iv.notes && <p className="text-[11px] text-muted-foreground truncate mt-0.5">{iv.notes}</p>}
+      </div>
+      <div className="flex shrink-0 items-center gap-1">
+        {row.stage === "completed" ? (
+          <Button size="sm" variant="ghost" className="h-8 gap-1 text-xs" onClick={() => onReopen(iv)} title="Reopen">
+            <RotateCcw className="h-3.5 w-3.5" /> Reopen
+          </Button>
+        ) : (
+          <Button size="sm" variant="ghost" className="h-8 gap-1 text-xs" onClick={() => onComplete(iv)} title="Mark completed">
+            <CheckCircle2 className="h-3.5 w-3.5 text-green-600" /> Done
+          </Button>
+        )}
+        <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive" onClick={() => onDelete(iv)} title="Remove">
+          <Trash2 className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** A titled group of tracked-interview cards (module-scope, not recreated in render). */
+function TrackedSection({
+  title, items, tone, actions,
+}: { title: string; items: TrackedRow[]; tone?: string; actions: TrackedActions }) {
+  return (
+    <div className="space-y-2">
+      <h3 className={cn("text-sm font-semibold flex items-center gap-2", tone)}>
+        {title} <span className="text-xs font-normal text-muted-foreground tabular-nums">({items.length})</span>
+      </h3>
+      {items.length === 0
+        ? <p className="text-xs text-muted-foreground italic">None.</p>
+        : <div className="space-y-2">{items.map((r) => (
+            <TrackedCard key={r.interview.id} row={r} {...actions} />
+          ))}</div>}
+    </div>
+  );
+}
+
+/**
+ * Tracks the interviews the bishopric arranges (temple recommends, worthiness,
+ * callings, …) through Needs scheduling → Scheduled → Completed. A tracked
+ * interview shows as scheduled the moment a matching appointment (same member +
+ * type) is ingested from the bishop's Google Calendar — so the board reconciles
+ * with self-bookings automatically. Tithing settlement has its own tab.
+ */
+function InterviewsTrackingView({
+  interviews, bookings, members, onCreate, onComplete, onReopen, onDelete,
+}: InterviewsTrackingViewProps) {
+  const [addOpen, setAddOpen] = useState(false);
+  const [memberId, setMemberId] = useState<string>("");
+  const [type, setType] = useState<InterviewType>("temple_recommend");
+  const [requiresBishop, setRequiresBishop] = useState(false);
+  const [notes, setNotes] = useState("");
+
+  const rows = useMemo(
+    () => interviews
+      .filter((iv) => TRACKED_TYPES.includes(iv.type))
+      .map((iv) => trackedRow(iv, bookings)),
+    [interviews, bookings],
+  );
+  const needs = rows.filter((r) => r.stage === "needs");
+  const scheduled = rows.filter((r) => r.stage === "scheduled")
+    .sort((a, b) => (a.when?.date ?? "").localeCompare(b.when?.date ?? ""));
+  const completed = rows.filter((r) => r.stage === "completed");
+
+  const activeMembers = useMemo(
+    () => members.filter((m) => m.isActive)
+      .sort((a, b) => `${a.lastName} ${a.firstName}`.localeCompare(`${b.lastName} ${b.firstName}`)),
+    [members],
+  );
+
+  function submit() {
+    const m = activeMembers.find((x) => x.id === memberId);
+    if (!m) return;
+    onCreate({ memberId: m.id, memberName: `${m.firstName} ${m.lastName}`, type, requiresBishop, notes: notes.trim() || undefined });
+    setAddOpen(false);
+    setMemberId(""); setType("temple_recommend"); setRequiresBishop(false); setNotes("");
+  }
+
+  const actions = { onComplete, onReopen, onDelete };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">
+          Interviews the bishopric arranges. A tracked interview moves to Scheduled automatically when a matching
+          appointment is booked on the ward calendar.
+        </p>
+        <Button size="sm" className="gap-1.5 shrink-0" onClick={() => setAddOpen(true)}>
+          <Plus className="h-4 w-4" /> Add interview
+        </Button>
+      </div>
+
+      {rows.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+          No interviews tracked yet. Add someone who needs a temple recommend, worthiness, or other interview.
+        </div>
+      ) : (
+        <>
+          <TrackedSection title="Needs scheduling" items={needs} tone="text-amber-600 dark:text-amber-400" actions={actions} />
+          <TrackedSection title="Scheduled" items={scheduled} actions={actions} />
+          <TrackedSection title="Completed" items={completed} actions={actions} />
+        </>
+      )}
+
+      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle>Add an interview to track</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Member</Label>
+              <Select value={memberId} onValueChange={setMemberId}>
+                <SelectTrigger><SelectValue placeholder="Choose a member…" /></SelectTrigger>
+                <SelectContent>
+                  {activeMembers.map((m) => (
+                    <SelectItem key={m.id} value={m.id}>{m.firstName} {m.lastName}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Interview type</Label>
+              <Select value={type} onValueChange={(v) => setType(v as InterviewType)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {TRACKED_TYPES.map((t) => (
+                    <SelectItem key={t} value={t}>{INTERVIEW_TYPE_LABELS[t]}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" className="h-4 w-4 accent-primary" checked={requiresBishop} onChange={(e) => setRequiresBishop(e.target.checked)} />
+              Must be with the bishop
+            </label>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Notes (optional)</Label>
+              <Textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddOpen(false)}>Cancel</Button>
+            <Button onClick={submit} disabled={!memberId} className="gap-1.5"><Plus className="h-4 w-4" /> Add</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -791,17 +1029,19 @@ function SettlementView({
 
 // ── Page ───────────────────────────────────────────────────────────────────────
 
-type PageView = "bookings" | "settlement";
+type PageView = "interviews" | "bookings" | "settlement";
 
 export default function InterviewsPage() {
   const { user } = useAuth();
   const data = useData();
   const settlementsCol = data.settlements;
   const settlements  = settlementsCol.items;
+  const interviewsCol = data.interviews;
+  const interviews   = interviewsCol.items;
   const calendarBookings = data.calendarBookings.items;
   const members      = data.members;
 
-  const [view, setView] = useState<PageView>("bookings");
+  const [view, setView] = useState<PageView>("interviews");
 
   // Saved settlement-email template (Settings → Email).
   const [emailTemplate, setEmailTemplate] = useState<SettlementEmailTemplate>(DEFAULT_SETTLEMENT_EMAIL);
@@ -856,6 +1096,41 @@ export default function InterviewsPage() {
     } catch {
       /* leave the row as-is on failure */
     }
+  }
+
+  // ── Interview tracking handlers ──────────────────────────────────────────────
+  async function createTrackedInterview(input: {
+    memberId?: string; memberName: string; type: InterviewType; requiresBishop: boolean; notes?: string;
+  }) {
+    const now = new Date().toISOString();
+    await interviewsCol.create({
+      id: newId(),
+      memberName: input.memberName,
+      memberId: input.memberId,
+      type: input.type,
+      stage: input.requiresBishop ? "schedule_bishop" : "schedule_any",
+      requiresBishop: input.requiresBishop,
+      durationMins: INTERVIEW_DURATION_MINS[input.type],
+      notes: input.notes,
+      createdBy: user?.uid ?? "mock",
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  async function completeInterview(iv: Interview) {
+    await interviewsCol.update(iv.id, { stage: "completed", updatedAt: new Date().toISOString() });
+  }
+
+  async function reopenInterview(iv: Interview) {
+    await interviewsCol.update(iv.id, {
+      stage: iv.requiresBishop ? "schedule_bishop" : "schedule_any",
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  async function deleteInterview(iv: Interview) {
+    await interviewsCol.remove(iv.id);
   }
 
   // ── Settlement handlers ──────────────────────────────────────────────────────
@@ -966,6 +1241,10 @@ export default function InterviewsPage() {
   }
 
   // ── Header counts ────────────────────────────────────────────────────────────
+  // Tracked interviews still needing a time (no matching booking, not completed).
+  const interviewsToSchedule = interviews.filter(
+    (iv) => TRACKED_TYPES.includes(iv.type) && trackedRow(iv, calendarBookings).stage === "needs",
+  ).length;
   const unmatchedBookings = calendarBookings.filter((b) => b.status !== "cancelled" && !b.memberId).length;
   const upcomingBookings = calendarBookings.filter(
     (b) => b.status !== "cancelled" && b.memberId && bookingWhen(b.startAt).date >= TODAY,
@@ -996,8 +1275,9 @@ export default function InterviewsPage() {
   })();
 
   const TAB_CONFIG: { view: PageView; label: string; count?: number }[] = [
-    { view: "bookings",   label: "Bookings",           count: unmatchedBookings },
-    { view: "settlement", label: "Tithing Settlement", count: settlementRemaining },
+    { view: "interviews", label: "Interviews",          count: interviewsToSchedule },
+    { view: "bookings",   label: "Bookings",            count: unmatchedBookings },
+    { view: "settlement", label: "Tithing Settlement",  count: settlementRemaining },
   ];
 
   return (
@@ -1006,6 +1286,9 @@ export default function InterviewsPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Scheduling</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
+            {interviewsToSchedule > 0 && (
+              <span className="text-amber-600 dark:text-amber-400">{interviewsToSchedule} to schedule · </span>
+            )}
             {upcomingBookings} upcoming
             {unmatchedBookings > 0 && (
               <span className="text-amber-600 dark:text-amber-400"> · {unmatchedBookings} to link</span>
@@ -1042,6 +1325,18 @@ export default function InterviewsPage() {
           </button>
         ))}
       </div>
+
+      {view === "interviews" && (
+        <InterviewsTrackingView
+          interviews={interviews}
+          bookings={calendarBookings}
+          members={members}
+          onCreate={(input) => { void createTrackedInterview(input); }}
+          onComplete={(iv) => { void completeInterview(iv); }}
+          onReopen={(iv) => { void reopenInterview(iv); }}
+          onDelete={(iv) => { void deleteInterview(iv); }}
+        />
+      )}
 
       {view === "bookings" && (
         <BookingsView
