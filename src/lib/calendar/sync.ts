@@ -1,7 +1,7 @@
 import "server-only";
 import type { createAdminClient } from "@/lib/supabase/admin";
 import { membersRepo } from "@/lib/db";
-import { fetchIcs, parseIcs, matchMember, inferInterviewType } from "./subscribe";
+import { fetchIcs, parseIcs, matchMember, inferInterviewType, normalizeTitle } from "./subscribe";
 
 /**
  * Ingest step for the calendar subscription. Reads the bishop's secret iCal URL
@@ -68,8 +68,21 @@ export async function syncCalendar(admin: Admin): Promise<SyncResult> {
   if (!url) throw new CalendarNotConfiguredError();
 
   const [icsText, members] = await Promise.all([fetchIcs(url), membersRepo.list(admin)]);
-  const events = parseIcs(icsText);
   const syncedAt = new Date().toISOString();
+
+  // Standing "always ignore" title rules — skip any event whose title matches,
+  // so recurring non-interview events (e.g. a weekly council) never re-enter.
+  const { data: settingsRow, error: settingsReadErr } = await admin
+    .from("app_settings")
+    .select("ignored_event_titles")
+    .eq("id", "default")
+    .maybeSingle();
+  if (settingsReadErr) throw settingsReadErr;
+  const ignoredTitles = new Set(
+    ((settingsRow?.ignored_event_titles as string[] | null) ?? []).map((t) => normalizeTitle(t)),
+  );
+
+  const events = parseIcs(icsText).filter((e) => !ignoredTitles.has(normalizeTitle(e.summary)));
 
   // Load existing links + status so a manual match or an "ignored" dismissal
   // survives re-syncing.

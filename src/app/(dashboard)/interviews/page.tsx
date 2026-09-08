@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import {
   RotateCcw, Loader2, Trash2, Mail, Send, Search, Download, User, CalendarClock, Check,
-  Plus, CheckCircle2, Star, EyeOff, Undo2,
+  Plus, CheckCircle2, Star, EyeOff, Undo2, Ban,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -88,16 +88,18 @@ interface BookingsViewProps {
   members: Member[];
   onLink: (bookingId: string, memberId: string | null) => void;
   onIgnore: (bookingId: string, ignored: boolean) => void;
+  /** Add a standing rule to always skip events with this title. */
+  onAlwaysIgnore: (title: string) => void;
   onSync: () => void;
   syncing: boolean;
   syncedAt?: string | null;
 }
 
-type BookingRowActions = Pick<BookingsViewProps, "onLink" | "onIgnore">;
+type BookingRowActions = Pick<BookingsViewProps, "onLink" | "onIgnore" | "onAlwaysIgnore">;
 
 /** One booking row: when, what, and who it's linked to (or a picker to link). */
 function BookingRow({
-  booking, members, onLink, onIgnore,
+  booking, members, onLink, onIgnore, onAlwaysIgnore,
 }: { booking: CalendarBooking; members: Member[] } & BookingRowActions) {
   const { date, time } = bookingWhen(booking.startAt);
   return (
@@ -148,10 +150,19 @@ function BookingRow({
             </Select>
             <Button
               variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground"
-              title="Not an interview — dismiss" onClick={() => onIgnore(booking.id, true)}
+              title="Not an interview — dismiss this one" onClick={() => onIgnore(booking.id, true)}
             >
               <EyeOff className="h-3.5 w-3.5" />
             </Button>
+            {booking.summary && (
+              <Button
+                variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground"
+                title={`Always ignore events named "${booking.summary}"`}
+                onClick={() => onAlwaysIgnore(booking.summary!)}
+              >
+                <Ban className="h-3.5 w-3.5" />
+              </Button>
+            )}
           </>
         )}
       </div>
@@ -161,7 +172,7 @@ function BookingRow({
 
 /** A titled group of booking rows (module-scope so it isn't recreated in render). */
 function BookingSection({
-  title, rows, members, onLink, onIgnore, tone,
+  title, rows, members, tone, ...actions
 }: {
   title: string; rows: CalendarBooking[]; members: Member[]; tone?: string;
 } & BookingRowActions) {
@@ -172,7 +183,7 @@ function BookingSection({
       </h3>
       {rows.length === 0
         ? <p className="text-xs text-muted-foreground italic">None.</p>
-        : <div className="space-y-2">{rows.map((b) => <BookingRow key={b.id} booking={b} members={members} onLink={onLink} onIgnore={onIgnore} />)}</div>}
+        : <div className="space-y-2">{rows.map((b) => <BookingRow key={b.id} booking={b} members={members} {...actions} />)}</div>}
     </div>
   );
 }
@@ -183,7 +194,7 @@ function BookingSection({
  * place surface in a "Needs linking" queue for a reviewer to attach — or dismiss
  * if the event isn't an interview at all.
  */
-function BookingsView({ bookings, members, onLink, onIgnore, onSync, syncing, syncedAt }: BookingsViewProps) {
+function BookingsView({ bookings, members, onLink, onIgnore, onAlwaysIgnore, onSync, syncing, syncedAt }: BookingsViewProps) {
   const [showIgnored, setShowIgnored] = useState(false);
   const byStartAsc = (a: CalendarBooking, b: CalendarBooking) => a.startAt.localeCompare(b.startAt);
   const byStartDesc = (a: CalendarBooking, b: CalendarBooking) => b.startAt.localeCompare(a.startAt);
@@ -195,7 +206,7 @@ function BookingsView({ bookings, members, onLink, onIgnore, onSync, syncing, sy
   const upcoming = active.filter((b) => b.memberId && !isPast(b)).sort(byStartAsc);
   const past = active.filter((b) => b.memberId && isPast(b)).sort(byStartDesc);
 
-  const actions = { onLink, onIgnore };
+  const actions = { onLink, onIgnore, onAlwaysIgnore };
 
   return (
     <div className="space-y-6">
@@ -1159,6 +1170,20 @@ export default function InterviewsPage() {
     }
   }
 
+  /** Add a standing rule to always skip events with the given title. */
+  async function alwaysIgnoreTitle(title: string) {
+    try {
+      await fetch("/api/calendar/ignored-titles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title }),
+      });
+      await data.reloadAll();
+    } catch {
+      /* leave the row as-is on failure */
+    }
+  }
+
   // ── Interview tracking handlers ──────────────────────────────────────────────
   async function createTrackedInterview(input: {
     memberId?: string; memberName: string; type: InterviewType; requiresBishop: boolean; notes?: string;
@@ -1414,6 +1439,7 @@ export default function InterviewsPage() {
           members={members}
           onLink={(id, memberId) => { void linkBooking(id, memberId); }}
           onIgnore={(id, ignored) => { void ignoreBooking(id, ignored); }}
+          onAlwaysIgnore={(title) => { void alwaysIgnoreTitle(title); }}
           onSync={() => { void syncBookings(); }}
           syncing={syncing}
           syncedAt={syncedAt}

@@ -119,6 +119,11 @@ function normalizedName(member: Pick<Member, "firstName" | "lastName">): string 
   return `${member.firstName} ${member.lastName}`.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
+/** Normalize an event title for "always ignore" matching (trim, collapse, fold). */
+export function normalizeTitle(summary?: string): string {
+  return (summary ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
 /**
  * Link a parsed event to a ward member.
  *

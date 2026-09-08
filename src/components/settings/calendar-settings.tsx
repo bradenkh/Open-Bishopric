@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, Check, CalendarClock, RefreshCw, Rss, Save } from "lucide-react";
+import { Loader2, Check, CalendarClock, RefreshCw, Rss, Save, Ban, X, Plus } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,13 +24,17 @@ export function CalendarSettingsCard() {
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState("");
   const [error, setError] = useState("");
+  const [ignoredTitles, setIgnoredTitles] = useState<string[]>([]);
+  const [newTitle, setNewTitle] = useState("");
+  const [titleBusy, setTitleBusy] = useState(false);
 
   useEffect(() => {
     Promise.all([
       fetch("/api/settings/calendar").then((r) => r.json()),
       fetch("/api/calendar/sync").then((r) => r.json()).catch(() => null),
+      fetch("/api/calendar/ignored-titles").then((r) => r.json()).catch(() => null),
     ])
-      .then(([settings, sync]) => {
+      .then(([settings, sync, ignored]) => {
         if (settings.error) setError(settings.error);
         else {
           setIcalUrl(settings.icalUrl ?? "");
@@ -40,10 +44,50 @@ export function CalendarSettingsCard() {
           setSyncedAt(sync.syncedAt ?? null);
           setCounts({ matched: sync.matched ?? 0, unmatched: sync.unmatched ?? 0 });
         }
+        if (ignored && !ignored.error) setIgnoredTitles(ignored.titles ?? []);
       })
       .catch(() => setError("Couldn't load calendar settings."))
       .finally(() => setLoading(false));
   }, []);
+
+  const addTitle = async () => {
+    const title = newTitle.trim();
+    if (!title) return;
+    setTitleBusy(true); setError("");
+    try {
+      const res = await fetch("/api/calendar/ignored-titles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to add");
+      setIgnoredTitles(data.titles ?? []);
+      setNewTitle("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to add");
+    } finally {
+      setTitleBusy(false);
+    }
+  };
+
+  const removeTitle = async (title: string) => {
+    setTitleBusy(true); setError("");
+    try {
+      const res = await fetch("/api/calendar/ignored-titles", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to remove");
+      setIgnoredTitles(data.titles ?? []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to remove");
+    } finally {
+      setTitleBusy(false);
+    }
+  };
 
   const saveUrl = async () => {
     setSavingUrl(true); setError("");
@@ -158,6 +202,50 @@ export function CalendarSettingsCard() {
             </div>
 
             {syncMsg && <p className="text-sm text-green-600">{syncMsg}</p>}
+
+            {/* Always-ignore rules by event title */}
+            <div className="space-y-2 border-t border-border pt-4">
+              <div className="flex items-center gap-2">
+                <Ban className="h-4 w-4 text-muted-foreground" />
+                <p className="font-medium text-sm">Always-ignored event titles</p>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Events with these titles are skipped when reading the calendar, so recurring
+                non-interview events (a weekly council, say) never show up. Add one here, or use
+                &ldquo;Always ignore&rdquo; on a booking in the Scheduling → Bookings tab.
+              </p>
+              {ignoredTitles.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {ignoredTitles.map((t) => (
+                    <span key={t} className="inline-flex items-center gap-1 rounded-full border border-border bg-muted/40 px-2.5 py-1 text-xs">
+                      {t}
+                      <button
+                        type="button"
+                        className="text-muted-foreground hover:text-destructive disabled:opacity-50"
+                        onClick={() => removeTitle(t)}
+                        disabled={titleBusy}
+                        aria-label={`Stop ignoring "${t}"`}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div className="flex items-center gap-2">
+                <Input
+                  value={newTitle}
+                  onChange={(e) => setNewTitle(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void addTitle(); } }}
+                  placeholder="Event title to ignore, e.g. Ward Council"
+                  className="text-sm"
+                />
+                <Button variant="outline" size="sm" className="shrink-0 gap-1.5" onClick={addTitle} disabled={titleBusy || !newTitle.trim()}>
+                  {titleBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                  Add
+                </Button>
+              </div>
+            </div>
           </>
         )}
 
