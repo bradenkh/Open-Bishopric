@@ -529,8 +529,9 @@ export const INTERVIEW_DURATION_MINS: Record<InterviewType, number> = {
 /** How an ingested booking was linked to a ward member. */
 export type CalendarMatchMethod = "email" | "name" | "manual";
 
-/** Whether an ingested calendar event is live or has been cancelled. */
-export type CalendarBookingStatus = "active" | "cancelled";
+/** Whether an ingested calendar event is live, cancelled, or dismissed as
+ *  not-an-interview by a reviewer. */
+export type CalendarBookingStatus = "active" | "cancelled" | "ignored";
 
 /**
  * An appointment read from the bishop's subscribed Google Calendar (its secret

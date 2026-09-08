@@ -93,6 +93,10 @@ export function parseIcs(icsText: string): ParsedEvent[] {
     const event = component as VEvent;
     if (event.rrule) continue; // recurring master — not a booking
     if (!event.start) continue;
+    // All-day events (birthdays, holidays, anniversaries) are never interview
+    // appointments — a booked interview always has a specific time. Dropping them
+    // keeps the ingest to real appointments.
+    if (event.datetype === "date") continue;
 
     events.push({
       uid: event.uid,

@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import {
   RotateCcw, Loader2, Trash2, Mail, Send, Search, Download, User, CalendarClock, Check,
-  Plus, CheckCircle2, Star,
+  Plus, CheckCircle2, Star, EyeOff, Undo2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -87,15 +87,18 @@ interface BookingsViewProps {
   bookings: CalendarBooking[];
   members: Member[];
   onLink: (bookingId: string, memberId: string | null) => void;
+  onIgnore: (bookingId: string, ignored: boolean) => void;
   onSync: () => void;
   syncing: boolean;
   syncedAt?: string | null;
 }
 
+type BookingRowActions = Pick<BookingsViewProps, "onLink" | "onIgnore">;
+
 /** One booking row: when, what, and who it's linked to (or a picker to link). */
 function BookingRow({
-  booking, members, onLink,
-}: { booking: CalendarBooking; members: Member[]; onLink: BookingsViewProps["onLink"] }) {
+  booking, members, onLink, onIgnore,
+}: { booking: CalendarBooking; members: Member[] } & BookingRowActions) {
   const { date, time } = bookingWhen(booking.startAt);
   return (
     <div className="flex items-center gap-3 rounded-lg border border-border bg-card p-3">
@@ -117,9 +120,9 @@ function BookingRow({
           <p className="text-xs text-muted-foreground truncate">{booking.attendeeEmails.join(", ")}</p>
         ) : null}
       </div>
-      <div className="shrink-0">
+      <div className="flex shrink-0 items-center gap-1.5">
         {booking.memberId ? (
-          <div className="flex items-center gap-1.5">
+          <>
             <span className="text-sm font-medium">{booking.memberName}</span>
             <Button
               variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground"
@@ -127,21 +130,29 @@ function BookingRow({
             >
               <Trash2 className="h-3.5 w-3.5" />
             </Button>
-          </div>
+          </>
         ) : (
-          <Select value="" onValueChange={(v) => onLink(booking.id, v)}>
-            <SelectTrigger className="h-8 w-44 text-xs">
-              <SelectValue placeholder="Link to member…" />
-            </SelectTrigger>
-            <SelectContent>
-              {members
-                .filter((m) => m.isActive)
-                .sort((a, b) => `${a.lastName} ${a.firstName}`.localeCompare(`${b.lastName} ${b.firstName}`))
-                .map((m) => (
-                  <SelectItem key={m.id} value={m.id}>{m.firstName} {m.lastName}</SelectItem>
-                ))}
-            </SelectContent>
-          </Select>
+          <>
+            <Select value="" onValueChange={(v) => onLink(booking.id, v)}>
+              <SelectTrigger className="h-8 w-40 text-xs">
+                <SelectValue placeholder="Link to member…" />
+              </SelectTrigger>
+              <SelectContent>
+                {members
+                  .filter((m) => m.isActive)
+                  .sort((a, b) => `${a.lastName} ${a.firstName}`.localeCompare(`${b.lastName} ${b.firstName}`))
+                  .map((m) => (
+                    <SelectItem key={m.id} value={m.id}>{m.firstName} {m.lastName}</SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+            <Button
+              variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground"
+              title="Not an interview — dismiss" onClick={() => onIgnore(booking.id, true)}
+            >
+              <EyeOff className="h-3.5 w-3.5" />
+            </Button>
+          </>
         )}
       </div>
     </div>
@@ -150,11 +161,10 @@ function BookingRow({
 
 /** A titled group of booking rows (module-scope so it isn't recreated in render). */
 function BookingSection({
-  title, rows, members, onLink, tone,
+  title, rows, members, onLink, onIgnore, tone,
 }: {
-  title: string; rows: CalendarBooking[]; members: Member[];
-  onLink: BookingsViewProps["onLink"]; tone?: string;
-}) {
+  title: string; rows: CalendarBooking[]; members: Member[]; tone?: string;
+} & BookingRowActions) {
   return (
     <div className="space-y-2">
       <h3 className={cn("text-sm font-semibold flex items-center gap-2", tone)}>
@@ -162,7 +172,7 @@ function BookingSection({
       </h3>
       {rows.length === 0
         ? <p className="text-xs text-muted-foreground italic">None.</p>
-        : <div className="space-y-2">{rows.map((b) => <BookingRow key={b.id} booking={b} members={members} onLink={onLink} />)}</div>}
+        : <div className="space-y-2">{rows.map((b) => <BookingRow key={b.id} booking={b} members={members} onLink={onLink} onIgnore={onIgnore} />)}</div>}
     </div>
   );
 }
@@ -170,19 +180,22 @@ function BookingSection({
 /**
  * Read-only tracking of appointments members self-booked on Google. Bookings are
  * ingested from the bishop's calendar subscription; those the matcher couldn't
- * place surface in a "Needs linking" queue for a reviewer to attach by hand.
+ * place surface in a "Needs linking" queue for a reviewer to attach — or dismiss
+ * if the event isn't an interview at all.
  */
-function BookingsView({ bookings, members, onLink, onSync, syncing, syncedAt }: BookingsViewProps) {
-  const active = bookings.filter((b) => b.status !== "cancelled");
+function BookingsView({ bookings, members, onLink, onIgnore, onSync, syncing, syncedAt }: BookingsViewProps) {
+  const [showIgnored, setShowIgnored] = useState(false);
   const byStartAsc = (a: CalendarBooking, b: CalendarBooking) => a.startAt.localeCompare(b.startAt);
   const byStartDesc = (a: CalendarBooking, b: CalendarBooking) => b.startAt.localeCompare(a.startAt);
-  // Split upcoming/past by ward-local date against TODAY (a module-load anchor),
-  // avoiding an impure clock read during render.
   const isPast = (b: CalendarBooking) => bookingWhen(b.startAt).date < TODAY;
 
+  const active = bookings.filter((b) => b.status === "active");
+  const ignored = bookings.filter((b) => b.status === "ignored").sort(byStartDesc);
   const unmatched = active.filter((b) => !b.memberId).sort(byStartAsc);
   const upcoming = active.filter((b) => b.memberId && !isPast(b)).sort(byStartAsc);
   const past = active.filter((b) => b.memberId && isPast(b)).sort(byStartDesc);
+
+  const actions = { onLink, onIgnore };
 
   return (
     <div className="space-y-6">
@@ -204,10 +217,44 @@ function BookingsView({ bookings, members, onLink, onSync, syncing, syncedAt }: 
       ) : (
         <>
           {unmatched.length > 0 && (
-            <BookingSection title="Needs linking" rows={unmatched} members={members} onLink={onLink} tone="text-amber-600 dark:text-amber-400" />
+            <BookingSection title="Needs linking" rows={unmatched} members={members} {...actions} tone="text-amber-600 dark:text-amber-400" />
           )}
-          <BookingSection title="Upcoming" rows={upcoming} members={members} onLink={onLink} />
-          <BookingSection title="Past" rows={past} members={members} onLink={onLink} />
+          <BookingSection title="Upcoming" rows={upcoming} members={members} {...actions} />
+          <BookingSection title="Past" rows={past} members={members} {...actions} />
+
+          {ignored.length > 0 && (
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={() => setShowIgnored((s) => !s)}
+                className="text-xs text-muted-foreground hover:text-foreground"
+              >
+                {showIgnored ? "Hide" : "Show"} dismissed ({ignored.length})
+              </button>
+              {showIgnored && (
+                <div className="space-y-2">
+                  {ignored.map((b) => {
+                    const { date, time } = bookingWhen(b.startAt);
+                    return (
+                      <div key={b.id} className="flex items-center gap-3 rounded-lg border border-dashed border-border bg-muted/30 p-3">
+                        <div className="shrink-0 text-center w-14">
+                          <div className="text-xs text-muted-foreground">{formatDate(date)}</div>
+                          <div className="text-sm tabular-nums text-muted-foreground">{formatTime(time)}</div>
+                        </div>
+                        <p className="min-w-0 flex-1 truncate text-sm text-muted-foreground">{b.summary ?? "(no title)"}</p>
+                        <Button
+                          variant="ghost" size="sm" className="h-8 gap-1 text-xs shrink-0"
+                          title="Restore to the queue" onClick={() => onIgnore(b.id, false)}
+                        >
+                          <Undo2 className="h-3.5 w-3.5" /> Restore
+                        </Button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </>
       )}
     </div>
@@ -236,7 +283,7 @@ interface TrackedRow {
 function matchingBooking(iv: Interview, bookings: CalendarBooking[]): CalendarBooking | undefined {
   const norm = (s?: string) => (s ?? "").trim().replace(/\s+/g, " ").toLowerCase();
   const candidates = bookings.filter(
-    (b) => b.status !== "cancelled" && b.interviewType === iv.type && b.memberId,
+    (b) => b.status === "active" && b.interviewType === iv.type && b.memberId,
   );
   if (iv.memberId) {
     const byId = candidates.find((b) => b.memberId === iv.memberId);
@@ -594,7 +641,7 @@ function SettlementView({
   const settlementBookingByMember = useMemo(() => {
     const map = new Map<string, CalendarBooking>();
     for (const b of calendarBookings) {
-      if (b.status === "cancelled" || b.interviewType !== "tithing_settlement" || !b.memberId) continue;
+      if (b.status !== "active" || b.interviewType !== "tithing_settlement" || !b.memberId) continue;
       map.set(b.memberId, b);
     }
     return map;
@@ -1098,6 +1145,20 @@ export default function InterviewsPage() {
     }
   }
 
+  /** Dismiss a non-interview booking (or restore it). */
+  async function ignoreBooking(bookingId: string, ignored: boolean) {
+    try {
+      await fetch(`/api/calendar/bookings/${bookingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ignored }),
+      });
+      await data.reloadAll();
+    } catch {
+      /* leave the row as-is on failure */
+    }
+  }
+
   // ── Interview tracking handlers ──────────────────────────────────────────────
   async function createTrackedInterview(input: {
     memberId?: string; memberName: string; type: InterviewType; requiresBishop: boolean; notes?: string;
@@ -1242,16 +1303,25 @@ export default function InterviewsPage() {
 
   // ── Header counts ────────────────────────────────────────────────────────────
   // Tracked interviews still needing a time (no matching booking, not completed).
-  const interviewsToSchedule = interviews.filter(
-    (iv) => TRACKED_TYPES.includes(iv.type) && trackedRow(iv, calendarBookings).stage === "needs",
-  ).length;
-  const unmatchedBookings = calendarBookings.filter((b) => b.status !== "cancelled" && !b.memberId).length;
-  const upcomingBookings = calendarBookings.filter(
-    (b) => b.status !== "cancelled" && b.memberId && bookingWhen(b.startAt).date >= TODAY,
-  ).length;
+  const interviewsToSchedule = useMemo(
+    () => interviews.filter(
+      (iv) => TRACKED_TYPES.includes(iv.type) && trackedRow(iv, calendarBookings).stage === "needs",
+    ).length,
+    [interviews, calendarBookings],
+  );
+  const { unmatchedBookings, upcomingBookings } = useMemo(() => {
+    let unmatchedN = 0;
+    let upcomingN = 0;
+    for (const b of calendarBookings) {
+      if (b.status !== "active") continue;
+      if (!b.memberId) unmatchedN++;
+      else if (bookingWhen(b.startAt).date >= TODAY) upcomingN++;
+    }
+    return { unmatchedBookings: unmatchedN, upcomingBookings: upcomingN };
+  }, [calendarBookings]);
 
   // Households still needing a settlement booking (for the tab badge).
-  const settlementRemaining = (() => {
+  const settlementRemaining = useMemo(() => {
     const active = members.filter((m) => m.isActive);
     const groups = new Map<string, Member[]>();
     for (const m of active) {
@@ -1260,7 +1330,7 @@ export default function InterviewsPage() {
     }
     const bookedMemberIds = new Set(
       calendarBookings
-        .filter((b) => b.status !== "cancelled" && b.interviewType === "tithing_settlement" && b.memberId)
+        .filter((b) => b.status === "active" && b.interviewType === "tithing_settlement" && b.memberId)
         .map((b) => b.memberId!),
     );
     let remaining = 0;
@@ -1272,7 +1342,7 @@ export default function InterviewsPage() {
       if (!booked && !terminal) remaining += 1;
     }
     return remaining;
-  })();
+  }, [members, settlements, calendarBookings]);
 
   const TAB_CONFIG: { view: PageView; label: string; count?: number }[] = [
     { view: "interviews", label: "Interviews",          count: interviewsToSchedule },
@@ -1343,6 +1413,7 @@ export default function InterviewsPage() {
           bookings={calendarBookings}
           members={members}
           onLink={(id, memberId) => { void linkBooking(id, memberId); }}
+          onIgnore={(id, ignored) => { void ignoreBooking(id, ignored); }}
           onSync={() => { void syncBookings(); }}
           syncing={syncing}
           syncedAt={syncedAt}

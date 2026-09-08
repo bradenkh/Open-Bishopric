@@ -11,9 +11,12 @@ import type { Member } from "@/types";
  *
  *   PATCH { memberId }        → link to that member (match_method = 'manual')
  *   PATCH { memberId: null }  → clear the link, back to unmatched
+ *   PATCH { ignored: true }   → dismiss (not an interview); hidden and kept out
+ *                               of the sync's auto-cleanup
+ *   PATCH { ignored: false }  → restore a dismissed booking
  *
- * A manual link is authoritative: the calendar sync preserves it and never
- * re-runs the auto-matcher over it (see lib/calendar/sync.ts).
+ * A manual link and an "ignored" dismissal are both authoritative: the calendar
+ * sync preserves them across re-syncs (see lib/calendar/sync.ts).
  */
 export async function PATCH(
   request: NextRequest,
@@ -25,8 +28,19 @@ export async function PATCH(
   const { id } = await params;
   const body = await request.json().catch(() => null);
   const memberId: unknown = body?.memberId;
+  const ignored: unknown = body?.ignored;
 
   const admin = createAdminClient();
+
+  // Ignore / restore takes precedence when present.
+  if (typeof ignored === "boolean") {
+    const { error } = await admin
+      .from("calendar_bookings")
+      .update({ status: ignored ? "ignored" : "active" })
+      .eq("id", id);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true, ignored });
+  }
 
   // Unlink: clear the member fields and the manual mark.
   if (memberId === null || memberId === "" || memberId === undefined) {

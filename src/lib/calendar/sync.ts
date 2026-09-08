@@ -43,6 +43,7 @@ interface ExistingLink {
   memberId: string | null;
   memberName: string | null;
   matchMethod: string | null;
+  status: string | null;
 }
 
 /** Read the configured secret iCal URL, or null when the feed isn't set up. */
@@ -70,12 +71,13 @@ export async function syncCalendar(admin: Admin): Promise<SyncResult> {
   const events = parseIcs(icsText);
   const syncedAt = new Date().toISOString();
 
-  // Load existing member links so a manual match survives re-syncing.
+  // Load existing links + status so a manual match or an "ignored" dismissal
+  // survives re-syncing.
   const existing = new Map<string, ExistingLink>();
   if (events.length) {
     const { data, error } = await admin
       .from("calendar_bookings")
-      .select("id, member_id, member_name, match_method")
+      .select("id, member_id, member_name, match_method, status")
       .in("id", events.map((e) => e.uid));
     if (error) throw error;
     for (const row of data ?? []) {
@@ -83,6 +85,7 @@ export async function syncCalendar(admin: Admin): Promise<SyncResult> {
         memberId: (row.member_id as string | null) ?? null,
         memberName: (row.member_name as string | null) ?? null,
         matchMethod: (row.match_method as string | null) ?? null,
+        status: (row.status as string | null) ?? null,
       });
     }
   }
@@ -103,6 +106,9 @@ export async function syncCalendar(admin: Admin): Promise<SyncResult> {
     else unmatched++;
     if (event.cancelled) cancelled++;
 
+    // A reviewer's "ignored" dismissal sticks; otherwise the feed's state wins.
+    const status = prior?.status === "ignored" ? "ignored" : event.cancelled ? "cancelled" : "active";
+
     return {
       id: event.uid,
       summary: event.summary ?? null,
@@ -116,7 +122,7 @@ export async function syncCalendar(admin: Admin): Promise<SyncResult> {
       member_name: link.memberName ?? null,
       match_method: link.method ?? null,
       interview_type: inferInterviewType(event) ?? null,
-      status: event.cancelled ? "cancelled" : "active",
+      status,
       last_seen_at: syncedAt,
     };
   });
@@ -126,6 +132,24 @@ export async function syncCalendar(admin: Admin): Promise<SyncResult> {
     // created_at (column default) is preserved across updates.
     const { error } = await admin.from("calendar_bookings").upsert(rows, { onConflict: "id" });
     if (error) throw error;
+  }
+
+  // Sweep out stale, unmatched noise: rows that are no longer in the feed's
+  // qualifying set (e.g. all-day events dropped by the ingest filter, or events
+  // removed from the calendar) and were never linked to a member or dismissed by
+  // hand. Matched, manually-linked, and ignored rows are always kept.
+  const keepUids = new Set(rows.map((r) => r.id));
+  const { data: strays, error: strayErr } = await admin
+    .from("calendar_bookings")
+    .select("id")
+    .is("member_id", null)
+    .is("match_method", null)
+    .eq("status", "active");
+  if (strayErr) throw strayErr;
+  const toDelete = (strays ?? []).map((r) => r.id as string).filter((id) => !keepUids.has(id));
+  if (toDelete.length) {
+    const { error: delErr } = await admin.from("calendar_bookings").delete().in("id", toDelete);
+    if (delErr) throw delErr;
   }
 
   const { error: settingsError } = await admin
