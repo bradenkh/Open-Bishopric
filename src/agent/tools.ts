@@ -7,6 +7,7 @@ import { isAnnouncementActive } from "@/lib/announcements";
 import { listAgentNotes } from "@/lib/agent-notes";
 import { isEmailConfigured, sendEmail as sendGmailMessage, searchInbox, readInboxMessage } from "@/lib/email/gmail";
 import { WARD_BUSINESS_CATEGORIES, makeEntry, seedBusiness } from "@/lib/ward";
+import { renderTaskReminder, withReminderDefaults } from "@/lib/task-reminder";
 import { INTERVIEW_DURATION_MINS } from "@/types";
 import type {
   Announcement,
@@ -1224,22 +1225,28 @@ export const sendTaskReminder = tool({
       return { error: "No email address found for this task's owner. Assign an owner whose member record has an email, or provide a `to` address." };
     }
 
-    const lines = [
-      task.assigneeName ? `Hi ${task.assigneeName.split(" ")[0]},` : "Hello,",
-      "",
-      `This is a friendly reminder about a task assigned to you: ${task.title}.`,
-      task.description ? `\n${task.description}` : "",
-      task.dueDate ? `\nDue: ${task.dueDate}` : "",
-      note ? `\n${note}` : "",
-      "",
-      "Thank you!",
-    ].filter(Boolean);
-
-    const { messageId } = await sendGmailMessage({
-      to: recipient,
-      subject: `Reminder: ${task.title}`,
-      body: lines.join("\n"),
+    // Use the bishopric's saved reminder template (Settings → Email), falling
+    // back to the built-in default. Keeps the assistant's wording in sync with
+    // the Tasks page.
+    const { data: settings } = await db()
+      .from("app_settings")
+      .select("task_reminder_subject, task_reminder_body")
+      .eq("id", "default")
+      .maybeSingle();
+    const tpl = withReminderDefaults({
+      subject: settings?.task_reminder_subject,
+      body: settings?.task_reminder_body,
     });
+    const { subject, body } = renderTaskReminder(tpl, {
+      name: task.assigneeName?.split(" ")[0] ?? "",
+      task: task.title,
+      description: task.description ?? "",
+      due: task.dueDate ? `Due: ${task.dueDate}` : "",
+    });
+    // Append the caller's extra note, if any.
+    const finalBody = note ? `${body}\n\n${note}` : body;
+
+    const { messageId } = await sendGmailMessage({ to: recipient, subject, body: finalBody });
     await db().from("tasks").update({ reminder_sent_at: new Date().toISOString() }).eq("id", taskId);
     return { ok: true, taskId, to: recipient, messageId };
   },

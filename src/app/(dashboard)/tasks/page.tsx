@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Plus, Filter, CheckCircle2, RotateCcw, Pencil, Trash2, User, CalendarDays,
   Mail, ListTodo,
@@ -19,6 +19,10 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useData, useTasks, newId } from "@/contexts/DataContext";
 import type { Task, TaskType, TaskStatus } from "@/types";
 import { TASK_TYPE_LABELS, TASK_STATUS_COLORS } from "@/types";
+import {
+  DEFAULT_TASK_REMINDER, renderTaskReminder, withReminderDefaults,
+  type TaskReminderTemplate,
+} from "@/lib/task-reminder";
 import { formatDate, cn } from "@/lib/utils";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -76,6 +80,20 @@ export default function TasksPage() {
     { taskId: string; to: string; subject: string; body: string } | null
   >(null);
   const [sendingReminder, setSendingReminder] = useState(false);
+
+  // The saved reminder template (Settings → Email); falls back to the built-in
+  // default until loaded.
+  const [template, setTemplate] = useState<TaskReminderTemplate>(DEFAULT_TASK_REMINDER);
+  useEffect(() => {
+    fetch("/api/settings/email")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d && !d.error) {
+          setTemplate(withReminderDefaults({ subject: d.taskReminderSubject, body: d.taskReminderBody }));
+        }
+      })
+      .catch(() => { /* keep the default template */ });
+  }, []);
 
   const openCount = tasks.filter((t) => OPEN_STATUSES.includes(t.status)).length;
 
@@ -168,18 +186,12 @@ export default function TasksPage() {
   // recipient, subject and body can all be edited before anything is sent.
   function openReminder(t: Task) {
     const owner = t.assigneeId ? members.find((m) => m.id === t.assigneeId) : undefined;
-    const firstName = owner?.firstName || t.assigneeName?.split(" ")[0] || "there";
-    const subject = `Reminder: ${t.title}`;
-    const body = [
-      `Hi ${firstName},`,
-      "",
-      `This is a reminder about a task assigned to you: ${t.title}.`,
-      t.description ? `\n${t.description}` : "",
-      t.dueDate ? `\nDue: ${formatDate(t.dueDate)}` : "",
-      "",
-      "Thank you,",
-      "The Bishopric",
-    ].join("\n");
+    const { subject, body } = renderTaskReminder(template, {
+      name: owner?.firstName || t.assigneeName?.split(" ")[0] || "",
+      task: t.title,
+      description: t.description ?? "",
+      due: t.dueDate ? `Due: ${formatDate(t.dueDate)}` : "",
+    });
     setReminder({ taskId: t.id, to: owner?.email ?? "", subject, body });
   }
 
