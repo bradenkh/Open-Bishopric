@@ -1,8 +1,8 @@
 # Open Bishopric
 
 A private, invite-only tool for an LDS ward bishopric — callings pipeline,
-interview scheduling, meeting agendas & bulletins, tasks, and an AI assistant.
-Built with Next.js 16 (App Router) and Supabase (Postgres + Auth).
+interview scheduling, task tracking, sacrament meeting bulletins, and an AI
+assistant. Built with Next.js 16 (App Router) and Supabase (Postgres + Auth).
 
 ## Getting started
 
@@ -85,9 +85,9 @@ key lives), never exposed to the browser.
 - **Receiving** reads the INBOX over IMAP (`imap.gmail.com:993`) via `imapflow` /
   `mailparser`. `POST /api/email/poll` matches each reply's `In-Reply-To` /
   `References` headers back to the stored `Message-ID`, then records agenda
-  replies (`status='replied'`) and interview replies (appended to the interview's
-  notes for the assistant to parse). Trigger it with **Check for replies** in the
-  Collect-agenda-items dialog, or wire it to a cron.
+  solicitation replies (`status='replied'`) and interview replies (appended to
+  the interview's notes for the assistant to parse). Wire it to a cron to poll
+  for replies.
 - **Searching & reading** the inbox is available to the AI assistant via
   `searchInbox` (Gmail search over the INBOX — filter by sender, subject,
   free text, recency, or unread — returning per-message summaries keyed by a
