@@ -42,8 +42,7 @@ const EMPTY_FORM = {
   description: "",
   type: "todo" as TaskType,
   status: "active" as TaskStatus,
-  assigneeName: "",
-  memberId: "",
+  ownerId: "",
   dueDate: "",
 };
 type TaskForm = typeof EMPTY_FORM;
@@ -52,7 +51,7 @@ type TaskForm = typeof EMPTY_FORM;
 
 export default function TasksPage() {
   const { appUser } = useAuth();
-  const members = useData().members;
+  const { bishopric, profiles } = useData();
   const { tasks, addTask, updateTask, completeTask } = useTasks();
 
   const [filterStatus, setFilterStatus] = useState<TaskStatus | "open" | "all">("open");
@@ -67,11 +66,9 @@ export default function TasksPage() {
   // Reminder state, keyed by task id
   const [reminding, setReminding] = useState<string | null>(null);
 
-  const activeMembers = useMemo(
-    () => [...members].filter((m) => m.isActive).sort((a, b) =>
-      `${a.lastName} ${a.firstName}`.localeCompare(`${b.lastName} ${b.firstName}`)),
-    [members],
-  );
+  /** The owner's email, if the task has an owner we can resolve to a profile. */
+  const ownerEmailFor = (t: Task) =>
+    t.assigneeId ? profiles.find((p) => p.uid === t.assigneeId)?.email : undefined;
 
   const openCount = tasks.filter((t) => OPEN_STATUSES.includes(t.status)).length;
 
@@ -103,13 +100,17 @@ export default function TasksPage() {
 
   function openEdit(t: Task) {
     setEditing(t);
+    // Reflect the stored owner in the picker: match on id, then fall back to the
+    // name (calling-workflow tasks record an owner name but no id).
+    const owner = t.assigneeId
+      ? bishopric.find((b) => b.id === t.assigneeId)
+      : bishopric.find((b) => b.name === t.assigneeName);
     setForm({
       title: t.title,
       description: t.description ?? "",
       type: t.type,
       status: t.status,
-      assigneeName: t.assigneeName ?? "",
-      memberId: t.memberId ?? "",
+      ownerId: owner?.id ?? "",
       dueDate: t.dueDate ?? "",
     });
     setDialogOpen(true);
@@ -118,16 +119,14 @@ export default function TasksPage() {
   async function handleSave() {
     if (!form.title.trim()) return;
     setSaving(true);
-    const member = form.memberId ? members.find((m) => m.id === form.memberId) : undefined;
-    const memberName = member ? `${member.firstName} ${member.lastName}` : undefined;
+    const owner = form.ownerId ? bishopric.find((b) => b.id === form.ownerId) : undefined;
     const patch = {
       title: form.title.trim(),
       description: form.description.trim() || undefined,
       type: form.type,
       status: form.status,
-      assigneeName: form.assigneeName.trim() || undefined,
-      memberId: form.memberId || undefined,
-      memberName,
+      assigneeId: form.ownerId || undefined,
+      assigneeName: owner?.name,
       dueDate: form.dueDate || undefined,
     };
     if (editing) {
@@ -162,28 +161,28 @@ export default function TasksPage() {
   }
 
   // ── Email reminder ───────────────────────────────────────────────────────────
-  // Mirrors the assistant's sendTaskReminder tool: resolve the member's email,
-  // send via the shared endpoint, and fall back to a mailto: link if Gmail isn't
-  // configured (409 notConfigured).
+  // Nudge the task's owner. Resolve their email from the profiles roster, send via
+  // the shared endpoint, and fall back to a mailto: link if Gmail isn't configured
+  // (409 notConfigured).
   async function sendReminder(t: Task) {
-    const member = t.memberId ? members.find((m) => m.id === t.memberId) : undefined;
-    const email = member?.email;
+    const owner = t.assigneeId ? profiles.find((p) => p.uid === t.assigneeId) : undefined;
+    const email = owner?.email;
     if (!email) {
-      alert("This task has no member with an email address. Add a 'regarding' member (with an email on their record) first.");
+      alert("This task has no owner with an email on file. Assign an owner first.");
       return;
     }
-    const firstName = member ? member.firstName : "there";
+    const firstName = owner!.displayName.split(" ")[0] || "there";
     const subject = `Reminder: ${t.title}`;
     const body = [
       `Hi ${firstName},`,
       "",
-      `This is a friendly reminder about: ${t.title}.`,
+      `This is a reminder about a task assigned to you: ${t.title}.`,
       t.description ? `\n${t.description}` : "",
       t.dueDate ? `\nDue: ${formatDate(t.dueDate)}` : "",
       "",
       "Thank you,",
       "The Bishopric",
-    ].filter((l) => l !== null).join("\n");
+    ].join("\n");
 
     setReminding(t.id);
     try {
@@ -275,6 +274,7 @@ export default function TasksPage() {
           {filtered.map((t) => {
             const done = t.status === "completed";
             const closed = done || t.status === "cancelled";
+            const ownerEmail = ownerEmailFor(t);
             return (
               <li
                 key={t.id}
@@ -311,9 +311,6 @@ export default function TasksPage() {
                         <User className="h-3 w-3" /> {t.assigneeName}
                       </span>
                     )}
-                    {t.memberName && (
-                      <span className="text-xs text-muted-foreground italic">re: {t.memberName}</span>
-                    )}
                     {t.dueDate && (
                       <span className="flex items-center gap-1 text-xs text-muted-foreground">
                         <CalendarDays className="h-3 w-3" /> {formatDate(t.dueDate)}
@@ -326,12 +323,12 @@ export default function TasksPage() {
                 </div>
 
                 <div className="flex shrink-0 items-center gap-0.5">
-                  {t.memberId && !closed && (
+                  {ownerEmail && !closed && (
                     <Button
                       variant="ghost" size="icon" className="h-8 w-8"
                       onClick={() => sendReminder(t)}
                       disabled={reminding === t.id}
-                      title="Send email reminder"
+                      title="Send the owner a reminder"
                     >
                       <Mail className="h-3.5 w-3.5" />
                     </Button>
@@ -396,13 +393,19 @@ export default function TasksPage() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label htmlFor="task-assignee">Assigned to</Label>
-                <Input
-                  id="task-assignee"
-                  value={form.assigneeName}
-                  onChange={(e) => setForm((f) => ({ ...f, assigneeName: e.target.value }))}
-                  placeholder="Who's responsible"
-                />
+                <Label>Owner</Label>
+                <Select
+                  value={form.ownerId || "__none"}
+                  onValueChange={(v) => setForm((f) => ({ ...f, ownerId: v === "__none" ? "" : v }))}
+                >
+                  <SelectTrigger><SelectValue placeholder="Unassigned" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none">Unassigned</SelectItem>
+                    {bishopric.map((b) => (
+                      <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="task-due">Due date</Label>
@@ -414,24 +417,9 @@ export default function TasksPage() {
                 />
               </div>
             </div>
-            <div className="space-y-1.5">
-              <Label>Regarding member</Label>
-              <Select
-                value={form.memberId || "__none"}
-                onValueChange={(v) => setForm((f) => ({ ...f, memberId: v === "__none" ? "" : v }))}
-              >
-                <SelectTrigger><SelectValue placeholder="No member" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none">No member</SelectItem>
-                  {activeMembers.map((m) => (
-                    <SelectItem key={m.id} value={m.id}>{m.firstName} {m.lastName}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-[11px] text-muted-foreground">
-                Link a member to enable email reminders about this task.
-              </p>
-            </div>
+            <p className="text-[11px] text-muted-foreground -mt-1">
+              The owner is who&apos;s responsible for the task. Assign one to enable email reminders.
+            </p>
             <div className="space-y-1.5">
               <Label htmlFor="task-notes">Notes</Label>
               <Textarea
