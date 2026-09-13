@@ -23,6 +23,25 @@ Always be respectful, brief, and practical. Confirm what you did, including date
 
 Current date: ${new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}`;
 
+/**
+ * Diagnostics for the agent's tool loop. On by default so we can see, in the
+ * server logs (e.g. Vercel → Logs), exactly how each model turn resolves —
+ * finish reason, whether a real tool call came through, and any provider
+ * warnings. Set AI_DEBUG=0 to silence. Logs never include message or email
+ * contents — only shapes, counts, lengths, and tool names — so no member data
+ * lands in the logs.
+ */
+const AI_DEBUG = process.env.AI_DEBUG !== "0";
+
+function logAgent(event: string, data: Record<string, unknown>) {
+  if (!AI_DEBUG) return;
+  try {
+    console.log(`[agent] ${event}`, JSON.stringify(data));
+  } catch {
+    console.log(`[agent] ${event}`, data);
+  }
+}
+
 /** Human-readable role label for the person currently signed in. */
 const ROLE_LABELS: Record<string, string> = {
   bishop: "bishop",
@@ -87,6 +106,19 @@ export async function POST(request: Request) {
   const { messages: uiMessages } = await request.json();
   const messages = await convertToModelMessages(uiMessages);
 
+  // What model/provider actually got resolved for this request. The id is the
+  // first thing to check: a native-DeepSeek provider expects `deepseek-chat` /
+  // `deepseek-reasoner`, while an OpenRouter-style `vendor/model` id belongs on
+  // the openai-compat provider — a mismatch is a common cause of empty/looping
+  // replies.
+  const modelId = typeof model === "string" ? model : model.modelId;
+  const modelProvider = typeof model === "string" ? "(string id)" : model.provider;
+  logAgent("request", {
+    provider: modelProvider,
+    model: modelId,
+    incomingMessages: messages.length,
+  });
+
   // Load the assistant's durable memory and fold it into the system prompt so it
   // honors standing preferences. Tolerate the table not existing yet.
   let notes: { content: string }[] = [];
@@ -129,7 +161,73 @@ export async function POST(request: Request) {
     // the SDK retry a few times (with exponential backoff) before giving up,
     // since these usually clear quickly.
     maxRetries: 4,
+    // ── Diagnostics (see AI_DEBUG above) ────────────────────────────────────
+    // Log how each model turn resolved. The key signals for the DeepSeek
+    // "used a tool but nothing happened / spins forever" symptom:
+    //   • finishReason "tool-calls" but toolCalls: 0  → model described a tool
+    //     call in prose instead of emitting a real one.
+    //   • a toolCall with emptyInput: true            → arguments never
+    //     assembled into valid JSON (malformed streamed tool call).
+    //   • finishReason "stop" with textLen 0          → empty reply.
+    onStepFinish: (step) => {
+      logAgent("step", {
+        step: step.stepNumber,
+        finishReason: step.finishReason,
+        textLen: step.text?.length ?? 0,
+        reasoningLen: step.reasoningText?.length ?? 0,
+        toolCalls: (step.toolCalls ?? []).map((tc) => {
+          const input = (tc as { input?: unknown }).input;
+          const keys =
+            input && typeof input === "object" ? Object.keys(input as object) : [];
+          return {
+            name: tc.toolName,
+            emptyInput: input == null || (keys.length === 0 && typeof input !== "string"),
+            inputKeys: keys,
+          };
+        }),
+        toolResults: step.toolResults?.length ?? 0,
+        stepWarnings: step.warnings?.length ?? 0,
+      });
+    },
+    onFinish: (final) => {
+      logAgent("finish", {
+        steps: final.steps?.length ?? 0,
+        finishReason: final.finishReason,
+        totalTextLen: final.text?.length ?? 0,
+        toolCallsMade: final.steps?.reduce((n, s) => n + (s.toolCalls?.length ?? 0), 0) ?? 0,
+      });
+    },
+    onError: ({ error }) => {
+      logAgent("stream-error", { error: describeError(error) });
+    },
+    // Fires only when the SDK cannot turn the model's tool call into a valid
+    // input (empty/malformed arguments, or an unknown tool). We log the shape —
+    // never the values — and return null to leave behavior exactly as it is
+    // today; this call just tells us how often, and on which tools, DeepSeek
+    // emits a broken tool call.
+    experimental_repairToolCall: async ({ toolCall, error }) => {
+      const raw =
+        typeof toolCall.input === "string"
+          ? toolCall.input
+          : JSON.stringify(toolCall.input ?? "");
+      logAgent("tool-call-unrepairable", {
+        toolName: toolCall.toolName,
+        rawInputLen: raw.length,
+        looksEmpty: raw.trim() === "" || raw.trim() === "{}",
+        errorName: error?.name,
+      });
+      return null;
+    },
   });
+
+  // Provider-level warnings are the tell for "the model/route can't do tools":
+  // e.g. tools or tool_choice unsupported, so they were dropped. Awaited off to
+  // the side so it never blocks the streamed response.
+  void Promise.resolve(result.warnings)
+    .then((w) => {
+      if (w && w.length > 0) logAgent("provider-warnings", { warnings: w });
+    })
+    .catch(() => {});
 
   return result.toUIMessageStreamResponse({
     onError: (error) => {
