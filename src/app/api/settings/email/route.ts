@@ -17,7 +17,7 @@ export async function GET() {
   const { data, error } = await createAdminClient()
     .from("app_settings")
     .select(
-      "gmail_address, gmail_app_password, settlement_email_subject, settlement_email_body, settlement_confirmation_subject, settlement_confirmation_body",
+      "gmail_address, gmail_app_password, settlement_email_subject, settlement_email_body, settlement_confirmation_subject, settlement_confirmation_body, task_reminder_subject, task_reminder_body",
     )
     .eq("id", "default")
     .maybeSingle();
@@ -32,6 +32,8 @@ export async function GET() {
     settlementEmailBody: data?.settlement_email_body ?? "",
     settlementConfirmationSubject: data?.settlement_confirmation_subject ?? "",
     settlementConfirmationBody: data?.settlement_confirmation_body ?? "",
+    taskReminderSubject: data?.task_reminder_subject ?? "",
+    taskReminderBody: data?.task_reminder_body ?? "",
   });
 }
 
@@ -50,6 +52,8 @@ export async function PUT(request: NextRequest) {
   const settlementEmailBody: unknown = body.settlementEmailBody;
   const settlementConfirmationSubject: unknown = body.settlementConfirmationSubject;
   const settlementConfirmationBody: unknown = body.settlementConfirmationBody;
+  const taskReminderSubject: unknown = body.taskReminderSubject;
+  const taskReminderBody: unknown = body.taskReminderBody;
 
   const patch: Record<string, string> = {};
   if (typeof gmailAddress === "string") patch.gmail_address = gmailAddress.trim();
@@ -61,6 +65,8 @@ export async function PUT(request: NextRequest) {
   if (typeof settlementEmailBody === "string") patch.settlement_email_body = settlementEmailBody;
   if (typeof settlementConfirmationSubject === "string") patch.settlement_confirmation_subject = settlementConfirmationSubject;
   if (typeof settlementConfirmationBody === "string") patch.settlement_confirmation_body = settlementConfirmationBody;
+  if (typeof taskReminderSubject === "string") patch.task_reminder_subject = taskReminderSubject;
+  if (typeof taskReminderBody === "string") patch.task_reminder_body = taskReminderBody;
 
   const { error } = await createAdminClient()
     .from("app_settings")

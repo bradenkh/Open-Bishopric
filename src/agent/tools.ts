@@ -7,9 +7,9 @@ import { isAnnouncementActive } from "@/lib/announcements";
 import { listAgentNotes } from "@/lib/agent-notes";
 import { isEmailConfigured, sendEmail as sendGmailMessage, searchInbox, readInboxMessage } from "@/lib/email/gmail";
 import { WARD_BUSINESS_CATEGORIES, makeEntry, seedBusiness } from "@/lib/ward";
+import { renderTaskReminder, withReminderDefaults } from "@/lib/task-reminder";
 import { INTERVIEW_DURATION_MINS } from "@/types";
 import type {
-  AgendaItem,
   Announcement,
   Calling,
   Interview,
@@ -1173,112 +1173,14 @@ export const updateAnnouncement = tool({
   },
 });
 
-// ── Meeting agendas (bishopric & ward council) ───────────────────────────────
-
-const AGENDA_MEETING_TYPES = ["bishopric", "ward_council"] as const;
-
-/** Find the meeting to act on: an exact date if given, else the soonest upcoming. */
-async function resolveAgendaMeeting(
-  type: "bishopric" | "ward_council",
-  date?: string,
-): Promise<Meeting | null> {
-  let query = db().from("meetings").select("*").eq("type", type);
-  if (date) {
-    query = query.eq("date", normalizeDateInput(date));
-  } else {
-    const today = new Date().toISOString().slice(0, 10);
-    query = query.gte("date", today).eq("status", "upcoming").order("date", { ascending: true });
-  }
-  const { data, error } = await query.limit(1).maybeSingle();
-  if (error) throw error;
-  return data ? fromRow<Meeting>(data) : null;
-}
-
-export const getMeetingAgenda = tool({
-  description:
-    "Read a bishopric or ward council meeting's agenda (its sections and items). Use this before adding items so you can place them under the right section. Defaults to the soonest upcoming meeting of that type; pass a date to target a specific one.",
-  inputSchema: z.object({
-    type: z.enum(AGENDA_MEETING_TYPES).describe("Which meeting's agenda to read"),
-    date: z.string().optional().describe("ISO date YYYY-MM-DD; omit for the next upcoming meeting"),
-  }),
-  execute: async ({ type, date }) => {
-    const meeting = await resolveAgendaMeeting(type, date);
-    if (!meeting) return { exists: false, type, date };
-    return {
-      exists: true,
-      meetingId: meeting.id,
-      title: meeting.title,
-      date: meeting.date,
-      sections: meeting.sections ?? [],
-      agenda: meeting.agenda.map((a) => ({
-        id: a.id, title: a.title, section: a.section, presenter: a.presenter,
-        notes: a.notes, outcome: a.outcome, source: a.source,
-      })),
-    };
-  },
-});
-
-export const addAgendaItems = tool({
-  description:
-    "Add one or more items to a bishopric or ward council meeting's agenda — e.g. after an organization leader replies with the items they want discussed. Place each item under one of the meeting's sections (read them first with getMeetingAgenda). Set `source` to the organization or leader the items came from. Targets the soonest upcoming meeting of the given type unless meetingId or date is provided.",
-  inputSchema: z.object({
-    type: z.enum(AGENDA_MEETING_TYPES).optional().describe("Meeting type (used when meetingId is omitted)"),
-    meetingId: z.string().optional().describe("Specific meeting id (from getMeetingAgenda)"),
-    date: z.string().optional().describe("ISO date YYYY-MM-DD (used with type when meetingId is omitted)"),
-    source: z.string().optional().describe("Organization or leader the items came from, e.g. 'Relief Society'"),
-    items: z.array(z.object({
-      title: z.string(),
-      section: z.string().optional().describe("Section heading the item belongs under"),
-      presenter: z.string().optional(),
-      durationMins: z.number().optional(),
-      notes: z.string().optional(),
-    })).min(1),
-  }),
-  execute: async ({ type, meetingId, date, source, items }) => {
-    let meeting: Meeting | null = null;
-    if (meetingId) {
-      const { data, error } = await db().from("meetings").select("*").eq("id", meetingId).maybeSingle();
-      if (error) throw error;
-      meeting = data ? fromRow<Meeting>(data) : null;
-    } else if (type) {
-      meeting = await resolveAgendaMeeting(type, date);
-    }
-    if (!meeting) return { error: "No matching meeting found. Provide a meetingId, or a type (and optional date)." };
-
-    const additions: AgendaItem[] = items.map((i) => ({
-      id: crypto.randomUUID(),
-      title: i.title,
-      section: i.section,
-      presenter: i.presenter,
-      durationMins: i.durationMins,
-      notes: i.notes,
-      source,
-    }));
-    const agenda = [...meeting.agenda, ...additions];
-    const { error } = await db().from("meetings").update({ agenda }).eq("id", meeting.id);
-    if (error) throw error;
-    return { ok: true, meetingId: meeting.id, date: meeting.date, added: additions.length };
-  },
-});
-
-export const recordSolicitationReply = tool({
-  description:
-    "Record an organization leader's reply to a pre-meeting agenda request, marking that request as replied. Use after you've added the leader's items with addAgendaItems.",
-  inputSchema: z.object({
-    solicitationId: z.string().describe("The agenda request's id"),
-    replyText: z.string().describe("The leader's raw reply text"),
-  }),
-  execute: async ({ solicitationId, replyText }) => {
-    const { error } = await db()
-      .from("agenda_solicitations")
-      .update({ reply_text: replyText, status: "replied" })
-      .eq("id", solicitationId);
-    if (error) throw error;
-    return { ok: true, solicitationId };
-  },
-});
-
 // ── Email: send reminders and scheduling requests ────────────────────────────
+
+/** Resolve a ward member's email by id. */
+async function memberEmailById(id: string): Promise<string | undefined> {
+  const { data, error } = await db().from("members").select("email").eq("id", id).maybeSingle();
+  if (error) throw error;
+  return (data as { email?: string } | null)?.email ?? undefined;
+}
 
 /** Resolve a ward member's email by (case-insensitive) full name. */
 async function memberEmailByName(name: string): Promise<string | undefined> {
@@ -1295,13 +1197,13 @@ async function memberEmailByName(name: string): Promise<string | undefined> {
 
 export const sendTaskReminder = tool({
   description:
-    "Email a reminder about a to-do/task to the person it concerns. Use when the bishopric wants to nudge someone about an assignment. Resolves the recipient from the task's member (or pass an explicit email). The user reviews and approves (or gives feedback on) the message before it is sent. Requires email to be configured in Settings → Email.",
+    "Email a reminder about a to-do/task to its owner — the ward member responsible for it. Use when the bishopric wants to nudge whoever owns an assignment. Resolves the recipient from the task's owner (assignee), or pass an explicit email. The user reviews and approves (or gives feedback on) the message before it is sent. Requires email to be configured in Settings → Email.",
   // Outbound email always goes through human review: the send only happens
   // after the signed-in bishopric member approves it in the chat.
   needsApproval: true,
   inputSchema: z.object({
     taskId: z.string().describe("The task to send a reminder about (from getTasks)"),
-    to: z.string().optional().describe("Recipient email; if omitted, resolved from the task's member"),
+    to: z.string().optional().describe("Recipient email; if omitted, resolved from the task's owner (assignee)"),
     note: z.string().optional().describe("Optional extra line to include in the reminder"),
   }),
   execute: async ({ taskId, to, note }) => {
@@ -1313,27 +1215,38 @@ export const sendTaskReminder = tool({
     if (!row) return { error: "No task found with that id." };
     const task = fromRow<Task>(row);
 
-    const recipient = to ?? (task.memberName ? await memberEmailByName(task.memberName) : undefined);
+    // Resolve the owner's email: prefer the assignee's member id, fall back to
+    // matching their name (older calling-workflow tasks store a name but no id).
+    const recipient =
+      to ??
+      (task.assigneeId ? await memberEmailById(task.assigneeId) : undefined) ??
+      (task.assigneeName ? await memberEmailByName(task.assigneeName) : undefined);
     if (!recipient) {
-      return { error: "No email address found for this task. Provide a `to` address, or add an email to the member's record." };
+      return { error: "No email address found for this task's owner. Assign an owner whose member record has an email, or provide a `to` address." };
     }
 
-    const lines = [
-      task.memberName ? `Hi ${task.memberName.split(" ")[0]},` : "Hello,",
-      "",
-      `This is a friendly reminder about: ${task.title}.`,
-      task.description ? `\n${task.description}` : "",
-      task.dueDate ? `\nDue: ${task.dueDate}` : "",
-      note ? `\n${note}` : "",
-      "",
-      "Thank you!",
-    ].filter(Boolean);
-
-    const { messageId } = await sendGmailMessage({
-      to: recipient,
-      subject: `Reminder: ${task.title}`,
-      body: lines.join("\n"),
+    // Use the bishopric's saved reminder template (Settings → Email), falling
+    // back to the built-in default. Keeps the assistant's wording in sync with
+    // the Tasks page.
+    const { data: settings } = await db()
+      .from("app_settings")
+      .select("task_reminder_subject, task_reminder_body")
+      .eq("id", "default")
+      .maybeSingle();
+    const tpl = withReminderDefaults({
+      subject: settings?.task_reminder_subject,
+      body: settings?.task_reminder_body,
     });
+    const { subject, body } = renderTaskReminder(tpl, {
+      name: task.assigneeName?.split(" ")[0] ?? "",
+      task: task.title,
+      description: task.description ?? "",
+      due: task.dueDate ? `Due: ${task.dueDate}` : "",
+    });
+    // Append the caller's extra note, if any.
+    const finalBody = note ? `${body}\n\n${note}` : body;
+
+    const { messageId } = await sendGmailMessage({ to: recipient, subject, body: finalBody });
     await db().from("tasks").update({ reminder_sent_at: new Date().toISOString() }).eq("id", taskId);
     return { ok: true, taskId, to: recipient, messageId };
   },
@@ -1540,10 +1453,6 @@ export const agentTools = {
   getAnnouncements,
   createAnnouncement,
   updateAnnouncement,
-  // Meeting agendas
-  getMeetingAgenda,
-  addAgendaItems,
-  recordSolicitationReply,
   // Email
   sendTaskReminder,
   emailInterviewTimes,

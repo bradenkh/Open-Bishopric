@@ -331,9 +331,9 @@ export type SolicitationStatus = "draft" | "sent" | "replied";
  * they keep or dismiss last meeting's items and add new ones. One row per
  * (meeting, organization). The assistant parses replies into agenda items.
  *
- * NOTE: live email send + inbound reply parsing are not wired yet — sending is a
- * manual action (mailto/copy) and replies are pasted into the AI assistant. See
- * the "deferred" seams in collect-items.tsx / agent tools.
+ * NOTE: the agenda-builder UI that created these has been removed; the row and
+ * the /api/email/poll matching that records replies remain for any solicitations
+ * still in flight.
  */
 export interface AgendaSolicitation {
   id: string;

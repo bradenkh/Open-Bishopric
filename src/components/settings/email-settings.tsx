@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { DEFAULT_SETTLEMENT_EMAIL, DEFAULT_SETTLEMENT_CONFIRMATION } from "@/lib/settlement-email";
+import { DEFAULT_TASK_REMINDER } from "@/lib/task-reminder";
 
 interface EmailConfig {
   gmailAddress: string;
@@ -36,6 +37,9 @@ export function EmailSettingsCard() {
   // Settlement confirmation email template — sent when a member books their slot.
   const [confirmationSubject, setConfirmationSubject] = useState(DEFAULT_SETTLEMENT_CONFIRMATION.subject);
   const [confirmationBody, setConfirmationBody] = useState(DEFAULT_SETTLEMENT_CONFIRMATION.body);
+  // Task reminder email template — blank falls back to the built-in default.
+  const [reminderSubject, setReminderSubject] = useState(DEFAULT_TASK_REMINDER.subject);
+  const [reminderBody, setReminderBody] = useState(DEFAULT_TASK_REMINDER.body);
 
   useEffect(() => {
     fetch("/api/settings/email")
@@ -48,6 +52,8 @@ export function EmailSettingsCard() {
         if (data.settlementEmailBody) setSettlementBody(data.settlementEmailBody);
         if (data.settlementConfirmationSubject) setConfirmationSubject(data.settlementConfirmationSubject);
         if (data.settlementConfirmationBody) setConfirmationBody(data.settlementConfirmationBody);
+        if (data.taskReminderSubject) setReminderSubject(data.taskReminderSubject);
+        if (data.taskReminderBody) setReminderBody(data.taskReminderBody);
       })
       .catch(() => setError("Couldn't load email settings."));
   }, []);
@@ -66,6 +72,8 @@ export function EmailSettingsCard() {
           settlementEmailBody: settlementBody,
           settlementConfirmationSubject: confirmationSubject,
           settlementConfirmationBody: confirmationBody,
+          taskReminderSubject: reminderSubject,
+          taskReminderBody: reminderBody,
         }),
       });
       const data = await res.json();
@@ -254,6 +262,55 @@ export function EmailSettingsCard() {
                 <Textarea id="confirmation-body" value={confirmationBody} rows={8}
                   onChange={(e) => { setConfirmationBody(e.target.value); setSaved(false); }}
                   placeholder={DEFAULT_SETTLEMENT_CONFIRMATION.body} />
+              </div>
+            </div>
+
+            {/* Task reminder email — the default message prefilled when you send a
+                task's owner a reminder from the Tasks page (editable per-send) and
+                used by the AI assistant's reminder tool. Saved with the button above. */}
+            <div className="space-y-3 border-t border-border pt-4">
+              <div className="flex items-center justify-between gap-2">
+                <Label className="text-sm font-medium">Task reminder email</Label>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={() => {
+                    setReminderSubject(DEFAULT_TASK_REMINDER.subject);
+                    setReminderBody(DEFAULT_TASK_REMINDER.body);
+                    setSaved(false);
+                  }}
+                >
+                  Reset to default
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                The default reminder prefilled when you email a task&rsquo;s owner from the
+                Tasks page (you can still edit it before sending) and used by the AI
+                assistant. Use{" "}
+                <code className="rounded bg-muted px-1 py-0.5">{"{name}"}</code> for the
+                owner&rsquo;s first name,{" "}
+                <code className="rounded bg-muted px-1 py-0.5">{"{task}"}</code> for the task
+                title,{" "}
+                <code className="rounded bg-muted px-1 py-0.5">{"{description}"}</code> for its
+                notes, and{" "}
+                <code className="rounded bg-muted px-1 py-0.5">{"{due}"}</code> for a
+                &ldquo;Due: &hellip;&rdquo; line — all filled in per task. Lines that hold only{" "}
+                <code className="rounded bg-muted px-1 py-0.5">{"{description}"}</code> or{" "}
+                <code className="rounded bg-muted px-1 py-0.5">{"{due}"}</code> are dropped when
+                the task has none.
+              </p>
+              <div className="space-y-1.5">
+                <Label htmlFor="reminder-subject" className="text-xs">Subject</Label>
+                <Input id="reminder-subject" value={reminderSubject}
+                  onChange={(e) => { setReminderSubject(e.target.value); setSaved(false); }}
+                  placeholder={DEFAULT_TASK_REMINDER.subject} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="reminder-body" className="text-xs">Message</Label>
+                <Textarea id="reminder-body" value={reminderBody} rows={9}
+                  onChange={(e) => { setReminderBody(e.target.value); setSaved(false); }}
+                  placeholder={DEFAULT_TASK_REMINDER.body} />
               </div>
             </div>
           </>

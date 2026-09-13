@@ -2,13 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, MessageSquare, ClipboardList, Lectern, CalendarClock, HandHelping } from "lucide-react";
+import { LayoutDashboard, MessageSquare, ListTodo, Lectern, CalendarClock, HandHelping } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
   { href: "/home", label: "Home", icon: LayoutDashboard },
   { href: "/chat", label: "Chat", icon: MessageSquare },
-  { href: "/agendas", label: "Agendas", icon: ClipboardList },
+  { href: "/tasks", label: "Tasks", icon: ListTodo },
   { href: "/sacrament", label: "Sacrament", icon: Lectern },
   { href: "/interviews", label: "Scheduling", icon: CalendarClock },
   { href: "/callings", label: "Callings", icon: HandHelping },

@@ -2,8 +2,8 @@
 
 import { useMemo } from "react";
 import {
-  ClipboardList, CalendarClock, HandHelping, Calendar, ArrowRight, MessageSquare,
-  CalendarPlus, Plus, Settings,
+  ClipboardList, CalendarClock, HandHelping, ArrowRight, MessageSquare,
+  CalendarPlus, Plus, Settings, ListTodo,
 } from "lucide-react";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,6 +20,7 @@ export default function DashboardPage() {
   const callings = data.callings.items;
   const meetings = data.meetings.items;
   const interviews = data.interviews.items;
+  const tasks = data.tasks;
 
   // Compute stats from live ward data.
   const stats = useMemo(() => {
@@ -28,8 +29,9 @@ export default function DashboardPage() {
     const upcomingInterviews = interviews.filter((i) => i.stage === "scheduled" || i.stage === "pending_confirmation").length;
     const callingsInProgress = callings.filter((c) => c.stage !== "recorded" && c.stage !== "vacant" && c.stage !== "needs_calling").length;
     const vacantCallings     = callings.filter((c) => c.stage === "vacant").length;
-    return { upcomingMeetings, needsScheduling, upcomingInterviews, callingsInProgress, vacantCallings };
-  }, [callings, meetings, interviews]);
+    const openTasks          = tasks.filter((t) => t.status === "active" || t.status === "in_progress" || t.status === "waiting").length;
+    return { upcomingMeetings, needsScheduling, upcomingInterviews, callingsInProgress, vacantCallings, openTasks };
+  }, [callings, meetings, interviews, tasks]);
 
   const upcomingMeetings = meetings
     .filter((m) => m.status === "upcoming")
@@ -51,10 +53,10 @@ export default function DashboardPage() {
     INTERVIEW_STAGES.find((x) => x.stage === s)?.label ?? s.replace("_", " ");
 
   const statCards = [
-    { label: "Upcoming Meetings",   value: stats.upcomingMeetings,   icon: ClipboardList,  href: "/agendas",    color: "text-blue-600",   badge: undefined },
+    { label: "Open Tasks",          value: stats.openTasks,          icon: ListTodo,       href: "/tasks",      color: "text-blue-600",   badge: undefined },
     { label: "Interviews to Set",   value: stats.needsScheduling,    icon: CalendarClock,  href: "/interviews", color: "text-amber-600",  badge: stats.upcomingInterviews > 0 ? `${stats.upcomingInterviews} scheduled` : undefined },
     { label: "Callings In Progress",value: stats.callingsInProgress, icon: HandHelping,   href: "/callings",   color: "text-purple-600", badge: stats.vacantCallings > 0 ? `${stats.vacantCallings} vacant` : undefined },
-    { label: "Scheduled Interviews",value: stats.upcomingInterviews, icon: Calendar,       href: "/interviews", color: "text-green-600",  badge: undefined },
+    { label: "Upcoming Meetings",   value: stats.upcomingMeetings,   icon: ClipboardList,  href: "/sacrament",  color: "text-green-600",  badge: undefined },
   ];
 
   return (
@@ -110,9 +112,9 @@ export default function DashboardPage() {
           </Link>
         </Button>
         <Button variant="outline" asChild className="flex-1 sm:flex-none gap-2">
-          <Link href="/agendas">
-            <ClipboardList className="h-4 w-4" />
-            View Agendas
+          <Link href="/tasks">
+            <ListTodo className="h-4 w-4" />
+            View Tasks
           </Link>
         </Button>
       </div>
@@ -121,7 +123,7 @@ export default function DashboardPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-3">
             <CardTitle className="text-base">Upcoming Meetings</CardTitle>
-            <Link href="/agendas" className="text-xs text-primary flex items-center gap-1 hover:underline">
+            <Link href="/sacrament" className="text-xs text-primary flex items-center gap-1 hover:underline">
               View all <ArrowRight className="h-3 w-3" />
             </Link>
           </CardHeader>

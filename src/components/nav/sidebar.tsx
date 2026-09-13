@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
   MessageSquare,
-  ClipboardList,
+  ListTodo,
   CalendarClock,
   HandHelping,
   Lectern,
@@ -22,7 +22,7 @@ import { Button } from "@/components/ui/button";
 const navItems = [
   { href: "/home", label: "Dashboard", icon: LayoutDashboard },
   { href: "/chat", label: "AI Assistant", icon: MessageSquare },
-  { href: "/agendas", label: "Agendas", icon: ClipboardList },
+  { href: "/tasks", label: "Tasks", icon: ListTodo },
   { href: "/sacrament", label: "Sacrament", icon: Lectern },
   { href: "/interviews", label: "Scheduling", icon: CalendarClock },
   { href: "/callings", label: "Callings", icon: HandHelping },
