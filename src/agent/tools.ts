@@ -1174,6 +1174,13 @@ export const updateAnnouncement = tool({
 
 // ── Email: send reminders and scheduling requests ────────────────────────────
 
+/** Resolve a ward member's email by id. */
+async function memberEmailById(id: string): Promise<string | undefined> {
+  const { data, error } = await db().from("members").select("email").eq("id", id).maybeSingle();
+  if (error) throw error;
+  return (data as { email?: string } | null)?.email ?? undefined;
+}
+
 /** Resolve a ward member's email by (case-insensitive) full name. */
 async function memberEmailByName(name: string): Promise<string | undefined> {
   const { data, error } = await db().from("members").select("email").ilike("first_name || ' ' || last_name", name);
@@ -1189,13 +1196,13 @@ async function memberEmailByName(name: string): Promise<string | undefined> {
 
 export const sendTaskReminder = tool({
   description:
-    "Email a reminder about a to-do/task to the person it concerns. Use when the bishopric wants to nudge someone about an assignment. Resolves the recipient from the task's member (or pass an explicit email). The user reviews and approves (or gives feedback on) the message before it is sent. Requires email to be configured in Settings → Email.",
+    "Email a reminder about a to-do/task to its owner — the ward member responsible for it. Use when the bishopric wants to nudge whoever owns an assignment. Resolves the recipient from the task's owner (assignee), or pass an explicit email. The user reviews and approves (or gives feedback on) the message before it is sent. Requires email to be configured in Settings → Email.",
   // Outbound email always goes through human review: the send only happens
   // after the signed-in bishopric member approves it in the chat.
   needsApproval: true,
   inputSchema: z.object({
     taskId: z.string().describe("The task to send a reminder about (from getTasks)"),
-    to: z.string().optional().describe("Recipient email; if omitted, resolved from the task's member"),
+    to: z.string().optional().describe("Recipient email; if omitted, resolved from the task's owner (assignee)"),
     note: z.string().optional().describe("Optional extra line to include in the reminder"),
   }),
   execute: async ({ taskId, to, note }) => {
@@ -1207,15 +1214,20 @@ export const sendTaskReminder = tool({
     if (!row) return { error: "No task found with that id." };
     const task = fromRow<Task>(row);
 
-    const recipient = to ?? (task.memberName ? await memberEmailByName(task.memberName) : undefined);
+    // Resolve the owner's email: prefer the assignee's member id, fall back to
+    // matching their name (older calling-workflow tasks store a name but no id).
+    const recipient =
+      to ??
+      (task.assigneeId ? await memberEmailById(task.assigneeId) : undefined) ??
+      (task.assigneeName ? await memberEmailByName(task.assigneeName) : undefined);
     if (!recipient) {
-      return { error: "No email address found for this task. Provide a `to` address, or add an email to the member's record." };
+      return { error: "No email address found for this task's owner. Assign an owner whose member record has an email, or provide a `to` address." };
     }
 
     const lines = [
-      task.memberName ? `Hi ${task.memberName.split(" ")[0]},` : "Hello,",
+      task.assigneeName ? `Hi ${task.assigneeName.split(" ")[0]},` : "Hello,",
       "",
-      `This is a friendly reminder about: ${task.title}.`,
+      `This is a friendly reminder about a task assigned to you: ${task.title}.`,
       task.description ? `\n${task.description}` : "",
       task.dueDate ? `\nDue: ${task.dueDate}` : "",
       note ? `\n${note}` : "",
