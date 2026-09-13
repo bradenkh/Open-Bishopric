@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Plus, Filter, CheckCircle2, RotateCcw, Pencil, Trash2, User, CalendarDays,
-  Mail, ListTodo,
+  Mail, ListTodo, Check,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -46,7 +46,8 @@ const EMPTY_FORM = {
   description: "",
   type: "todo" as TaskType,
   status: "active" as TaskStatus,
-  ownerId: "",
+  ownerId: "",     // set when the owner is a ward member (enables reminders)
+  ownerName: "",   // the display/typed name — may be someone not in the ward
   dueDate: "",
 };
 type TaskForm = typeof EMPTY_FORM;
@@ -74,6 +75,7 @@ export default function TasksPage() {
   const [editing, setEditing] = useState<Task | null>(null);
   const [form, setForm] = useState<TaskForm>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+  const [ownerOpen, setOwnerOpen] = useState(false); // owner typeahead dropdown
 
   // Reminder compose dialog: prefilled from the task, editable before sending.
   const [reminder, setReminder] = useState<
@@ -96,6 +98,17 @@ export default function TasksPage() {
   }, []);
 
   const openCount = tasks.filter((t) => OPEN_STATUSES.includes(t.status)).length;
+
+  // Owner typeahead: members matching what's typed, and whether the text already
+  // names a member exactly (so we only offer the "not in the ward" option when it doesn't).
+  const ownerQuery = form.ownerName.trim().toLowerCase();
+  const ownerMatches = (ownerQuery
+    ? owners.filter((m) => `${m.firstName} ${m.lastName}`.toLowerCase().includes(ownerQuery))
+    : owners
+  ).slice(0, 8);
+  const ownerIsExactMember = owners.some(
+    (m) => `${m.firstName} ${m.lastName}`.toLowerCase() === ownerQuery,
+  );
 
   const filtered = useMemo(() => {
     let list = tasks;
@@ -125,9 +138,9 @@ export default function TasksPage() {
 
   function openEdit(t: Task) {
     setEditing(t);
-    // Reflect the stored owner in the picker: match on id, then fall back to the
-    // name (calling-workflow tasks record an owner name but no id).
-    const owner = t.assigneeId
+    // Keep the stored owner name as typed; re-link a member id by matching the
+    // name when the task recorded one without an id (calling-workflow tasks).
+    const matched = t.assigneeId
       ? members.find((m) => m.id === t.assigneeId)
       : members.find((m) => `${m.firstName} ${m.lastName}` === t.assigneeName);
     setForm({
@@ -135,7 +148,8 @@ export default function TasksPage() {
       description: t.description ?? "",
       type: t.type,
       status: t.status,
-      ownerId: owner?.id ?? "",
+      ownerId: matched?.id ?? "",
+      ownerName: t.assigneeName ?? "",
       dueDate: t.dueDate ?? "",
     });
     setDialogOpen(true);
@@ -144,14 +158,19 @@ export default function TasksPage() {
   async function handleSave() {
     if (!form.title.trim()) return;
     setSaving(true);
-    const owner = form.ownerId ? members.find((m) => m.id === form.ownerId) : undefined;
+    // A selected member (or a typed name that exactly matches one) gives a
+    // canonical name + id; any other typed name is kept as-is with no id
+    // (someone outside the ward has no roster record).
+    const owner = form.ownerId
+      ? members.find((m) => m.id === form.ownerId)
+      : members.find((m) => `${m.firstName} ${m.lastName}`.toLowerCase() === form.ownerName.trim().toLowerCase());
     const patch = {
       title: form.title.trim(),
       description: form.description.trim() || undefined,
       type: form.type,
       status: form.status,
-      assigneeId: form.ownerId || undefined,
-      assigneeName: owner ? `${owner.firstName} ${owner.lastName}` : undefined,
+      assigneeId: owner ? owner.id : undefined,
+      assigneeName: owner ? `${owner.firstName} ${owner.lastName}` : (form.ownerName.trim() || undefined),
       dueDate: form.dueDate || undefined,
     };
     if (editing) {
@@ -409,19 +428,56 @@ export default function TasksPage() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label>Owner</Label>
-                <Select
-                  value={form.ownerId || "__none"}
-                  onValueChange={(v) => setForm((f) => ({ ...f, ownerId: v === "__none" ? "" : v }))}
-                >
-                  <SelectTrigger><SelectValue placeholder="Unassigned" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none">Unassigned</SelectItem>
-                    {owners.map((m) => (
-                      <SelectItem key={m.id} value={m.id}>{m.firstName} {m.lastName}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="task-owner">Owner</Label>
+                <div className="relative">
+                  <Input
+                    id="task-owner"
+                    autoComplete="off"
+                    value={form.ownerName}
+                    onChange={(e) => setForm((f) => ({ ...f, ownerName: e.target.value, ownerId: "" }))}
+                    onFocus={() => setOwnerOpen(true)}
+                    onBlur={() => setTimeout(() => setOwnerOpen(false), 120)}
+                    placeholder="Search members, or type any name"
+                    className={form.ownerId ? "pr-8" : undefined}
+                  />
+                  {form.ownerId && (
+                    <Check className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-green-600" />
+                  )}
+                  {ownerOpen && (ownerMatches.length > 0 || (!!form.ownerName.trim() && !ownerIsExactMember)) && (
+                    <ul className="absolute z-50 mt-1 max-h-56 w-full overflow-auto rounded-md border border-border bg-popover p-1 shadow-md">
+                      {ownerMatches.map((m) => (
+                        <li key={m.id}>
+                          <button
+                            type="button"
+                            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => {
+                              setForm((f) => ({ ...f, ownerId: m.id, ownerName: `${m.firstName} ${m.lastName}` }));
+                              setOwnerOpen(false);
+                            }}
+                          >
+                            <User className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                            <span className="flex-1 truncate">{m.firstName} {m.lastName}</span>
+                            {!m.email && <span className="text-[10px] text-muted-foreground">no email</span>}
+                          </button>
+                        </li>
+                      ))}
+                      {!!form.ownerName.trim() && !ownerIsExactMember && (
+                        <li>
+                          <button
+                            type="button"
+                            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => { setForm((f) => ({ ...f, ownerId: "" })); setOwnerOpen(false); }}
+                          >
+                            <Plus className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                            <span className="truncate">Use &ldquo;{form.ownerName.trim()}&rdquo; (not in the ward)</span>
+                          </button>
+                        </li>
+                      )}
+                    </ul>
+                  )}
+                </div>
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="task-due">Due date</Label>
@@ -434,7 +490,8 @@ export default function TasksPage() {
               </div>
             </div>
             <p className="text-[11px] text-muted-foreground -mt-1">
-              The owner is the ward member responsible for the task. Assigning one whose record has an email enables reminders.
+              Search the roster and pick a member, or type any name to assign someone not in
+              the ward. A member with an email on file can be sent reminders.
             </p>
             <div className="space-y-1.5">
               <Label htmlFor="task-notes">Notes</Label>
