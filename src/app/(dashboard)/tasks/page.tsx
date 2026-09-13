@@ -71,12 +71,11 @@ export default function TasksPage() {
   const [form, setForm] = useState<TaskForm>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
 
-  // Reminder state, keyed by task id
-  const [reminding, setReminding] = useState<string | null>(null);
-
-  /** The owner's email, if the task has an owner we can resolve to a member. */
-  const ownerEmailFor = (t: Task) =>
-    t.assigneeId ? members.find((m) => m.id === t.assigneeId)?.email : undefined;
+  // Reminder compose dialog: prefilled from the task, editable before sending.
+  const [reminder, setReminder] = useState<
+    { taskId: string; to: string; subject: string; body: string } | null
+  >(null);
+  const [sendingReminder, setSendingReminder] = useState(false);
 
   const openCount = tasks.filter((t) => OPEN_STATUSES.includes(t.status)).length;
 
@@ -169,17 +168,11 @@ export default function TasksPage() {
   }
 
   // ── Email reminder ───────────────────────────────────────────────────────────
-  // Nudge the task's owner. Resolve their email from the profiles roster, send via
-  // the shared endpoint, and fall back to a mailto: link if Gmail isn't configured
-  // (409 notConfigured).
-  async function sendReminder(t: Task) {
+  // Open a compose dialog prefilled with a reminder to the task's owner. The
+  // recipient, subject and body can all be edited before anything is sent.
+  function openReminder(t: Task) {
     const owner = t.assigneeId ? members.find((m) => m.id === t.assigneeId) : undefined;
-    const email = owner?.email;
-    if (!email) {
-      alert("This task's owner has no email on file. Assign an owner with an email address, or add one to their member record.");
-      return;
-    }
-    const firstName = owner!.firstName || "there";
+    const firstName = owner?.firstName || t.assigneeName?.split(" ")[0] || "there";
     const subject = `Reminder: ${t.title}`;
     const body = [
       `Hi ${firstName},`,
@@ -191,18 +184,27 @@ export default function TasksPage() {
       "Thank you,",
       "The Bishopric",
     ].join("\n");
+    setReminder({ taskId: t.id, to: owner?.email ?? "", subject, body });
+  }
 
-    setReminding(t.id);
+  // Send the edited reminder via the shared endpoint, falling back to a mailto:
+  // link if Gmail isn't configured (409 notConfigured).
+  async function submitReminder() {
+    if (!reminder || !reminder.to.trim()) return;
+    const { taskId, to, subject, body } = reminder;
+    setSendingReminder(true);
     try {
       const res = await fetch("/api/email/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ to: email, subject, body }),
+        body: JSON.stringify({ to: to.trim(), subject, body }),
       });
       if (res.status === 409) {
-        // Email not configured — fall back to the user's own mail client.
+        // Email not configured — hand off to the user's own mail client. We
+        // don't mark it "sent" since we can't confirm they actually send it.
         window.location.href =
-          `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+          `mailto:${encodeURIComponent(to.trim())}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+        setReminder(null);
         return;
       }
       if (!res.ok) {
@@ -210,11 +212,12 @@ export default function TasksPage() {
         alert(`Couldn't send the reminder: ${error}`);
         return;
       }
-      await updateTask(t.id, { reminderSentAt: new Date().toISOString() });
+      await updateTask(taskId, { reminderSentAt: new Date().toISOString() });
+      setReminder(null);
     } catch {
       alert("Couldn't reach the email service. Check your connection and try again.");
     } finally {
-      setReminding(null);
+      setSendingReminder(false);
     }
   }
 
@@ -282,7 +285,6 @@ export default function TasksPage() {
           {filtered.map((t) => {
             const done = t.status === "completed";
             const closed = done || t.status === "cancelled";
-            const ownerEmail = ownerEmailFor(t);
             return (
               <li
                 key={t.id}
@@ -331,12 +333,11 @@ export default function TasksPage() {
                 </div>
 
                 <div className="flex shrink-0 items-center gap-0.5">
-                  {ownerEmail && !closed && (
+                  {!closed && (
                     <Button
                       variant="ghost" size="icon" className="h-8 w-8"
-                      onClick={() => sendReminder(t)}
-                      disabled={reminding === t.id}
-                      title="Send the owner a reminder"
+                      onClick={() => openReminder(t)}
+                      title="Send a reminder"
                     >
                       <Mail className="h-3.5 w-3.5" />
                     </Button>
@@ -443,6 +444,57 @@ export default function TasksPage() {
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
             <Button onClick={handleSave} disabled={saving || !form.title.trim()}>
               {saving ? "Saving…" : editing ? "Save Changes" : "Create Task"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Reminder compose dialog ── */}
+      <Dialog open={!!reminder} onOpenChange={(o) => !o && setReminder(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Send reminder</DialogTitle>
+          </DialogHeader>
+          {reminder && (
+            <div className="space-y-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="reminder-to">To</Label>
+                <Input
+                  id="reminder-to"
+                  type="email"
+                  value={reminder.to}
+                  onChange={(e) => setReminder((r) => (r ? { ...r, to: e.target.value } : r))}
+                  placeholder="owner@example.com"
+                />
+                {!reminder.to.trim() && (
+                  <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                    This owner has no email on file — enter a recipient to send.
+                  </p>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="reminder-subject">Subject</Label>
+                <Input
+                  id="reminder-subject"
+                  value={reminder.subject}
+                  onChange={(e) => setReminder((r) => (r ? { ...r, subject: e.target.value } : r))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="reminder-body">Message</Label>
+                <Textarea
+                  id="reminder-body"
+                  value={reminder.body}
+                  onChange={(e) => setReminder((r) => (r ? { ...r, body: e.target.value } : r))}
+                  rows={9}
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setReminder(null)}>Cancel</Button>
+            <Button onClick={submitReminder} disabled={sendingReminder || !reminder?.to.trim()}>
+              {sendingReminder ? "Sending…" : "Send reminder"}
             </Button>
           </DialogFooter>
         </DialogContent>
