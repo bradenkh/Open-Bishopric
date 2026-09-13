@@ -2,12 +2,23 @@
 
 import { createContext, useContext, useCallback, useRef, useEffect } from "react";
 import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport, type UIMessage } from "ai";
+import {
+  DefaultChatTransport,
+  lastAssistantMessageIsCompleteWithApprovalResponses,
+  type UIMessage,
+} from "ai";
 import { useData } from "@/contexts/DataContext";
 
 const transport = new DefaultChatTransport({ api: "/api/agent" });
 
 type ChatStatus = "submitted" | "streaming" | "ready" | "error";
+
+/**
+ * Respond to a tool that's waiting on the user (e.g. an email pending review).
+ * `approved: true` lets the tool run; `approved: false` with a `reason` sends
+ * the user's feedback back to the assistant so it can revise and try again.
+ */
+type ApprovalResponse = (opts: { id: string; approved: boolean; reason?: string }) => void;
 
 type ChatContextValue = {
   messages: UIMessage[];
@@ -18,12 +29,19 @@ type ChatContextValue = {
   stop: () => void;
   clearError: () => void;
   newChat: () => void;
+  respondToApproval: ApprovalResponse;
 };
 
 const ChatContext = createContext<ChatContextValue | null>(null);
 
 export function ChatProvider({ children }: { children: React.ReactNode }) {
-  const chat = useChat({ transport });
+  const chat = useChat({
+    transport,
+    // When the user approves or declines a tool that needs review (e.g. sending
+    // an email), automatically forward that decision to the server so the
+    // assistant continues — sending the message, or revising it from feedback.
+    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
+  });
   const { reloadAll } = useData();
 
   const prevStatus = useRef(chat.status);
@@ -46,6 +64,13 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     chat.clearError();
   }, [chat]);
 
+  const respondToApproval = useCallback<ApprovalResponse>(
+    ({ id, approved, reason }) => {
+      void chat.addToolApprovalResponse({ id, approved, reason });
+    },
+    [chat],
+  );
+
   const value: ChatContextValue = {
     messages: chat.messages,
     sendMessage: chat.sendMessage,
@@ -55,6 +80,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     stop: chat.stop,
     clearError: chat.clearError,
     newChat,
+    respondToApproval,
   };
 
   return <ChatContext value={value}>{children}</ChatContext>;

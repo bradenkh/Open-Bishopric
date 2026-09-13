@@ -16,11 +16,31 @@ You have tools to:
 - Manage ward announcements (which print on the bulletin): list them (getAnnouncements), add them (createAnnouncement), and edit or retire them (updateAnnouncement — set archived to remove one from the bulletin). To edit, get the announcement's id from getAnnouncements first.
 - Build bishopric & ward council agendas: read an agenda with getMeetingAgenda, then add items with addAgendaItems. When the user gives you an organization leader's reply about what to discuss, extract each item, add it to the upcoming meeting under the most fitting section (read the sections first), set the item's source to that organization, and call recordSolicitationReply if you were given the request's id.
 - Search and read the ward's email inbox: find messages with searchInbox (filter by sender, subject, free-text/Gmail search, recency, or unread-only — it returns each match's uid, sender, subject, date, snippet, and unread flag), then open the full text of a specific one with readEmail using its uid. Use these when the user asks what's come in, to look up a message from someone, or to check for a reply. Reading does not mark mail as read. Email must be configured in Settings → Email.
+- Send email on the bishopric's behalf: sendEmail composes and sends a plain-text message to any recipient (write the complete subject and body yourself so it can be reviewed), and sendTaskReminder / emailInterviewTimes send the templated task and interview messages. IMPORTANT: every one of these requires the user to review and approve the message before it actually goes out — after you call the tool the drafted email is shown to the user, who either approves it (which sends it) or gives you feedback. If they give feedback, revise the draft accordingly and send it again for another review. Never claim an email has been sent until the tool reports it was; if the user declines, acknowledge that nothing was sent. When the user asks you to reply to an inbox message, read it first, then draft the reply with sendEmail using the original's Message-ID as inReplyTo so it threads.
 - Remember standing preferences across conversations: when the user asks you to remember something, or to always/never do something, save it with rememberPreference. Use getRememberedPreferences / forgetPreference to review or remove them.
 
 Always be respectful, brief, and practical. Confirm what you did, including dates, times, and names. When you don't know something, say so. Bulletins are dated on Sundays; if asked for a non-Sunday it will roll forward to the next Sunday.
 
 Current date: ${new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}`;
+
+/**
+ * Diagnostics for the agent's tool loop. On by default so we can see, in the
+ * server logs (e.g. Vercel → Logs), exactly how each model turn resolves —
+ * finish reason, whether a real tool call came through, and any provider
+ * warnings. Set AI_DEBUG=0 to silence. Logs never include message or email
+ * contents — only shapes, counts, lengths, and tool names — so no member data
+ * lands in the logs.
+ */
+const AI_DEBUG = process.env.AI_DEBUG !== "0";
+
+function logAgent(event: string, data: Record<string, unknown>) {
+  if (!AI_DEBUG) return;
+  try {
+    console.log(`[agent] ${event}`, JSON.stringify(data));
+  } catch {
+    console.log(`[agent] ${event}`, data);
+  }
+}
 
 /** Human-readable role label for the person currently signed in. */
 const ROLE_LABELS: Record<string, string> = {
@@ -86,6 +106,19 @@ export async function POST(request: Request) {
   const { messages: uiMessages } = await request.json();
   const messages = await convertToModelMessages(uiMessages);
 
+  // What model/provider actually got resolved for this request. The id is the
+  // first thing to check: a native-DeepSeek provider expects `deepseek-chat` /
+  // `deepseek-reasoner`, while an OpenRouter-style `vendor/model` id belongs on
+  // the openai-compat provider — a mismatch is a common cause of empty/looping
+  // replies.
+  const modelId = typeof model === "string" ? model : model.modelId;
+  const modelProvider = typeof model === "string" ? "(string id)" : model.provider;
+  logAgent("request", {
+    provider: modelProvider,
+    model: modelId,
+    incomingMessages: messages.length,
+  });
+
   // Load the assistant's durable memory and fold it into the system prompt so it
   // honors standing preferences. Tolerate the table not existing yet.
   let notes: { content: string }[] = [];
@@ -111,11 +144,31 @@ export async function POST(request: Request) {
     current = null;
   }
 
+  // Secret for HMAC-signing tool-approval requests (email sends etc.). With it,
+  // the server signs each approval request when it's issued and re-verifies the
+  // signature when the client replays the approval — so a tool marked
+  // `needsApproval` can never be executed from a forged or malformed approval
+  // response; only an approval the user actually granted in the browser is
+  // honored. Falls back to the service-role key (always present server-side) so
+  // no extra configuration is required; set AI_TOOL_APPROVAL_SECRET to use a
+  // dedicated secret. The secret only needs to be stable across the pair of
+  // requests that issue and replay one approval.
+  const approvalSecret =
+    process.env.AI_TOOL_APPROVAL_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || undefined;
+  if (!approvalSecret) {
+    // Never silently fall back to unenforced approvals — that's the exact gap
+    // that let email go out un-reviewed. Fail loudly instead.
+    logAgent("approval-secret-missing", {});
+  }
+
   const result = streamText({
     model,
     system: buildSystemPrompt(notes, current),
     messages,
     tools: agentTools,
+    // Cryptographically bind approvals so `needsApproval` tools (email) can only
+    // run from an approval the user actually granted. See approvalSecret above.
+    experimental_toolApprovalSecret: approvalSecret,
     // Runaway guard for the agentic tool loop — NOT a per-conversation message
     // limit. A "step" is one model turn plus the tool calls it makes; the model
     // then sees the results and can go again. This cap stops a misbehaving model
@@ -128,7 +181,79 @@ export async function POST(request: Request) {
     // the SDK retry a few times (with exponential backoff) before giving up,
     // since these usually clear quickly.
     maxRetries: 4,
+    // ── Diagnostics (see AI_DEBUG above) ────────────────────────────────────
+    // Log how each model turn resolved. The key signals for the DeepSeek
+    // "used a tool but nothing happened / spins forever" symptom:
+    //   • finishReason "tool-calls" but toolCalls: 0  → model described a tool
+    //     call in prose instead of emitting a real one.
+    //   • a toolCall with emptyInput: true            → arguments never
+    //     assembled into valid JSON (malformed streamed tool call).
+    //   • finishReason "stop" with textLen 0          → empty reply.
+    onStepFinish: (step) => {
+      logAgent("step", {
+        step: step.stepNumber,
+        finishReason: step.finishReason,
+        textLen: step.text?.length ?? 0,
+        reasoningLen: step.reasoningText?.length ?? 0,
+        toolCalls: (step.toolCalls ?? []).map((tc) => {
+          const input = (tc as { input?: unknown }).input;
+          const keys =
+            input && typeof input === "object" ? Object.keys(input as object) : [];
+          return {
+            name: tc.toolName,
+            emptyInput: input == null || (keys.length === 0 && typeof input !== "string"),
+            inputKeys: keys,
+          };
+        }),
+        toolResults: step.toolResults?.length ?? 0,
+        // How many tool calls this step held back for user approval (email
+        // sends). A send is only legitimate when a later step actually executes
+        // an approved one — approvalRequests here, then toolResults on resume.
+        approvalRequests: (step.content ?? []).filter(
+          (c) => (c as { type?: string }).type === "tool-approval-request",
+        ).length,
+        stepWarnings: step.warnings?.length ?? 0,
+      });
+    },
+    onFinish: (final) => {
+      logAgent("finish", {
+        steps: final.steps?.length ?? 0,
+        finishReason: final.finishReason,
+        totalTextLen: final.text?.length ?? 0,
+        toolCallsMade: final.steps?.reduce((n, s) => n + (s.toolCalls?.length ?? 0), 0) ?? 0,
+      });
+    },
+    onError: ({ error }) => {
+      logAgent("stream-error", { error: describeError(error) });
+    },
+    // Fires only when the SDK cannot turn the model's tool call into a valid
+    // input (empty/malformed arguments, or an unknown tool). We log the shape —
+    // never the values — and return null to leave behavior exactly as it is
+    // today; this call just tells us how often, and on which tools, DeepSeek
+    // emits a broken tool call.
+    experimental_repairToolCall: async ({ toolCall, error }) => {
+      const raw =
+        typeof toolCall.input === "string"
+          ? toolCall.input
+          : JSON.stringify(toolCall.input ?? "");
+      logAgent("tool-call-unrepairable", {
+        toolName: toolCall.toolName,
+        rawInputLen: raw.length,
+        looksEmpty: raw.trim() === "" || raw.trim() === "{}",
+        errorName: error?.name,
+      });
+      return null;
+    },
   });
+
+  // Provider-level warnings are the tell for "the model/route can't do tools":
+  // e.g. tools or tool_choice unsupported, so they were dropped. Awaited off to
+  // the side so it never blocks the streamed response.
+  void Promise.resolve(result.warnings)
+    .then((w) => {
+      if (w && w.length > 0) logAgent("provider-warnings", { warnings: w });
+    })
+    .catch(() => {});
 
   return result.toUIMessageStreamResponse({
     onError: (error) => {

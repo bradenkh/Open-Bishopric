@@ -5,7 +5,7 @@ import { fromRow } from "@/lib/db/mappers";
 import { parseBulletin, defaultBulletin, upcomingSunday } from "@/lib/bulletin";
 import { isAnnouncementActive } from "@/lib/announcements";
 import { listAgentNotes } from "@/lib/agent-notes";
-import { isEmailConfigured, sendEmail, searchInbox, readInboxMessage } from "@/lib/email/gmail";
+import { isEmailConfigured, sendEmail as sendGmailMessage, searchInbox, readInboxMessage } from "@/lib/email/gmail";
 import { WARD_BUSINESS_CATEGORIES, makeEntry, seedBusiness } from "@/lib/ward";
 import { INTERVIEW_DURATION_MINS } from "@/types";
 import type {
@@ -1295,7 +1295,10 @@ async function memberEmailByName(name: string): Promise<string | undefined> {
 
 export const sendTaskReminder = tool({
   description:
-    "Email a reminder about a to-do/task to the person it concerns. Use when the bishopric wants to nudge someone about an assignment. Resolves the recipient from the task's member (or pass an explicit email). Requires email to be configured in Settings → Email.",
+    "Email a reminder about a to-do/task to the person it concerns. Use when the bishopric wants to nudge someone about an assignment. Resolves the recipient from the task's member (or pass an explicit email). The user reviews and approves (or gives feedback on) the message before it is sent. Requires email to be configured in Settings → Email.",
+  // Outbound email always goes through human review: the send only happens
+  // after the signed-in bishopric member approves it in the chat.
+  needsApproval: true,
   inputSchema: z.object({
     taskId: z.string().describe("The task to send a reminder about (from getTasks)"),
     to: z.string().optional().describe("Recipient email; if omitted, resolved from the task's member"),
@@ -1326,7 +1329,7 @@ export const sendTaskReminder = tool({
       "Thank you!",
     ].filter(Boolean);
 
-    const { messageId } = await sendEmail({
+    const { messageId } = await sendGmailMessage({
       to: recipient,
       subject: `Reminder: ${task.title}`,
       body: lines.join("\n"),
@@ -1338,7 +1341,9 @@ export const sendTaskReminder = tool({
 
 export const emailInterviewTimes = tool({
   description:
-    "Email a member proposed interview time(s) and ask them to reply with what works. Stores the message id so the member's reply is matched back to this interview by the inbound poll. Requires email to be configured.",
+    "Email a member proposed interview time(s) and ask them to reply with what works. Stores the message id so the member's reply is matched back to this interview by the inbound poll. The user reviews and approves (or gives feedback on) the message before it is sent. Requires email to be configured.",
+  // Outbound email always goes through human review before it is sent.
+  needsApproval: true,
   inputSchema: z.object({
     interviewId: z.string().describe("The interview to schedule (from getInterviews)"),
     proposedTimes: z.array(z.string()).min(1).describe("Human-readable time options, e.g. 'Tuesday, Sep 2 at 7:00 PM'"),
@@ -1372,13 +1377,45 @@ export const emailInterviewTimes = tool({
       "Just reply to this email and let us know. Thank you!",
     ].filter(Boolean).join("\n");
 
-    const { messageId } = await sendEmail({
+    const { messageId } = await sendGmailMessage({
       to: recipient,
       subject: "Scheduling an interview",
       body,
     });
     await db().from("interviews").update({ email_message_id: messageId }).eq("id", interviewId);
     return { ok: true, interviewId, to: recipient, messageId };
+  },
+});
+
+export const sendEmail = tool({
+  description:
+    "Compose and send a plain-text email from the ward Gmail account to any recipient. Use this for any outbound email that isn't a task reminder or interview-time request — for example replying to a message from the inbox, or writing to a ward member or leader. Write the complete message yourself (subject and full body) so the user can review exactly what will go out. The user must review and either approve it (which sends it) or give feedback for you to revise — nothing is sent until they approve. To reply within an existing email thread, pass the original message's Message-ID as inReplyTo (available from readEmail). Requires email to be configured in Settings → Email.",
+  // Outbound email always goes through human review: the send only happens
+  // after the signed-in bishopric member approves the drafted message.
+  needsApproval: true,
+  inputSchema: z.object({
+    to: z.string().describe("Recipient email address"),
+    subject: z.string().describe("The email subject line"),
+    body: z.string().describe("The full plain-text body of the email, written out in full"),
+    inReplyTo: z
+      .string()
+      .optional()
+      .describe("The Message-ID being replied to, to thread the reply (from readEmail); omit for a new message"),
+  }),
+  execute: async ({ to, subject, body, inReplyTo }) => {
+    if (!(await isEmailConfigured())) {
+      return { error: "Email isn't configured yet. Add a Gmail address and app password in Settings → Email." };
+    }
+    const recipient = to.trim();
+    if (!recipient) {
+      return { error: "A recipient email address is required." };
+    }
+    try {
+      const { messageId } = await sendGmailMessage({ to: recipient, subject, body, inReplyTo });
+      return { ok: true, to: recipient, subject, messageId };
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : "Failed to send the email." };
+    }
   },
 });
 
@@ -1510,6 +1547,7 @@ export const agentTools = {
   // Email
   sendTaskReminder,
   emailInterviewTimes,
+  sendEmail,
   searchInbox: searchInboxTool,
   readEmail,
   // Memory
