@@ -51,8 +51,16 @@ type TaskForm = typeof EMPTY_FORM;
 
 export default function TasksPage() {
   const { appUser } = useAuth();
-  const { bishopric, profiles } = useData();
+  const members = useData().members;
   const { tasks, addTask, updateTask, completeTask } = useTasks();
+
+  // Any active ward member can own a task, sorted by name for the picker.
+  const owners = useMemo(
+    () => [...members]
+      .filter((m) => m.isActive)
+      .sort((a, b) => `${a.lastName} ${a.firstName}`.localeCompare(`${b.lastName} ${b.firstName}`)),
+    [members],
+  );
 
   const [filterStatus, setFilterStatus] = useState<TaskStatus | "open" | "all">("open");
   const [filterType, setFilterType] = useState<TaskType | "all">("all");
@@ -66,9 +74,9 @@ export default function TasksPage() {
   // Reminder state, keyed by task id
   const [reminding, setReminding] = useState<string | null>(null);
 
-  /** The owner's email, if the task has an owner we can resolve to a profile. */
+  /** The owner's email, if the task has an owner we can resolve to a member. */
   const ownerEmailFor = (t: Task) =>
-    t.assigneeId ? profiles.find((p) => p.uid === t.assigneeId)?.email : undefined;
+    t.assigneeId ? members.find((m) => m.id === t.assigneeId)?.email : undefined;
 
   const openCount = tasks.filter((t) => OPEN_STATUSES.includes(t.status)).length;
 
@@ -103,8 +111,8 @@ export default function TasksPage() {
     // Reflect the stored owner in the picker: match on id, then fall back to the
     // name (calling-workflow tasks record an owner name but no id).
     const owner = t.assigneeId
-      ? bishopric.find((b) => b.id === t.assigneeId)
-      : bishopric.find((b) => b.name === t.assigneeName);
+      ? members.find((m) => m.id === t.assigneeId)
+      : members.find((m) => `${m.firstName} ${m.lastName}` === t.assigneeName);
     setForm({
       title: t.title,
       description: t.description ?? "",
@@ -119,14 +127,14 @@ export default function TasksPage() {
   async function handleSave() {
     if (!form.title.trim()) return;
     setSaving(true);
-    const owner = form.ownerId ? bishopric.find((b) => b.id === form.ownerId) : undefined;
+    const owner = form.ownerId ? members.find((m) => m.id === form.ownerId) : undefined;
     const patch = {
       title: form.title.trim(),
       description: form.description.trim() || undefined,
       type: form.type,
       status: form.status,
       assigneeId: form.ownerId || undefined,
-      assigneeName: owner?.name,
+      assigneeName: owner ? `${owner.firstName} ${owner.lastName}` : undefined,
       dueDate: form.dueDate || undefined,
     };
     if (editing) {
@@ -165,13 +173,13 @@ export default function TasksPage() {
   // the shared endpoint, and fall back to a mailto: link if Gmail isn't configured
   // (409 notConfigured).
   async function sendReminder(t: Task) {
-    const owner = t.assigneeId ? profiles.find((p) => p.uid === t.assigneeId) : undefined;
+    const owner = t.assigneeId ? members.find((m) => m.id === t.assigneeId) : undefined;
     const email = owner?.email;
     if (!email) {
-      alert("This task has no owner with an email on file. Assign an owner first.");
+      alert("This task's owner has no email on file. Assign an owner with an email address, or add one to their member record.");
       return;
     }
-    const firstName = owner!.displayName.split(" ")[0] || "there";
+    const firstName = owner!.firstName || "there";
     const subject = `Reminder: ${t.title}`;
     const body = [
       `Hi ${firstName},`,
@@ -401,8 +409,8 @@ export default function TasksPage() {
                   <SelectTrigger><SelectValue placeholder="Unassigned" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__none">Unassigned</SelectItem>
-                    {bishopric.map((b) => (
-                      <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                    {owners.map((m) => (
+                      <SelectItem key={m.id} value={m.id}>{m.firstName} {m.lastName}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -418,7 +426,7 @@ export default function TasksPage() {
               </div>
             </div>
             <p className="text-[11px] text-muted-foreground -mt-1">
-              The owner is who&apos;s responsible for the task. Assign one to enable email reminders.
+              The owner is the ward member responsible for the task. Assigning one whose record has an email enables reminders.
             </p>
             <div className="space-y-1.5">
               <Label htmlFor="task-notes">Notes</Label>
