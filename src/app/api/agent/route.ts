@@ -144,11 +144,31 @@ export async function POST(request: Request) {
     current = null;
   }
 
+  // Secret for HMAC-signing tool-approval requests (email sends etc.). With it,
+  // the server signs each approval request when it's issued and re-verifies the
+  // signature when the client replays the approval — so a tool marked
+  // `needsApproval` can never be executed from a forged or malformed approval
+  // response; only an approval the user actually granted in the browser is
+  // honored. Falls back to the service-role key (always present server-side) so
+  // no extra configuration is required; set AI_TOOL_APPROVAL_SECRET to use a
+  // dedicated secret. The secret only needs to be stable across the pair of
+  // requests that issue and replay one approval.
+  const approvalSecret =
+    process.env.AI_TOOL_APPROVAL_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || undefined;
+  if (!approvalSecret) {
+    // Never silently fall back to unenforced approvals — that's the exact gap
+    // that let email go out un-reviewed. Fail loudly instead.
+    logAgent("approval-secret-missing", {});
+  }
+
   const result = streamText({
     model,
     system: buildSystemPrompt(notes, current),
     messages,
     tools: agentTools,
+    // Cryptographically bind approvals so `needsApproval` tools (email) can only
+    // run from an approval the user actually granted. See approvalSecret above.
+    experimental_toolApprovalSecret: approvalSecret,
     // Runaway guard for the agentic tool loop — NOT a per-conversation message
     // limit. A "step" is one model turn plus the tool calls it makes; the model
     // then sees the results and can go again. This cap stops a misbehaving model
@@ -186,6 +206,12 @@ export async function POST(request: Request) {
           };
         }),
         toolResults: step.toolResults?.length ?? 0,
+        // How many tool calls this step held back for user approval (email
+        // sends). A send is only legitimate when a later step actually executes
+        // an approved one — approvalRequests here, then toolResults on resume.
+        approvalRequests: (step.content ?? []).filter(
+          (c) => (c as { type?: string }).type === "tool-approval-request",
+        ).length,
         stepWarnings: step.warnings?.length ?? 0,
       });
     },
