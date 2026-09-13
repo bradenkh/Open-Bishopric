@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import {
-  Plus, Filter, CheckCircle2, Circle, Pencil, Trash2, User, CalendarDays,
+  Plus, Filter, CheckCircle2, RotateCcw, Pencil, Trash2, User, CalendarDays,
   Mail, ListTodo,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -153,12 +153,8 @@ export default function TasksPage() {
     setDialogOpen(false);
   }
 
-  async function toggleComplete(t: Task) {
-    if (t.status === "completed") {
-      await updateTask(t.id, { status: "active", updatedAt: new Date().toISOString() });
-    } else {
-      await completeTask(t.id);
-    }
+  async function reopenTask(t: Task) {
+    await updateTask(t.id, { status: "active", updatedAt: new Date().toISOString() });
   }
 
   async function deleteTask(t: Task) {
@@ -288,71 +284,70 @@ export default function TasksPage() {
             return (
               <li
                 key={t.id}
-                className="group flex items-start gap-3 rounded-xl border border-border bg-card px-4 py-3"
+                className="rounded-xl border border-border bg-card px-4 py-3"
               >
-                <button
-                  className="mt-0.5 shrink-0"
-                  onClick={() => toggleComplete(t)}
-                  title={done ? "Mark not done" : "Mark done"}
-                >
-                  {done
-                    ? <CheckCircle2 className="h-5 w-5 text-green-600" />
-                    : <Circle className="h-5 w-5 text-muted-foreground/40 hover:text-primary" />}
-                </button>
-
-                <div className="flex-1 min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className={cn("text-sm font-medium", closed && "line-through text-muted-foreground")}>
-                      {t.title}
-                    </p>
-                    <span className="text-[10px] rounded-full bg-muted px-2 py-0.5 text-muted-foreground">
-                      {TASK_TYPE_LABELS[t.type]}
-                    </span>
-                    <span className={cn("text-[10px] px-2 py-0.5 rounded-full", TASK_STATUS_COLORS[t.status])}>
-                      {STATUS_LABELS[t.status]}
-                    </span>
-                  </div>
-                  {t.description && (
-                    <p className="text-xs text-muted-foreground mt-0.5">{t.description}</p>
-                  )}
-                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
-                    {t.assigneeName && (
-                      <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                        <User className="h-3 w-3" /> {t.assigneeName}
+                <div className="flex items-start gap-2">
+                  {done && <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-green-600" />}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className={cn("text-sm font-medium", closed && "line-through text-muted-foreground")}>
+                        {t.title}
+                      </p>
+                      <span className="text-[10px] rounded-full bg-muted px-2 py-0.5 text-muted-foreground">
+                        {TASK_TYPE_LABELS[t.type]}
                       </span>
-                    )}
-                    {t.dueDate && (
-                      <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                        <CalendarDays className="h-3 w-3" /> {formatDate(t.dueDate)}
+                      <span className={cn("text-[10px] px-2 py-0.5 rounded-full", TASK_STATUS_COLORS[t.status])}>
+                        {STATUS_LABELS[t.status]}
                       </span>
+                    </div>
+                    {t.description && (
+                      <p className="text-xs text-muted-foreground mt-0.5">{t.description}</p>
                     )}
-                    {t.reminderSentAt && (
-                      <span className="text-xs text-green-700 dark:text-green-400">reminder sent</span>
-                    )}
+                    <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
+                      {t.assigneeName && (
+                        <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                          <User className="h-3 w-3" /> {t.assigneeName}
+                        </span>
+                      )}
+                      {t.dueDate && (
+                        <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                          <CalendarDays className="h-3 w-3" /> {formatDate(t.dueDate)}
+                        </span>
+                      )}
+                      {t.reminderSentAt && (
+                        <span className="text-xs text-green-700 dark:text-green-400">reminder sent</span>
+                      )}
+                    </div>
                   </div>
                 </div>
 
-                <div className="flex shrink-0 items-center gap-0.5">
-                  {!closed && (
-                    <Button
-                      variant="ghost" size="icon" className="h-8 w-8"
-                      onClick={() => openReminder(t)}
-                      title="Send a reminder"
-                    >
-                      <Mail className="h-3.5 w-3.5" />
+                <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                  {closed ? (
+                    <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => reopenTask(t)}>
+                      <RotateCcw className="h-3.5 w-3.5" /> Reopen
+                    </Button>
+                  ) : (
+                    <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => completeTask(t.id)}>
+                      <CheckCircle2 className="h-3.5 w-3.5" /> Complete
                     </Button>
                   )}
-                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(t)} title="Edit">
-                    <Pencil className="h-3.5 w-3.5" />
+                  {!closed && (
+                    <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => openReminder(t)}>
+                      <Mail className="h-3.5 w-3.5" /> Send reminder
+                    </Button>
+                  )}
+                  <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => openEdit(t)}>
+                    <Pencil className="h-3.5 w-3.5" /> Edit
                   </Button>
-                  <Button
-                    variant="ghost" size="icon"
-                    className="h-8 w-8 text-muted-foreground/60 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
-                    onClick={() => deleteTask(t)}
-                    title="Cancel task"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
+                  {t.status !== "cancelled" && (
+                    <Button
+                      variant="ghost" size="sm"
+                      className="h-8 gap-1.5 text-muted-foreground hover:text-red-600"
+                      onClick={() => deleteTask(t)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" /> Cancel
+                    </Button>
+                  )}
                 </div>
               </li>
             );
