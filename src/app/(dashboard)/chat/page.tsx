@@ -26,7 +26,7 @@ import { useChatContext } from "@/contexts/ChatContext";
 import { cn } from "@/lib/utils";
 
 export default function ChatPage() {
-  const { messages, sendMessage, status, error, stop, newChat } =
+  const { messages, sendMessage, status, error, stop, newChat, respondToApproval } =
     useChatContext();
   const [input, setInput] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -146,7 +146,13 @@ export default function ChatPage() {
                   <div className="flex max-w-[80%] flex-col gap-2">
                     {parts.map((part, i) => {
                       if (isToolUIPart(part)) {
-                        return <Tool key={i} part={part} />;
+                        return (
+                          <Tool
+                            key={i}
+                            part={part}
+                            onApproval={respondToApproval}
+                          />
+                        );
                       }
                       const text = (part as { type: "text"; text: string })
                         .text;
