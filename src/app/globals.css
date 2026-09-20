@@ -103,3 +103,32 @@
 @utility pb-safe {
   padding-bottom: env(safe-area-inset-bottom);
 }
+
+/* ── Meeting-mode markdown editor (MDXEditor) ────────────────────────────────
+   The editor fills its pane; the toolbar sticks to the top while the agenda
+   scrolls beneath it. Colors are mapped onto the app's theme tokens so the
+   editor matches the rest of the UI. */
+.mdx-agenda-shell .mdxeditor {
+  --accentBase: hsl(var(--accent));
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  font-family: inherit;
+}
+.mdx-agenda-shell .mdxeditor-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  border-radius: 0;
+  flex-wrap: wrap;
+}
+.mdx-agenda-shell .mdxeditor-root-contenteditable {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.mdx-agenda-prose {
+  padding: 1rem 1.25rem 2rem;
+}
+.mdx-agenda-prose h1 { font-size: 1.5rem; font-weight: 700; }
+.mdx-agenda-prose h2 { font-size: 1.25rem; font-weight: 600; }
+.mdx-agenda-prose h3 { font-size: 1.1rem; font-weight: 600; }

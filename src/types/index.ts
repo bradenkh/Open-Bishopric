@@ -226,6 +226,39 @@ export interface AgendaItem {
   carriedInto?: string;
 }
 
+// ── Meeting agendas (markdown documents) ─────────────────────────────────────
+
+/** A single checklist item on a meeting agenda's to-do list. */
+export interface AgendaTodo {
+  id: string;
+  text: string;
+  done: boolean;
+}
+
+/**
+ * A meeting, modeled as a single editable markdown document. The agenda body
+ * lives in `content` (markdown, edited visually in meeting mode); `todos` and
+ * `notes` are the working columns filled in while the meeting is run.
+ *
+ * This is the replacement for the old sectioned agenda-item builder — see
+ * migration 0019_meeting_agendas_v2.sql.
+ */
+export interface MeetingAgenda {
+  id: string;
+  title: string;
+  /** The agenda itself, stored as markdown. */
+  content: string;
+  /** Working to-do checklist captured during the meeting. */
+  todos: AgendaTodo[];
+  /** Free-form meeting notes (markdown / plain text). */
+  notes: string;
+  /** Optional date the meeting is for (YYYY-MM-DD). */
+  meetingDate?: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // ── Sacrament meeting program (bulletin JSON) ────────────────────────────────
 
 /**

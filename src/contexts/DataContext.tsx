@@ -32,6 +32,7 @@ import {
   callingsRepo,
   interviewsRepo,
   listProfiles,
+  meetingAgendasRepo,
   meetingsRepo,
   membersRepo,
   rosterRepo,
@@ -50,6 +51,7 @@ import type {
   Calling,
   Interview,
   Meeting,
+  MeetingAgenda,
   Member,
   RosterGroup,
   SettlementRecord,
@@ -84,6 +86,8 @@ interface DataContextValue {
   callings: Collection<Calling>;
   interviews: Collection<Interview>;
   meetings: Collection<Meeting>;
+  /** Markdown meeting-agenda documents (the Meetings tab). */
+  agendas: Collection<MeetingAgenda>;
   announcements: Collection<Announcement>;
   /** Pre-meeting agenda requests sent to organization leaders. */
   solicitations: Collection<AgendaSolicitation>;
@@ -177,6 +181,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const [callings, setCallings] = useState<Calling[]>([]);
   const [interviews, setInterviews] = useState<Interview[]>([]);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
+  const [agendas, setAgendas] = useState<MeetingAgenda[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [solicitations, setSolicitations] = useState<AgendaSolicitation[]>([]);
   const [settlements, setSettlements] = useState<SettlementRecord[]>([]);
@@ -216,6 +221,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       callingsData,
       interviewsData,
       meetingsData,
+      agendasData,
       announcementsData,
       solicitationsData,
       settlementsData,
@@ -229,6 +235,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       callingsRepo.list(db),
       interviewsRepo.list(db),
       meetingsRepo.list(db),
+      meetingAgendasRepo.list(db),
       announcementsRepo.list(db),
       solicitationsRepo.list(db),
       settlementRepo.list(db),
@@ -242,6 +249,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     setCallings(callingsData);
     setInterviews(interviewsData);
     setMeetings(meetingsData);
+    setAgendas(agendasData);
     setAnnouncements(announcementsData);
     setSolicitations(solicitationsData);
     setSettlements(settlementsData);
@@ -430,6 +438,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       callings: makeCollection(db, callingsRepo, callings, setCallings),
       interviews: makeCollection(db, interviewsRepo, interviews, setInterviews),
       meetings: makeCollection(db, meetingsRepo, meetings, setMeetings),
+      agendas: makeCollection(db, meetingAgendasRepo, agendas, setAgendas),
       announcements: makeCollection(db, announcementsRepo, announcements, setAnnouncements),
       solicitations: makeCollection(db, solicitationsRepo, solicitations, setSolicitations),
       settlements: makeCollection(db, settlementRepo, settlements, setSettlements),
@@ -457,6 +466,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       callings,
       interviews,
       meetings,
+      agendas,
       announcements,
       solicitations,
       settlements,
