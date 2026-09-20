@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { calendarBookingsRepo } from "@/lib/db";
 import { syncCalendar, getCalendarUrl, CalendarNotConfiguredError } from "@/lib/calendar/sync";
 
 /**
@@ -10,7 +9,12 @@ import { syncCalendar, getCalendarUrl, CalendarNotConfiguredError } from "@/lib/
  *   POST → fetch + parse the secret iCal feed, match appointments to members,
  *          upsert into `calendar_bookings`, and return the sync counts.
  *   GET  → current subscription state: whether a URL is set, when it last
- *          synced, and the ingested bookings (newest first).
+ *          synced, and matched/unmatched counts.
+ *
+ * GET is deliberately lightweight — it never returns the booking rows themselves
+ * (those already reach the client through the shared DataContext). It only reads
+ * the small subscription-status fields, using count-only queries so the whole
+ * `calendar_bookings` table isn't serialized on every Scheduling-tab visit.
  *
  * Server-only via the service-role client. Triggered on demand from Settings →
  * Calendar (there is no cron in this project — the email intake works the same
@@ -33,14 +37,20 @@ export async function GET() {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   const url = await getCalendarUrl(admin);
-  const bookings = await calendarBookingsRepo.list(admin);
+
+  // Count-only queries (head: true) — no rows are transferred, just totals.
+  const [matchedRes, unmatchedRes] = await Promise.all([
+    admin.from("calendar_bookings").select("id", { count: "exact", head: true }).not("member_id", "is", null),
+    admin.from("calendar_bookings").select("id", { count: "exact", head: true }).is("member_id", null),
+  ]);
+  if (matchedRes.error) return NextResponse.json({ error: matchedRes.error.message }, { status: 500 });
+  if (unmatchedRes.error) return NextResponse.json({ error: unmatchedRes.error.message }, { status: 500 });
 
   return NextResponse.json({
     configured: Boolean(url),
     syncedAt: settings?.calendar_synced_at ?? null,
-    matched: bookings.filter((b) => b.memberId).length,
-    unmatched: bookings.filter((b) => !b.memberId).length,
-    bookings,
+    matched: matchedRes.count ?? 0,
+    unmatched: unmatchedRes.count ?? 0,
   });
 }
 

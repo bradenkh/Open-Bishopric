@@ -966,13 +966,17 @@ export default function InterviewsPage() {
   }
 
   // ── Header counts ────────────────────────────────────────────────────────────
-  const unmatchedBookings = calendarBookings.filter((b) => b.status !== "cancelled" && !b.memberId).length;
-  const upcomingBookings = calendarBookings.filter(
-    (b) => b.status !== "cancelled" && b.memberId && bookingWhen(b.startAt).date >= TODAY,
-  ).length;
+  // Memoized so we don't re-run the timezone conversions and household grouping
+  // on every render (only when the underlying data changes).
+  const { unmatchedBookings, upcomingBookings } = useMemo(() => ({
+    unmatchedBookings: calendarBookings.filter((b) => b.status !== "cancelled" && !b.memberId).length,
+    upcomingBookings: calendarBookings.filter(
+      (b) => b.status !== "cancelled" && b.memberId && bookingWhen(b.startAt).date >= TODAY,
+    ).length,
+  }), [calendarBookings]);
 
   // Households still needing a settlement booking (for the tab badge).
-  const settlementRemaining = (() => {
+  const settlementRemaining = useMemo(() => {
     const active = members.filter((m) => m.isActive);
     const groups = new Map<string, Member[]>();
     for (const m of active) {
@@ -993,7 +997,7 @@ export default function InterviewsPage() {
       if (!booked && !terminal) remaining += 1;
     }
     return remaining;
-  })();
+  }, [members, settlements, calendarBookings]);
 
   const TAB_CONFIG: { view: PageView; label: string; count?: number }[] = [
     { view: "bookings",   label: "Bookings",           count: unmatchedBookings },
