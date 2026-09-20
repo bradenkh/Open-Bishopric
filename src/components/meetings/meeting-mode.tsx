@@ -15,7 +15,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { X, Plus, Trash2, Check, User } from "lucide-react";
+import { X, Plus, Trash2, Check, User, CalendarClock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MarkdownEditor } from "@/components/meetings/markdown-editor";
@@ -40,7 +40,10 @@ export function MeetingMode({
   const [todos, setTodos] = useState<AgendaTodo[]>(agenda.todos ?? []);
   const [newText, setNewText] = useState("");
   const [newAssignee, setNewAssignee] = useState("");
+  const [newDue, setNewDue] = useState("");
   const [saveState, setSaveState] = useState<SaveState>("idle");
+
+  const todayISO = new Date().toISOString().slice(0, 10);
 
   // MDXEditor is uncontrolled: pin the starting markdown once so our own
   // autosaves (which re-render the parent with new content) never re-feed the
@@ -119,11 +122,21 @@ export function MeetingMode({
     const text = newText.trim();
     if (!text) return;
     persistTodos(
-      [...todos, { id: newId(), text, done: false, assignee: newAssignee.trim() || undefined }],
+      [
+        ...todos,
+        {
+          id: newId(),
+          text,
+          done: false,
+          assignee: newAssignee.trim() || undefined,
+          dueDate: newDue || undefined,
+        },
+      ],
       true,
     );
     setNewText("");
     setNewAssignee("");
+    setNewDue("");
     // Keep focus on the task field for rapid-fire capture during the meeting.
     newTextRef.current?.focus();
   }
@@ -220,7 +233,20 @@ export function MeetingMode({
                       }
                     }}
                     placeholder="Assign to (optional)"
-                    className="h-9 w-full bg-background sm:w-40"
+                    className="h-9 w-full bg-background sm:w-36"
+                  />
+                  <Input
+                    type="date"
+                    value={newDue}
+                    onChange={(e) => setNewDue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        addTodo();
+                      }
+                    }}
+                    title="Due date (optional)"
+                    className={cn("h-9 w-[8.5rem] bg-background", !newDue && "text-muted-foreground")}
                   />
                   <Button
                     className="h-9 shrink-0"
@@ -275,6 +301,28 @@ export function MeetingMode({
                       }
                       placeholder="Unassigned"
                       className="w-24 bg-transparent py-1 text-xs outline-none placeholder:text-muted-foreground/60 focus:w-28"
+                    />
+                  </div>
+                  <div
+                    className={cn(
+                      "flex items-center gap-1",
+                      todo.dueDate && !todo.done && todo.dueDate < todayISO
+                        ? "text-destructive"
+                        : "text-muted-foreground",
+                    )}
+                  >
+                    <CalendarClock className="h-3.5 w-3.5 shrink-0" />
+                    <input
+                      type="date"
+                      value={todo.dueDate ?? ""}
+                      onChange={(e) =>
+                        editTodo(todo.id, { dueDate: e.target.value || undefined })
+                      }
+                      title="Due date"
+                      className={cn(
+                        "w-[7.5rem] bg-transparent py-1 text-xs outline-none",
+                        !todo.dueDate && "text-muted-foreground/60",
+                      )}
                     />
                   </div>
                   <button

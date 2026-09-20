@@ -235,6 +235,8 @@ export interface AgendaTodo {
   done: boolean;
   /** Who the item was assigned to, captured live during the meeting. */
   assignee?: string;
+  /** Optional due date (YYYY-MM-DD). */
+  dueDate?: string;
 }
 
 /**
