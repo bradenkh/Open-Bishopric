@@ -233,6 +233,8 @@ export interface AgendaTodo {
   id: string;
   text: string;
   done: boolean;
+  /** Who the item was assigned to, captured live during the meeting. */
+  assignee?: string;
 }
 
 /**

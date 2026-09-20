@@ -18,7 +18,12 @@ const Editor = dynamic(() => import("./initialized-mdx-editor"), {
   ),
 });
 
-export const MarkdownEditor = forwardRef<MDXEditorMethods, MDXEditorProps>(
+type MarkdownEditorProps = MDXEditorProps & {
+  /** Render a lighter toolbar (used for the smaller notes pane). */
+  compact?: boolean;
+};
+
+export const MarkdownEditor = forwardRef<MDXEditorMethods, MarkdownEditorProps>(
   function MarkdownEditor(props, ref) {
     return <Editor {...props} editorRef={ref} />;
   },

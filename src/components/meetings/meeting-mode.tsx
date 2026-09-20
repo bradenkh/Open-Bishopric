@@ -4,20 +4,20 @@
  * Full-screen "run the meeting" view for a single agenda.
  *
  * Three panes:
- *   • Left half        — the agenda itself, edited visually (MDXEditor) so the
- *                        markdown renders while you edit it, no raw syntax.
- *   • Right, top half   — a working to-do checklist.
- *   • Right, bottom half — free-form meeting notes.
+ *   • Left half         — the agenda itself, edited visually (MDXEditor).
+ *   • Right, top half    — a working to-do list built for capturing assignments
+ *                          in real time: a persistent quick-add row (task +
+ *                          optional assignee) sits on top of the running list.
+ *   • Right, bottom half — free-form meeting notes, also edited visually.
  *
- * Every pane autosaves (debounced) back to the `meeting_agendas` row through the
- * DataContext, which persists optimistically to Supabase.
+ * The agenda and notes are stored as markdown; every pane autosaves (debounced)
+ * back to the `meeting_agendas` row through the DataContext.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { X, Plus, Trash2, Check } from "lucide-react";
+import { X, Plus, Trash2, Check, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { MarkdownEditor } from "@/components/meetings/markdown-editor";
 import { useData, newId } from "@/contexts/DataContext";
 import type { AgendaTodo, MeetingAgenda } from "@/types";
@@ -38,14 +38,18 @@ export function MeetingMode({
   // id), so seeding from props on mount is safe.
   const [title, setTitle] = useState(agenda.title);
   const [todos, setTodos] = useState<AgendaTodo[]>(agenda.todos ?? []);
-  const [notes, setNotes] = useState(agenda.notes ?? "");
+  const [newText, setNewText] = useState("");
+  const [newAssignee, setNewAssignee] = useState("");
+  const [saveState, setSaveState] = useState<SaveState>("idle");
+
   // MDXEditor is uncontrolled: pin the starting markdown once so our own
   // autosaves (which re-render the parent with new content) never re-feed the
-  // editor and jump the cursor. The component is keyed by id, so opening a
+  // editors and jump the cursor. The component is keyed by id, so opening a
   // different agenda remounts with fresh content.
   const [initialContent] = useState(agenda.content ?? "");
-  const [newTodo, setNewTodo] = useState("");
-  const [saveState, setSaveState] = useState<SaveState>("idle");
+  const [initialNotes] = useState(agenda.notes ?? "");
+
+  const newTextRef = useRef<HTMLInputElement>(null);
 
   // ── Debounced persistence ───────────────────────────────────────────────────
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -78,10 +82,15 @@ export function MeetingMode({
     };
   }, []);
 
-  // Close on Escape.
+  // Close on Escape (unless focus is in a text field, so Esc can cancel typing).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape") return;
+      const el = document.activeElement;
+      const typing =
+        el instanceof HTMLElement &&
+        (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
+      if (!typing) onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -97,9 +106,8 @@ export function MeetingMode({
     save({ content: markdown }, "content");
   }
 
-  function onNotesChange(value: string) {
-    setNotes(value);
-    save({ notes: value }, "notes");
+  function onNotesChange(markdown: string) {
+    save({ notes: markdown }, "notes");
   }
 
   function persistTodos(next: AgendaTodo[], immediate = false) {
@@ -108,21 +116,24 @@ export function MeetingMode({
   }
 
   function addTodo() {
-    const text = newTodo.trim();
+    const text = newText.trim();
     if (!text) return;
-    persistTodos([...todos, { id: newId(), text, done: false }], true);
-    setNewTodo("");
+    persistTodos(
+      [...todos, { id: newId(), text, done: false, assignee: newAssignee.trim() || undefined }],
+      true,
+    );
+    setNewText("");
+    setNewAssignee("");
+    // Keep focus on the task field for rapid-fire capture during the meeting.
+    newTextRef.current?.focus();
   }
 
   function toggleTodo(id: string) {
-    persistTodos(
-      todos.map((t) => (t.id === id ? { ...t, done: !t.done } : t)),
-      true,
-    );
+    persistTodos(todos.map((t) => (t.id === id ? { ...t, done: !t.done } : t)), true);
   }
 
-  function editTodo(id: string, text: string) {
-    persistTodos(todos.map((t) => (t.id === id ? { ...t, text } : t)));
+  function editTodo(id: string, patch: Partial<AgendaTodo>) {
+    persistTodos(todos.map((t) => (t.id === id ? { ...t, ...patch } : t)));
   }
 
   function removeTodo(id: string) {
@@ -169,11 +180,11 @@ export function MeetingMode({
 
         {/* Right: to-dos (top) + notes (bottom) */}
         <section className="flex min-h-0 flex-1 flex-col border-t border-border lg:w-1/2 lg:flex-none lg:border-t-0">
-          {/* To-dos */}
+          {/* To-dos / assignments */}
           <div className="flex min-h-0 flex-1 flex-col border-b border-border">
             <div className="flex shrink-0 items-center justify-between px-4 pt-3 pb-2">
               <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                To-dos
+                Assignments &amp; to-dos
               </h2>
               {todos.length > 0 && (
                 <span className="text-xs text-muted-foreground">
@@ -181,31 +192,59 @@ export function MeetingMode({
                 </span>
               )}
             </div>
-            <div className="flex shrink-0 items-center gap-2 px-4 pb-2">
-              <Input
-                value={newTodo}
-                onChange={(e) => setNewTodo(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    addTodo();
-                  }
-                }}
-                placeholder="Add a to-do and press Enter"
-                className="h-9"
-              />
-              <Button size="icon" className="h-9 w-9 shrink-0" onClick={addTodo} aria-label="Add to-do">
-                <Plus className="h-4 w-4" />
-              </Button>
+
+            {/* Quick-add — the primary action during a meeting. */}
+            <div className="shrink-0 px-4 pb-3">
+              <div className="flex flex-col gap-2 rounded-lg border border-border bg-muted/40 p-2 sm:flex-row sm:items-center">
+                <Input
+                  ref={newTextRef}
+                  value={newText}
+                  onChange={(e) => setNewText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addTodo();
+                    }
+                  }}
+                  placeholder="New assignment or to-do…"
+                  className="h-9 flex-1 bg-background"
+                />
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={newAssignee}
+                    onChange={(e) => setNewAssignee(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        addTodo();
+                      }
+                    }}
+                    placeholder="Assign to (optional)"
+                    className="h-9 w-full bg-background sm:w-40"
+                  />
+                  <Button
+                    className="h-9 shrink-0"
+                    onClick={addTodo}
+                    disabled={!newText.trim()}
+                  >
+                    <Plus className="mr-1 h-4 w-4" />
+                    Add
+                  </Button>
+                </div>
+              </div>
             </div>
+
             <ul className="min-h-0 flex-1 space-y-1 overflow-y-auto px-4 pb-3">
               {todos.length === 0 && (
                 <li className="py-6 text-center text-sm text-muted-foreground">
-                  No to-dos yet.
+                  Assignments you add during the meeting show up here.
                 </li>
               )}
               {todos.map((todo) => (
-                <li key={todo.id} className="group flex items-center gap-2">
+                <li
+                  key={todo.id}
+                  className="group flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md px-1 py-1 hover:bg-accent/40"
+                >
                   <button
                     type="button"
                     onClick={() => toggleTodo(todo.id)}
@@ -221,12 +260,23 @@ export function MeetingMode({
                   </button>
                   <input
                     value={todo.text}
-                    onChange={(e) => editTodo(todo.id, e.target.value)}
+                    onChange={(e) => editTodo(todo.id, { text: e.target.value })}
                     className={cn(
-                      "flex-1 bg-transparent py-1 text-sm outline-none",
+                      "min-w-[6rem] flex-1 bg-transparent py-1 text-sm outline-none",
                       todo.done && "text-muted-foreground line-through",
                     )}
                   />
+                  <div className="flex items-center gap-1 text-muted-foreground">
+                    <User className="h-3.5 w-3.5 shrink-0" />
+                    <input
+                      value={todo.assignee ?? ""}
+                      onChange={(e) =>
+                        editTodo(todo.id, { assignee: e.target.value || undefined })
+                      }
+                      placeholder="Unassigned"
+                      className="w-24 bg-transparent py-1 text-xs outline-none placeholder:text-muted-foreground/60 focus:w-28"
+                    />
+                  </div>
                   <button
                     type="button"
                     onClick={() => removeTodo(todo.id)}
@@ -240,19 +290,21 @@ export function MeetingMode({
             </ul>
           </div>
 
-          {/* Notes */}
+          {/* Notes (visual markdown) */}
           <div className="flex min-h-0 flex-1 flex-col">
             <div className="shrink-0 px-4 pt-3 pb-2">
               <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
                 Notes
               </h2>
             </div>
-            <Textarea
-              value={notes}
-              onChange={(e) => onNotesChange(e.target.value)}
-              placeholder="Notes taken during the meeting…"
-              className="min-h-0 flex-1 resize-none rounded-none border-0 px-4 pb-4 text-sm shadow-none focus-visible:ring-0"
-            />
+            <div className="mdx-agenda-shell min-h-0 flex-1 overflow-y-auto">
+              <MarkdownEditor
+                compact
+                markdown={initialNotes}
+                onChange={onNotesChange}
+                placeholder="Notes taken during the meeting…"
+              />
+            </div>
           </div>
         </section>
       </div>

@@ -40,8 +40,13 @@ import "@mdxeditor/editor/style.css";
 
 export default function InitializedMDXEditor({
   editorRef,
+  compact = false,
   ...props
-}: { editorRef: ForwardedRef<MDXEditorMethods> } & MDXEditorProps) {
+}: {
+  editorRef: ForwardedRef<MDXEditorMethods>;
+  /** A lighter toolbar for smaller panes (e.g. the notes pane). */
+  compact?: boolean;
+} & MDXEditorProps) {
   return (
     <MDXEditor
       ref={editorRef}
@@ -57,21 +62,31 @@ export default function InitializedMDXEditor({
         markdownShortcutPlugin(),
         diffSourcePlugin({ viewMode: "rich-text" }),
         toolbarPlugin({
-          toolbarContents: () => (
-            <DiffSourceToggleWrapper>
-              <UndoRedo />
-              <Separator />
-              <BoldItalicUnderlineToggles />
-              <Separator />
-              <BlockTypeSelect />
-              <Separator />
-              <ListsToggle />
-              <Separator />
-              <CreateLink />
-              <InsertTable />
-              <InsertThematicBreak />
-            </DiffSourceToggleWrapper>
-          ),
+          toolbarContents: () =>
+            compact ? (
+              <DiffSourceToggleWrapper>
+                <BoldItalicUnderlineToggles />
+                <Separator />
+                <BlockTypeSelect />
+                <Separator />
+                <ListsToggle />
+                <CreateLink />
+              </DiffSourceToggleWrapper>
+            ) : (
+              <DiffSourceToggleWrapper>
+                <UndoRedo />
+                <Separator />
+                <BoldItalicUnderlineToggles />
+                <Separator />
+                <BlockTypeSelect />
+                <Separator />
+                <ListsToggle />
+                <Separator />
+                <CreateLink />
+                <InsertTable />
+                <InsertThematicBreak />
+              </DiffSourceToggleWrapper>
+            ),
         }),
       ]}
       {...props}
