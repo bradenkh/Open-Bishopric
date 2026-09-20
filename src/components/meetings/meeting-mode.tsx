@@ -25,6 +25,13 @@ import { cn } from "@/lib/utils";
 
 type SaveState = "idle" | "saving" | "saved";
 
+/** New assignments default to a two-week turnaround. */
+function defaultDue(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + 14);
+  return d.toISOString().slice(0, 10);
+}
+
 export function MeetingMode({
   agenda,
   onClose,
@@ -40,7 +47,7 @@ export function MeetingMode({
   const [todos, setTodos] = useState<AgendaTodo[]>(agenda.todos ?? []);
   const [newText, setNewText] = useState("");
   const [newAssignee, setNewAssignee] = useState("");
-  const [newDue, setNewDue] = useState("");
+  const [newDue, setNewDue] = useState(defaultDue);
   const [saveState, setSaveState] = useState<SaveState>("idle");
 
   const todayISO = new Date().toISOString().slice(0, 10);
@@ -136,7 +143,7 @@ export function MeetingMode({
     );
     setNewText("");
     setNewAssignee("");
-    setNewDue("");
+    setNewDue(defaultDue());
     // Keep focus on the task field for rapid-fire capture during the meeting.
     newTextRef.current?.focus();
   }
