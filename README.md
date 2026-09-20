@@ -1,8 +1,14 @@
 # Open Bishopric
 
 A private, invite-only tool for an LDS ward bishopric — callings pipeline,
-interview scheduling, task tracking, sacrament meeting bulletins, and an AI
-assistant. Built with Next.js 16 (App Router) and Supabase (Postgres + Auth).
+interview scheduling, task tracking, meeting agendas, sacrament meeting
+bulletins, and an AI assistant. Built with Next.js 16 (App Router) and Supabase
+(Postgres + Auth).
+
+The **Meetings** tab holds each meeting as an editable markdown agenda. Opening
+one enters a three-pane meeting mode: the agenda on the left (edited visually,
+not as raw markdown), a working to-do checklist top-right, and free-form notes
+bottom-right — all autosaved.
 
 ## Getting started
 

@@ -7,6 +7,7 @@ import type {
   Calling,
   Interview,
   Meeting,
+  MeetingAgenda,
   Member,
   RosterGroup,
   SettlementRecord,
@@ -69,6 +70,7 @@ function repo<T extends { id: string }>(table: string, order?: Order) {
 export const membersRepo = repo<Member>("members", { column: "last_name" });
 export const callingsRepo = repo<Calling>("callings", { column: "created_at", ascending: false });
 export const meetingsRepo = repo<Meeting>("meetings", { column: "date" });
+export const meetingAgendasRepo = repo<MeetingAgenda>("meeting_agendas", { column: "updated_at", ascending: false });
 export const announcementsRepo = repo<Announcement>("announcements", { column: "created_at", ascending: false });
 export const interviewsRepo = repo<Interview>("interviews", { column: "created_at", ascending: false });
 export const tasksRepo = repo<Task>("tasks", { column: "created_at", ascending: false });
