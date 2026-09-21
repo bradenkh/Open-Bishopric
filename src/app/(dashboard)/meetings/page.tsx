@@ -30,8 +30,20 @@ const STARTER = "# Agenda\n\n- \n";
 
 export default function MeetingsPage() {
   const { user } = useAuth();
-  const { agendas, loading } = useData();
+  const { agendas, tasks, loading } = useData();
   const items = agendas.items;
+
+  // Open to-do count per agenda (tasks linked via context.agendaId).
+  const openTodosByAgenda = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const t of tasks) {
+      const agendaId = t.context?.agendaId as string | undefined;
+      if (!agendaId) continue;
+      if (t.status === "completed" || t.status === "cancelled") continue;
+      counts[agendaId] = (counts[agendaId] ?? 0) + 1;
+    }
+    return counts;
+  }, [tasks]);
 
   // The agenda currently open in meeting mode.
   const [openId, setOpenId] = useState<string | null>(null);
@@ -72,7 +84,6 @@ export default function MeetingsPage() {
       id: newId(),
       title,
       content: STARTER,
-      todos: [],
       notes: "",
       meetingDate: formDate || undefined,
       createdBy: user?.uid ?? "unknown",
@@ -123,7 +134,7 @@ export default function MeetingsPage() {
       ) : (
         <ul className="grid gap-3 sm:grid-cols-2">
           {items.map((agenda) => {
-            const openTodos = (agenda.todos ?? []).filter((t) => !t.done).length;
+            const openTodos = openTodosByAgenda[agenda.id] ?? 0;
             const snippet = preview(agenda.content ?? "");
             return (
               <li key={agenda.id}>
