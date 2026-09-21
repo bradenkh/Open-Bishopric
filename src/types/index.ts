@@ -228,21 +228,12 @@ export interface AgendaItem {
 
 // ── Meeting agendas (markdown documents) ─────────────────────────────────────
 
-/** A single checklist item on a meeting agenda's to-do list. */
-export interface AgendaTodo {
-  id: string;
-  text: string;
-  done: boolean;
-  /** Who the item was assigned to, captured live during the meeting. */
-  assignee?: string;
-  /** Optional due date (YYYY-MM-DD). */
-  dueDate?: string;
-}
-
 /**
  * A meeting, modeled as a single editable markdown document. The agenda body
- * lives in `content` (markdown, edited visually in meeting mode); `todos` and
- * `notes` are the working columns filled in while the meeting is run.
+ * lives in `content` (markdown, edited visually in meeting mode) and meeting
+ * notes in `notes`. Assignments and to-dos captured during the meeting are
+ * stored as regular Task records (see the `tasks` table) linked back to this
+ * agenda via `context.agendaId`, so they also appear on the Tasks screen.
  *
  * This is the replacement for the old sectioned agenda-item builder — see
  * migration 0019_meeting_agendas_v2.sql.
@@ -252,8 +243,6 @@ export interface MeetingAgenda {
   title: string;
   /** The agenda itself, stored as markdown. */
   content: string;
-  /** Working to-do checklist captured during the meeting. */
-  todos: AgendaTodo[];
   /** Free-form meeting notes (markdown / plain text). */
   notes: string;
   /** Optional date the meeting is for (YYYY-MM-DD). */

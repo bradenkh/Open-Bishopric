@@ -7,11 +7,16 @@
 -- plus a running list of to-dos and a free-form notes field used while the
 -- meeting is run in "meeting mode".
 --
+-- NOTE: the `todos` jsonb column added here was later superseded — to-dos are
+-- now regular rows in the `tasks` table, linked to the agenda via
+-- context.agendaId. Migration 0020 drops this column. It remains here so this
+-- migration reflects what was originally applied (migrations are forward-only).
+--
 --   meeting_agendas
 --     id         — app-supplied text id
 --     title      — display name of the agenda
 --     content    — the agenda itself, as markdown
---     todos      — jsonb array of { id, text, done } checklist items
+--     todos      — jsonb array of { id, text, done } checklist items (see note)
 --     notes      — free-form meeting notes (markdown/plain text)
 --     meeting_date — optional date the meeting is for (YYYY-MM-DD)
 --
