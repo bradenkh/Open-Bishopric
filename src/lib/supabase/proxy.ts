@@ -5,7 +5,11 @@ import { NextResponse, type NextRequest } from "next/server";
 // /book + /api/book power the token-authenticated public self-signup flow: the
 // unguessable link is the credential, and the API runs with the service role,
 // so these must bypass the login gate while the rest of the app stays private.
-const PUBLIC_PATHS = ["/login", "/auth", "/book", "/api/book"];
+//
+// /api/mcp, /api/oauth and /.well-known are the MCP connector endpoints: they
+// authenticate with OAuth bearer tokens (src/lib/mcp/oauth.ts), not cookies.
+// The /oauth/authorize consent page stays behind the login gate.
+const PUBLIC_PATHS = ["/login", "/auth", "/book", "/api/book", "/api/mcp", "/api/oauth", "/.well-known"];
 
 /**
  * Refreshes the Supabase auth session and gates protected routes.
@@ -54,7 +58,7 @@ export async function updateSession(request: NextRequest) {
 
   if (!user && !isPublic) {
     const loginUrl = new URL("/login", request.url);
-    loginUrl.searchParams.set("from", pathname);
+    loginUrl.searchParams.set("from", pathname + request.nextUrl.search);
     return NextResponse.redirect(loginUrl);
   }
 
