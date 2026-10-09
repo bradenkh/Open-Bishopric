@@ -32,7 +32,6 @@ See `.env.example`. The Supabase values come from your project's
 | `SUPABASE_SERVICE_ROLE_KEY` | service_role key | **Server-only.** Bypasses RLS; used by the AI agent. |
 | `SUPABASE_DB_URL` | Settings → Database → Connection string → **Session pooler** URI | Used by the migration runner, which runs as `prebuild` on every build/deploy. Set it in Production only. Use the Session pooler (IPv4) on IPv4-only hosts. |
 | `AI_*` | — | AI assistant provider config. |
-| `MCP_OAUTH_SECRET` | — | **Server-only.** Enables the MCP server and signs its OAuth tokens. See [MCP server](#mcp-server-use-the-ward-tools-from-claude). |
 
 ## Backend & data layer
 
@@ -125,25 +124,22 @@ every few hours, so new appointments take a little while to appear.
   `src/app/api/calendar/[token]/route.ts`. Feed rendering (RFC 5545, with a
   `America/New_York` `VTIMEZONE`) is in `src/lib/calendar/ics.ts`.
 
-## MCP server (use the ward tools from Claude)
+## Claude connector (MCP server)
 
-The assistant's tools (`src/agent/tools.ts`) are also served over MCP at
-`/api/mcp` (Streamable HTTP), so Claude can use them as a custom connector.
+The assistant's tools (`src/agent/tools.ts`) are also served over MCP
+(Streamable HTTP) so Claude can use them as a custom connector.
 
-- **Auth:** OAuth 2.1 with PKCE and dynamic client registration, implemented in
-  `src/lib/mcp/oauth.ts`. Connecting sends you to `/oauth/authorize`, which sits
-  behind the normal app login; after you click **Allow**, the client acts as you.
-  There is no anonymous access.
-- **Setup:** set `MCP_OAUTH_SECRET` (a long random value, e.g.
-  `openssl rand -base64 48`) in your deployment. The endpoint is disabled
-  without it. Changing it disconnects every client.
-- **Connect in Claude:** Settings → Connectors → Add custom connector, URL
-  `https://<your-app>/api/mcp`, then sign in when prompted.
-- Only Claude's connector callback can register by default; add others (e.g.
-  the MCP Inspector) with `MCP_OAUTH_REDIRECT_URIS`.
-- Email tools send immediately over MCP (there's no in-app review screen), so
-  the server tells Claude to confirm each draft with you first. Keep those
-  tools on "ask before use" in Claude's connector settings.
+1. In the app, go to **Settings → Claude connector**, and click **Generate URL**.
+   The URL (`https://<your-app>/api/mcp/<token>`) is shown once.
+2. In Claude, go to **Settings → Connectors → Add custom connector** and paste
+   the URL. Leave the OAuth fields blank.
+
+Each token acts as the member who generated it. Only a hash is stored
+(`mcp_tokens`), and revoking a token in Settings cuts it off immediately.
+Clients that can send headers can use `/api/mcp` with
+`Authorization: Bearer <token>` instead. Email tools send immediately over MCP
+(there's no in-app review screen), so the server tells Claude to confirm each
+draft with you first. Keep those tools on "ask before use" in Claude.
 
 ## Database setup & schema changes
 
