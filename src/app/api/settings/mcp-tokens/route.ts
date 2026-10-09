@@ -9,7 +9,7 @@ export async function GET() {
   try {
     return NextResponse.json({ tokens: await listTokens(auth.user.uid) });
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : "Failed to load tokens" }, { status: 500 });
+    return NextResponse.json({ error: errorMessage(err, "Failed to load tokens") }, { status: 500 });
   }
 }
 
@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
     const { token, info } = await createToken(auth.user.uid, label);
     return NextResponse.json({ token, info });
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : "Failed to create token" }, { status: 500 });
+    return NextResponse.json({ error: errorMessage(err, "Failed to create token") }, { status: 500 });
   }
 }
 
@@ -37,6 +37,12 @@ export async function DELETE(request: NextRequest) {
     await deleteToken(auth.user.uid, id);
     return NextResponse.json({ ok: true });
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : "Failed to revoke token" }, { status: 500 });
+    return NextResponse.json({ error: errorMessage(err, "Failed to revoke token") }, { status: 500 });
   }
+}
+
+/** Supabase errors are plain objects, not Error instances, so read `.message` directly. */
+function errorMessage(err: unknown, fallback: string): string {
+  const message = (err as { message?: unknown } | null)?.message;
+  return typeof message === "string" && message ? message : fallback;
 }
