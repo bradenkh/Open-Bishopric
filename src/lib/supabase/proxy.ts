@@ -5,7 +5,10 @@ import { NextResponse, type NextRequest } from "next/server";
 // /book + /api/book power the token-authenticated public self-signup flow: the
 // unguessable link is the credential, and the API runs with the service role,
 // so these must bypass the login gate while the rest of the app stays private.
-const PUBLIC_PATHS = ["/login", "/auth", "/book", "/api/book"];
+//
+// /api/mcp authenticates with its own access tokens (src/lib/mcp/tokens.ts),
+// not the session cookie, so it bypasses the login gate too.
+const PUBLIC_PATHS = ["/login", "/auth", "/book", "/api/book", "/api/mcp"];
 
 /**
  * Refreshes the Supabase auth session and gates protected routes.

@@ -124,6 +124,23 @@ every few hours, so new appointments take a little while to appear.
   `src/app/api/calendar/[token]/route.ts`. Feed rendering (RFC 5545, with a
   `America/New_York` `VTIMEZONE`) is in `src/lib/calendar/ics.ts`.
 
+## Claude connector (MCP server)
+
+The assistant's tools (`src/agent/tools.ts`) are also served over MCP
+(Streamable HTTP) so Claude can use them as a custom connector.
+
+1. In the app, go to **Settings → Claude connector**, and click **Generate URL**.
+   The URL (`https://<your-app>/api/mcp/<token>`) is shown once.
+2. In Claude, go to **Settings → Connectors → Add custom connector** and paste
+   the URL. Leave the OAuth fields blank.
+
+Each token acts as the member who generated it. Only a hash is stored
+(`mcp_tokens`), and revoking a token in Settings cuts it off immediately.
+Clients that can send headers can use `/api/mcp` with
+`Authorization: Bearer <token>` instead. Email tools send immediately over MCP
+(there's no in-app review screen), so the server tells Claude to confirm each
+draft with you first. Keep those tools on "ask before use" in Claude.
+
 ## Database setup & schema changes
 
 Migrations are tracked and applied automatically. A `schema_migrations` table
