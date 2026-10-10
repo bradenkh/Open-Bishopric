@@ -7,7 +7,6 @@ import {
   Check,
   AlertCircle,
   Wrench,
-  Mail,
   Send,
   X,
 } from "lucide-react";
@@ -18,7 +17,7 @@ import { cn } from "@/lib/utils";
 
 type AnyToolPart = ToolUIPart | DynamicToolUIPart;
 
-/** A user's decision on a tool that's waiting for review (e.g. sending email). */
+/** A user's decision on a tool that's waiting for review . */
 export type ApprovalDecision = (opts: {
   id: string;
   approved: boolean;
@@ -50,18 +49,10 @@ const TOOL_LABELS: Record<string, string> = {
   getAnnouncements: "Reading announcements",
   createAnnouncement: "Adding an announcement",
   updateAnnouncement: "Updating an announcement",
-  sendTaskReminder: "Sending a task reminder",
-  emailInterviewTimes: "Emailing interview times",
-  sendEmail: "Sending an email",
-  searchInbox: "Searching the inbox",
-  readEmail: "Reading an email",
   rememberPreference: "Saving a preference",
   getRememberedPreferences: "Recalling preferences",
   forgetPreference: "Forgetting a preference",
 };
-
-/** Tools whose approval prompt should render a full email preview. */
-const EMAIL_TOOLS = new Set(["sendEmail", "sendTaskReminder", "emailInterviewTimes"]);
 
 function statusOf(state: AnyToolPart["state"]) {
   switch (state) {
@@ -82,7 +73,7 @@ function statusOf(state: AnyToolPart["state"]) {
  * Renders one of the assistant's tool calls — name, status, and (expandable)
  * input/output. Equivalent to Vercel AI Elements' <Tool>, vendored locally.
  *
- * When a tool needs approval before it runs (e.g. sending an email), it renders
+ * When a tool needs approval before it runs (none currently do), it renders
  * a review panel instead: the drafted action is shown and the user can approve
  * it — which lets the tool run — or send feedback for the assistant to revise.
  */
@@ -103,7 +94,6 @@ export function Tool({
   if (part.state === "approval-requested" && onApproval) {
     return (
       <ApprovalPanel
-        toolName={name}
         label={label}
         input={part.input}
         approvalId={part.approval.id}
@@ -145,18 +135,16 @@ export function Tool({
 }
 
 /**
- * The review card shown while a sensitive tool (currently: sending email) waits
+ * The review card shown while a tool marked `needsApproval` waits
  * for the user. Shows what will happen, then Approve (run it) or send feedback
  * (decline with a note the assistant uses to revise and try again).
  */
 function ApprovalPanel({
-  toolName,
   label,
   input,
   approvalId,
   onApproval,
 }: {
-  toolName: string;
   label: string;
   input: unknown;
   approvalId: string;
@@ -165,7 +153,6 @@ function ApprovalPanel({
   const [decided, setDecided] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
   const [feedback, setFeedback] = useState("");
-  const isEmail = EMAIL_TOOLS.has(toolName);
 
   const approve = () => {
     setDecided(true);
@@ -187,11 +174,7 @@ function ApprovalPanel({
   return (
     <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 text-xs">
       <div className="flex items-center gap-2 border-b border-amber-500/30 px-2.5 py-1.5">
-        {isEmail ? (
-          <Mail className="h-3.5 w-3.5 shrink-0 text-amber-600" />
-        ) : (
-          <Wrench className="h-3.5 w-3.5 shrink-0 text-amber-600" />
-        )}
+        <Wrench className="h-3.5 w-3.5 shrink-0 text-amber-600" />
         <span className="font-medium">{label}</span>
         <span className="ml-auto font-medium text-amber-700 dark:text-amber-500">
           Needs your review
@@ -199,11 +182,7 @@ function ApprovalPanel({
       </div>
 
       <div className="space-y-2 px-2.5 py-2">
-        {isEmail ? (
-          <EmailPreview input={input} />
-        ) : (
-          <ToolBlock title="Details" value={input} />
-        )}
+        <ToolBlock title="Details" value={input} />
 
         {decided ? (
           <p className="text-muted-foreground">Thanks — the assistant is continuing…</p>
@@ -214,11 +193,7 @@ function ApprovalPanel({
                 <Textarea
                   value={feedback}
                   onChange={(e) => setFeedback(e.target.value)}
-                  placeholder={
-                    isEmail
-                      ? "What should change? e.g. make it warmer, fix the date…"
-                      : "What should the assistant change?"
-                  }
+                  placeholder="What should the assistant change?"
                   className="min-h-[60px] resize-none text-xs"
                   rows={2}
                   autoFocus
@@ -252,7 +227,7 @@ function ApprovalPanel({
                   className="h-7 gap-1 text-xs"
                   onClick={approve}
                 >
-                  <Send className="h-3 w-3" /> {isEmail ? "Allow & send" : "Allow"}
+                  <Send className="h-3 w-3" /> Allow
                 </Button>
                 <Button
                   type="button"
@@ -277,56 +252,6 @@ function ApprovalPanel({
           </div>
         )}
       </div>
-    </div>
-  );
-}
-
-/** Renders an outbound email draft (to / subject / body) for review. */
-function EmailPreview({ input }: { input: unknown }) {
-  const email = (input ?? {}) as {
-    to?: string;
-    subject?: string;
-    body?: string;
-    note?: string;
-    proposedTimes?: string[];
-  };
-  const rows: { label: string; value: string }[] = [];
-  if (email.to) rows.push({ label: "To", value: email.to });
-  if (email.subject) rows.push({ label: "Subject", value: email.subject });
-
-  return (
-    <div className="space-y-2">
-      {rows.length > 0 && (
-        <div className="space-y-0.5">
-          {rows.map((r) => (
-            <div key={r.label} className="flex gap-2">
-              <span className="w-14 shrink-0 font-medium text-muted-foreground">{r.label}</span>
-              <span className="break-words">{r.value}</span>
-            </div>
-          ))}
-        </div>
-      )}
-      {email.proposedTimes && email.proposedTimes.length > 0 && (
-        <div>
-          <p className="mb-1 font-medium text-muted-foreground">Proposed times</p>
-          <ul className="list-inside list-disc space-y-0.5">
-            {email.proposedTimes.map((t, i) => (
-              <li key={i}>{t}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {(email.body || email.note) && (
-        <div>
-          <p className="mb-1 font-medium text-muted-foreground">Message</p>
-          <div className="max-h-56 overflow-y-auto whitespace-pre-wrap rounded bg-background/70 p-2 leading-relaxed">
-            {email.body ?? email.note}
-          </div>
-        </div>
-      )}
-      {rows.length === 0 && !email.body && !email.note && !email.proposedTimes && (
-        <ToolBlock title="Details" value={input} />
-      )}
     </div>
   );
 }

@@ -62,53 +62,22 @@ dashboard (**Authentication → Users → Invite**, or Add user). A matching
 (`bishop` | `counselor` | `clerk` | `exec_secretary`) via the invite's user
 metadata; otherwise role defaults to `counselor`.
 
-## Email (send & receive)
+## Email
 
-The app can really send agenda-item requests, to-do reminders, and interview
-times — and read the replies — using a **Gmail account over an app password**.
-This needs **no custom domain and no OAuth** (so no 7-day token expiry): Gmail
-sends from its own address and already receives mail there, so there are no MX
-records or provider verification to set up. It's free and fine for ward volume.
+The app doesn't send or read email itself. Email the assistant writes goes
+through the client's own email connector instead (for example Claude's Gmail
+connector when you use the Claude connector below).
 
-**One-time setup** (do this on a Gmail account — ideally a dedicated ward one like
-`firstwardbishopric@gmail.com`, so mail doesn't come from a personal address):
-
-1. Turn on **2-Step Verification** (https://myaccount.google.com/security).
-2. Create an **App Password** (https://myaccount.google.com/apppasswords) — a
-   16-character code.
-3. In the app, go to **Settings → Email**, enter the Gmail address and app
-   password, **Save**, then **Send test email** to confirm it works.
-
-No new environment variables are required — the address and app password are
-stored server-side in the RLS-locked `app_settings` table (the same place the AI
-key lives), never exposed to the browser.
-
-**How it works** (`src/lib/email/gmail.ts`):
-
-- **Sending** goes out over SMTP (`smtp.gmail.com:465`) via `nodemailer`. Each
-  outbound request stores the message's `Message-ID` on its record
-  (`agenda_solicitations` / `interviews`).
-- **Receiving** reads the INBOX over IMAP (`imap.gmail.com:993`) via `imapflow` /
-  `mailparser`. `POST /api/email/poll` matches each reply's `In-Reply-To` /
-  `References` headers back to the stored `Message-ID`, then records agenda
-  solicitation replies (`status='replied'`) and interview replies (appended to
-  the interview's notes for the assistant to parse). Wire it to a cron to poll
-  for replies.
-- **Searching & reading** the inbox is available to the AI assistant via
-  `searchInbox` (Gmail search over the INBOX — filter by sender, subject,
-  free text, recency, or unread — returning per-message summaries keyed by a
-  stable IMAP `uid`) and `readEmail` (open one message's full body by `uid`).
-  Both read only; messages are never marked seen.
-- The AI assistant also has `sendTaskReminder` and `emailInterviewTimes` tools.
-- If email isn't configured, sending an agenda request **falls back to a
-  `mailto:` link**, so nothing breaks before setup.
+The **Send reminder** button on Tasks and the settlement-link emails on the
+Tithing Settlement tab open a prefilled draft in your own mail app (`mailto:`).
+Their wording comes from **Settings → Email templates**.
 
 ## Calendar feed (Google Calendar)
 
 The interview board can be mirrored into Google Calendar — or any calendar app —
 as a **read-only iCalendar feed**. It's **one-way** (app → calendar): scheduled
 interviews flow to the calendar automatically; edits made in the calendar never
-touch the app. This keeps the same no-OAuth simplicity as email — the feed is
+touch the app. This keeps things simple with no OAuth — the feed is
 protected by an unguessable token in its URL rather than a Google login.
 
 **Enable it:** go to **Settings → Calendar** and click **Generate feed link**.
@@ -120,7 +89,7 @@ every few hours, so new appointments take a little while to appear.
   scheduled appointments, so share it only within the bishopric. **Regenerate**
   rotates it (invalidating the old link); **Disable feed** turns it off entirely.
 - The token lives in the server-only, RLS-locked `app_settings` table (same home
-  as the Gmail and AI credentials) and is served by
+  as the AI credentials) and is served by
   `src/app/api/calendar/[token]/route.ts`. Feed rendering (RFC 5545, with a
   `America/New_York` `VTIMEZONE`) is in `src/lib/calendar/ics.ts`.
 
@@ -137,9 +106,8 @@ The assistant's tools (`src/agent/tools.ts`) are also served over MCP
 Each token acts as the member who generated it. Only a hash is stored
 (`mcp_tokens`), and revoking a token in Settings cuts it off immediately.
 Clients that can send headers can use `/api/mcp` with
-`Authorization: Bearer <token>` instead. Email tools send immediately over MCP
-(there's no in-app review screen), so the server tells Claude to confirm each
-draft with you first. Keep those tools on "ask before use" in Claude.
+`Authorization: Bearer <token>` instead. The connector has no email tools; use
+Claude's Gmail connector alongside it to send and read mail.
 
 ## Database setup & schema changes
 
