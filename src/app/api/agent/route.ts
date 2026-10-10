@@ -148,7 +148,7 @@ export async function POST(request: Request) {
     system: buildSystemPrompt(notes, current),
     messages,
     tools: agentTools,
-    // Cryptographically bind approvals so `needsApproval` tools (email) can only
+    // Cryptographically bind approvals so `needsApproval` tools can only
     // run from an approval the user actually granted. See approvalSecret above.
     experimental_toolApprovalSecret: approvalSecret,
     // Runaway guard for the agentic tool loop — NOT a per-conversation message

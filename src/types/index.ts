@@ -358,8 +358,7 @@ export type SolicitationStatus = "draft" | "sent" | "replied";
  * (meeting, organization). The assistant parses replies into agenda items.
  *
  * NOTE: the agenda-builder UI that created these has been removed; the row and
- * the /api/email/poll matching that records replies remain for any solicitations
- * still in flight.
+ * row remains for history; the app no longer sends or reads email.
  */
 export interface AgendaSolicitation {
   id: string;
@@ -377,7 +376,7 @@ export interface AgendaSolicitation {
   /** Raw reply text (pasted in, or captured from an inbound email reply). */
   replyText?: string;
   /** Message-ID / thread of the outbound request, used to match the leader's
-   *  inbound reply back to this row (see src/lib/email/gmail.ts). */
+   *  inbound reply back to this row. Historical: the app no longer sends email. */
   emailMessageId?: string;
   emailThreadId?: string;
   sentAt?: string;
@@ -510,7 +509,7 @@ export interface Interview {
   durationMins?: number;
   notes?: string;
   /** Message-ID / thread of the scheduling email sent to the member, used to
-   *  match their reply back to this interview (see src/lib/email/gmail.ts). */
+   *  match their reply back to this interview. Historical: the app no longer sends email. */
   emailMessageId?: string;
   emailThreadId?: string;
   createdBy: string;

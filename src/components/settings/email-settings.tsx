@@ -1,42 +1,28 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, Check, Mail, Send } from "lucide-react";
+import { Loader2, Check, Mail } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { DEFAULT_SETTLEMENT_EMAIL, DEFAULT_SETTLEMENT_CONFIRMATION } from "@/lib/settlement-email";
+import { DEFAULT_SETTLEMENT_EMAIL } from "@/lib/settlement-email";
 import { DEFAULT_TASK_REMINDER } from "@/lib/task-reminder";
 
-interface EmailConfig {
-  gmailAddress: string;
-  connected: boolean;
-}
-
 /**
- * Email (Gmail) configuration panel. The bishopric enters a Gmail address and a
- * 16-character app password (2FA required — Google Account → Security → App
- * passwords); the app then sends and receives on that mailbox with no domain and
- * no OAuth. The password is write-only: it's stored server-side and never sent
- * back to the browser (GET reports only whether one is configured).
+ * Email templates. The app doesn't send email itself — these prefill the drafts
+ * it opens in the user's own mail app from the Tasks and Tithing Settlement
+ * pages. Email from the assistant goes through the client's email connector.
  */
 export function EmailSettingsCard() {
-  const [config, setConfig] = useState<EmailConfig | null>(null);
-  const [address, setAddress] = useState("");
-  const [appPassword, setAppPassword] = useState("");
+  const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [testing, setTesting] = useState(false);
   const [error, setError] = useState("");
-  const [testMsg, setTestMsg] = useState("");
   // Settlement link email template — blank falls back to the built-in default.
   const [settlementSubject, setSettlementSubject] = useState(DEFAULT_SETTLEMENT_EMAIL.subject);
   const [settlementBody, setSettlementBody] = useState(DEFAULT_SETTLEMENT_EMAIL.body);
-  // Settlement confirmation email template — sent when a member books their slot.
-  const [confirmationSubject, setConfirmationSubject] = useState(DEFAULT_SETTLEMENT_CONFIRMATION.subject);
-  const [confirmationBody, setConfirmationBody] = useState(DEFAULT_SETTLEMENT_CONFIRMATION.body);
   // Task reminder email template — blank falls back to the built-in default.
   const [reminderSubject, setReminderSubject] = useState(DEFAULT_TASK_REMINDER.subject);
   const [reminderBody, setReminderBody] = useState(DEFAULT_TASK_REMINDER.body);
@@ -46,12 +32,9 @@ export function EmailSettingsCard() {
       .then((r) => r.json())
       .then((data) => {
         if (data.error) return setError(data.error);
-        setConfig(data);
-        setAddress(data.gmailAddress ?? "");
+        setLoaded(true);
         if (data.settlementEmailSubject) setSettlementSubject(data.settlementEmailSubject);
         if (data.settlementEmailBody) setSettlementBody(data.settlementEmailBody);
-        if (data.settlementConfirmationSubject) setConfirmationSubject(data.settlementConfirmationSubject);
-        if (data.settlementConfirmationBody) setConfirmationBody(data.settlementConfirmationBody);
         if (data.taskReminderSubject) setReminderSubject(data.taskReminderSubject);
         if (data.taskReminderBody) setReminderBody(data.taskReminderBody);
       })
@@ -59,30 +42,20 @@ export function EmailSettingsCard() {
   }, []);
 
   const save = async () => {
-    setSaving(true); setError(""); setSaved(false); setTestMsg("");
+    setSaving(true); setError(""); setSaved(false);
     try {
       const res = await fetch("/api/settings/email", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          gmailAddress: address,
-          // Only send the password when the user typed a new one.
-          ...(appPassword ? { appPassword } : {}),
           settlementEmailSubject: settlementSubject,
           settlementEmailBody: settlementBody,
-          settlementConfirmationSubject: confirmationSubject,
-          settlementConfirmationBody: confirmationBody,
           taskReminderSubject: reminderSubject,
           taskReminderBody: reminderBody,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to save");
-      setConfig({
-        gmailAddress: address,
-        connected: Boolean(address) && (Boolean(appPassword) || (config?.connected ?? false)),
-      });
-      setAppPassword("");
       setSaved(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save");
@@ -91,88 +64,29 @@ export function EmailSettingsCard() {
     }
   };
 
-  const sendTest = async () => {
-    setTesting(true); setError(""); setTestMsg(""); setSaved(false);
-    try {
-      const res = await fetch("/api/settings/email", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Failed to send");
-      setTestMsg(`Test email sent to ${data.to}.`);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to send test email");
-    } finally {
-      setTesting(false);
-    }
-  };
-
   return (
     <Card>
       <CardHeader className="pb-3">
         <CardTitle className="text-base flex items-center gap-2">
-          <Mail className="h-4 w-4 text-primary" /> Email
+          <Mail className="h-4 w-4 text-primary" /> Email templates
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <p className="text-sm text-muted-foreground">
-          Lets the app send agenda requests, to-do reminders, and interview times —
-          and read the replies — from a Gmail account. Turn on{" "}
-          <a href="https://myaccount.google.com/security" target="_blank" rel="noreferrer" className="underline">
-            2-Step Verification
-          </a>
-          , then create an{" "}
-          <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noreferrer" className="underline">
-            App Password
-          </a>{" "}
-          and paste it below. It never expires and is stored securely on the server.
-          Tip: use a dedicated ward Gmail so mail doesn&rsquo;t come from a personal address.
+          These prefill the email drafts the app opens in your own mail app from the
+          Tasks and Tithing Settlement pages. You can still edit each draft before sending.
         </p>
 
-        {!config ? (
+        {!loaded ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" /> Loading…
           </div>
         ) : (
           <>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label htmlFor="gmail-address">Gmail address</Label>
-                <Input id="gmail-address" type="email" autoComplete="off" value={address}
-                  onChange={(e) => { setAddress(e.target.value); setSaved(false); }}
-                  placeholder="firstwardbishopric@gmail.com" />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="gmail-app-password">App password</Label>
-                <Input id="gmail-app-password" type="password" autoComplete="off" value={appPassword}
-                  onChange={(e) => { setAppPassword(e.target.value); setSaved(false); }}
-                  placeholder={config.connected ? "•••••••• (leave blank to keep current)" : "abcd efgh ijkl mnop"} />
-                {config.connected && (
-                  <p className="text-xs text-muted-foreground flex items-center gap-1">
-                    <Check className="h-3 w-3 text-green-600" /> An app password is configured.
-                  </p>
-                )}
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-3">
-              <Button onClick={save} disabled={saving || !address}>
-                {saving && <Loader2 className="h-4 w-4 animate-spin" />} Save email settings
-              </Button>
-              <Button variant="outline" onClick={sendTest} disabled={testing || !config.connected} className="gap-1.5">
-                {testing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Send test email
-              </Button>
-              {saved && <span className="text-sm text-green-600 flex items-center gap-1"><Check className="h-4 w-4" /> Saved</span>}
-              {testMsg && <span className="text-sm text-green-600 flex items-center gap-1"><Check className="h-4 w-4" /> {testMsg}</span>}
-              {error && <span className="text-sm text-destructive">{error}</span>}
-            </div>
-
-            {/* Tithing-settlement link email — the message sent when a member is
-                emailed their booking link. Saved with the button above; can also
-                be tweaked per-send from the Tithing Settlement tab. */}
-            <div className="space-y-3 border-t border-border pt-4">
+            {/* Tithing-settlement link email — the draft opened when a member is
+                emailed their booking link. Can also be tweaked per-send from the
+                Tithing Settlement tab. */}
+            <div className="space-y-3">
               <div className="flex items-center justify-between gap-2">
                 <Label className="text-sm font-medium">Tithing settlement link email</Label>
                 <Button
@@ -189,7 +103,7 @@ export function EmailSettingsCard() {
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">
-                Sent when you email a member their settlement booking link. Use{" "}
+                Prefilled when you email a member their settlement booking link. Use{" "}
                 <code className="rounded bg-muted px-1 py-0.5">{"{title}"}</code> for their
                 courtesy title (Brother/Sister),{" "}
                 <code className="rounded bg-muted px-1 py-0.5">{"{name}"}</code> for their
@@ -197,9 +111,9 @@ export function EmailSettingsCard() {
                 <code className="rounded bg-muted px-1 py-0.5">{"{lastName}"}</code> for their
                 last name, and{" "}
                 <code className="rounded bg-muted px-1 py-0.5">{"{link}"}</code> for their
-                personal booking link — all filled in per recipient when the email is sent.
-                Each parent is emailed individually, so a household&rsquo;s two parents get the
-                same message addressed to each of them. When a member&rsquo;s gender isn&rsquo;t on
+                personal booking link — all filled in when the draft opens. When
+                several people are emailed at once, the greeting reads &ldquo;Brothers and
+                Sisters&rdquo; and they&rsquo;re added as BCC. When a member&rsquo;s gender isn&rsquo;t on
                 file, <code className="rounded bg-muted px-1 py-0.5">{"{title}"}</code> is left blank.
               </p>
               <div className="space-y-1.5">
@@ -216,58 +130,9 @@ export function EmailSettingsCard() {
               </div>
             </div>
 
-            {/* Tithing-settlement confirmation email — sent automatically to the
-                household when a member books their slot through the link. */}
-            <div className="space-y-3 border-t border-border pt-4">
-              <div className="flex items-center justify-between gap-2">
-                <Label className="text-sm font-medium">Tithing settlement confirmation email</Label>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 text-xs"
-                  onClick={() => {
-                    setConfirmationSubject(DEFAULT_SETTLEMENT_CONFIRMATION.subject);
-                    setConfirmationBody(DEFAULT_SETTLEMENT_CONFIRMATION.body);
-                    setSaved(false);
-                  }}
-                >
-                  Reset to default
-                </Button>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Sent automatically to the household when a member books their settlement
-                appointment through their link. Use{" "}
-                <code className="rounded bg-muted px-1 py-0.5">{"{title}"}</code> (Brother/Sister),{" "}
-                <code className="rounded bg-muted px-1 py-0.5">{"{name}"}</code> (first name),{" "}
-                <code className="rounded bg-muted px-1 py-0.5">{"{lastName}"}</code>,{" "}
-                <code className="rounded bg-muted px-1 py-0.5">{"{date}"}</code>,{" "}
-                <code className="rounded bg-muted px-1 py-0.5">{"{time}"}</code>,{" "}
-                <code className="rounded bg-muted px-1 py-0.5">{"{interviewer}"}</code>, and{" "}
-                <code className="rounded bg-muted px-1 py-0.5">{"{calendar}"}</code> (an
-                add-to-calendar link) —{" "}
-                <code className="rounded bg-muted px-1 py-0.5">{"{title}"}</code>,{" "}
-                <code className="rounded bg-muted px-1 py-0.5">{"{name}"}</code>, and{" "}
-                <code className="rounded bg-muted px-1 py-0.5">{"{lastName}"}</code> from the
-                member, the rest from the booked appointment. An .ics calendar file is also
-                attached automatically.
-              </p>
-              <div className="space-y-1.5">
-                <Label htmlFor="confirmation-subject" className="text-xs">Subject</Label>
-                <Input id="confirmation-subject" value={confirmationSubject}
-                  onChange={(e) => { setConfirmationSubject(e.target.value); setSaved(false); }}
-                  placeholder={DEFAULT_SETTLEMENT_CONFIRMATION.subject} />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="confirmation-body" className="text-xs">Message</Label>
-                <Textarea id="confirmation-body" value={confirmationBody} rows={8}
-                  onChange={(e) => { setConfirmationBody(e.target.value); setSaved(false); }}
-                  placeholder={DEFAULT_SETTLEMENT_CONFIRMATION.body} />
-              </div>
-            </div>
-
             {/* Task reminder email — the default message prefilled when you send a
                 task's owner a reminder from the Tasks page (editable per-send) and
-                used by the AI assistant's reminder tool. Saved with the button above. */}
+                used by the AI assistant's reminder tool. Saved with the button below. */}
             <div className="space-y-3 border-t border-border pt-4">
               <div className="flex items-center justify-between gap-2">
                 <Label className="text-sm font-medium">Task reminder email</Label>
@@ -312,6 +177,14 @@ export function EmailSettingsCard() {
                   onChange={(e) => { setReminderBody(e.target.value); setSaved(false); }}
                   placeholder={DEFAULT_TASK_REMINDER.body} />
               </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 border-t border-border pt-4">
+              <Button onClick={save} disabled={saving}>
+                {saving && <Loader2 className="h-4 w-4 animate-spin" />} Save templates
+              </Button>
+              {saved && <span className="text-sm text-green-600 flex items-center gap-1"><Check className="h-4 w-4" /> Saved</span>}
+              {error && <span className="text-sm text-destructive">{error}</span>}
             </div>
           </>
         )}

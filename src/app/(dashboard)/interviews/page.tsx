@@ -482,11 +482,11 @@ function SettlementView({
         if (sent > 0) {
           setEmailedId(householdId);
           setTimeout(() => setEmailedId((c) => (c === householdId ? null : c)), 1800);
-          setEmailMsg(`Emailed ${householdName} (${sent} recipient${sent === 1 ? "" : "s"}).`);
+          setEmailMsg(`Opened a draft to ${householdName} (${sent} recipient${sent === 1 ? "" : "s"}) in your mail app.`);
         }
       } else {
         setSelected(new Set());
-        setEmailMsg(`Emailed ${sent} recipient${sent === 1 ? "" : "s"} across the selected households.`);
+        setEmailMsg(`Opened a draft to ${sent} recipient${sent === 1 ? "" : "s"} across the selected households in your mail app.`);
       }
     } catch (e) {
       setEmailMsg(e instanceof Error ? e.message : "Failed to send emails.");
@@ -752,8 +752,9 @@ function SettlementView({
               <code className="rounded bg-muted px-1 py-0.5">{"{name}"}</code>,{" "}
               <code className="rounded bg-muted px-1 py-0.5">{"{lastName}"}</code>, and{" "}
               <code className="rounded bg-muted px-1 py-0.5">{"{link}"}</code> are filled in for
-              each recipient when sent. Edits here apply to this send only — change the saved
-              default in Settings → Email.
+              each recipient when the draft opens (several recipients share one BCC draft
+              addressed to &ldquo;Brothers and Sisters&rdquo;). Edits here apply to this send only —
+              change the saved default in Settings → Email templates.
             </p>
             <div className="space-y-1.5">
               <Label htmlFor="compose-subject" className="text-xs">Subject</Label>
@@ -780,7 +781,7 @@ function SettlementView({
             <Button variant="outline" onClick={() => setComposeOpen(false)} disabled={composeSending}>Cancel</Button>
             <Button onClick={() => { void sendCompose(); }} disabled={composeSending || !draftSubject.trim() || !draftBody.trim()} className="gap-1.5">
               {composeSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              {composeRecipients.length === 1 ? "Send" : `Send ${composeRecipients.length}`}
+              Open in mail app
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -803,7 +804,7 @@ export default function InterviewsPage() {
 
   const [view, setView] = useState<PageView>("bookings");
 
-  // Saved settlement-email template (Settings → Email).
+  // Saved settlement-email template (Settings → Email templates).
   const [emailTemplate, setEmailTemplate] = useState<SettlementEmailTemplate>(DEFAULT_SETTLEMENT_EMAIL);
   useEffect(() => {
     fetch("/api/settings/email")
@@ -881,70 +882,66 @@ export default function InterviewsPage() {
     return record;
   }
 
+  /** Open a draft in the user's own mail app. */
+  function openMailDraft(to: string[], bcc: string[], subject: string, body: string) {
+    const params = [
+      bcc.length ? `bcc=${bcc.map(encodeURIComponent).join(",")}` : "",
+      `subject=${encodeURIComponent(subject)}`,
+      `body=${encodeURIComponent(body)}`,
+    ].filter(Boolean).join("&");
+    window.location.assign(`mailto:${to.map(encodeURIComponent).join(",")}?${params}`);
+  }
+
+  /** Stamp a record so the board shows when the link went out. */
+  async function markLinkSent(record: SettlementRecord | undefined) {
+    if (record) await settlementsCol.update(record.id, { linkSentAt: new Date().toISOString() });
+  }
+
+  /** Ensure records for the whole household (so each shows on the board). */
+  async function ensureHousehold(m: Member, records: Map<string, SettlementRecord>) {
+    const pool = members.filter((x) => x.isActive);
+    for (const person of householdMembersOf(m, pool)) records.set(person.id, await ensureRecord(person));
+  }
+
   /**
-   * Email one member the household's Google settlement booking link and stamp
-   * their record. Falls back to a mailto: window when Gmail isn't configured or
-   * the send fails. `silent` suppresses that fallback (for bulk sends).
+   * Open a mail-app draft with one member's settlement booking link, after
+   * ensuring settlement records for their household (so each shows on the
+   * board). Opening the draft counts as sending it for the board's "Emailed".
    */
-  async function sendLinkEmail(
-    m: Member, record: SettlementRecord | undefined, tpl: SettlementEmailTemplate, opts?: { silent?: boolean },
-  ): Promise<boolean> {
+  async function emailLink(m: Member, tpl: SettlementEmailTemplate): Promise<boolean> {
     if (!m.email || !settlementBookingUrl) return false;
+    const records = new Map<string, SettlementRecord>();
+    await ensureHousehold(m, records);
     const { subject, body } = renderSettlementEmail(tpl, {
       name: m.firstName, lastName: m.lastName, title: settlementTitle(m.gender), link: settlementBookingUrl,
     });
-    try {
-      const res = await fetch("/api/email/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ to: m.email, subject, body }),
-      });
-      if (res.ok) {
-        const { messageId } = await res.json();
-        const now = new Date().toISOString();
-        const patch: Partial<SettlementRecord> = { linkSentAt: now };
-        if (messageId) patch.linkEmailMessageId = messageId;
-        if (record && record.status === "not_started") patch.status = "link_created";
-        if (record) await settlementsCol.update(record.id, patch);
-        return true;
-      }
-    } catch {
-      /* network error — fall through to mailto */
-    }
-    if (!opts?.silent) {
-      window.location.assign(`mailto:${m.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`);
-    }
-    return false;
+    openMailDraft([m.email], [], subject, body);
+    await markLinkSent(records.get(m.id));
+    return true;
   }
 
-  /** Ensure records for the whole household (so each shows on the board), then send. */
-  async function emailLink(m: Member, tpl: SettlementEmailTemplate, opts?: { silent?: boolean }): Promise<boolean> {
-    if (!m.email) return false;
-    const pool = members.filter((x) => x.isActive);
-    const house = householdMembersOf(m, pool);
-    const records = new Map<string, SettlementRecord>();
-    for (const person of house) records.set(person.id, await ensureRecord(person));
-    return sendLinkEmail(m, records.get(m.id), tpl, opts);
-  }
-
+  /**
+   * Open one mail-app draft to several members, BCC'd, with a shared greeting
+   * since a single draft can't be personalized per recipient.
+   */
   async function emailSelected(ms: Member[], tpl: SettlementEmailTemplate): Promise<number> {
-    let sent = 0;
+    if (!settlementBookingUrl) throw new Error("Add the tithing settlement booking page in Settings first.");
+    const withEmail = ms.filter((m) => m.email);
+    const records = new Map<string, SettlementRecord>();
     const ensured = new Set<string>();
-    for (const m of ms) {
-      if (!m.email) continue;
+    for (const m of withEmail) {
       const key = householdKey(m);
-      if (!ensured.has(key)) {
-        const pool = members.filter((x) => x.isActive);
-        for (const person of householdMembersOf(m, pool)) await ensureRecord(person);
-        ensured.add(key);
-      }
-      const ok = await sendLinkEmail(m, recordFor(m.id), tpl, { silent: true });
-      if (ok) sent += 1;
-      else if (sent === 0) {
-        throw new Error("Email isn't set up yet. Add a Gmail address in Settings → Email, then try again.");
-      }
+      if (ensured.has(key)) continue;
+      await ensureHousehold(m, records);
+      ensured.add(key);
     }
-    return sent;
+    if (withEmail.length === 0) return 0;
+    const { subject, body } = renderSettlementEmail(tpl, {
+      name: "Brothers and Sisters", lastName: "Brothers and Sisters", title: "", link: settlementBookingUrl,
+    });
+    openMailDraft([], withEmail.map((m) => m.email!), subject, body);
+    for (const m of withEmail) await markLinkSent(records.get(m.id));
+    return withEmail.length;
   }
 
   async function setSettlementStatus(m: Member, record: SettlementRecord | undefined, status: SettlementStatus) {
