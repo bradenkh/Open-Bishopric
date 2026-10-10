@@ -8,9 +8,11 @@ import { listAgentNotes } from "@/lib/agent-notes";
 import { isEmailConfigured, sendEmail as sendGmailMessage, searchInbox, readInboxMessage } from "@/lib/email/gmail";
 import { WARD_BUSINESS_CATEGORIES, makeEntry, seedBusiness } from "@/lib/ward";
 import { renderTaskReminder, withReminderDefaults } from "@/lib/task-reminder";
+import { syncCalendar, CalendarNotConfiguredError } from "@/lib/calendar/sync";
 import { INTERVIEW_DURATION_MINS } from "@/types";
 import type {
   Announcement,
+  CalendarBooking,
   Calling,
   Interview,
   InterviewType,
@@ -1420,6 +1422,41 @@ export const forgetPreference = tool({
   },
 });
 
+export const getCalendarBookings = tool({
+  description:
+    "List appointments members self-booked on the bishop's Google Calendar (the Bookings tab), read from the calendar subscription. Use to see who has booked tithing settlement or another interview. Set sync=true to re-read the bishop's calendar first so the list is current. Each booking carries the matched member (when the app could link it), the inferred interview type, the start time, and whether it was cancelled.",
+  inputSchema: z.object({
+    interviewType: z
+      .enum(["temple_recommend", "temple_recommend_youth", "calling", "ministering", "tithing_settlement", "youth", "worthiness", "other", "all"])
+      .optional()
+      .default("all")
+      .describe("Only bookings of this inferred type"),
+    since: z.string().optional().describe("ISO date YYYY-MM-DD; only bookings starting on or after it"),
+    includeCancelled: z.boolean().optional().default(false),
+    sync: z.boolean().optional().default(false).describe("Re-read the bishop's calendar feed before listing"),
+    limitCount: z.number().optional().default(200),
+  }),
+  execute: async ({ interviewType = "all", since, includeCancelled = false, sync = false, limitCount = 200 }) => {
+    let syncResult: Awaited<ReturnType<typeof syncCalendar>> | { error: string } | undefined;
+    if (sync) {
+      try {
+        syncResult = await syncCalendar(db());
+      } catch (e) {
+        if (!(e instanceof CalendarNotConfiguredError)) throw e;
+        syncResult = { error: e.message };
+      }
+    }
+    let query = db().from("calendar_bookings").select("*").order("start_at", { ascending: false }).limit(limitCount);
+    if (interviewType !== "all") query = query.eq("interview_type", interviewType);
+    if (since) query = query.gte("start_at", since);
+    if (!includeCancelled) query = query.eq("status", "active");
+    const { data, error } = await query;
+    if (error) throw error;
+    const bookings = (data ?? []).map((r) => fromRow<CalendarBooking>(r));
+    return { ...(syncResult ? { sync: syncResult } : {}), count: bookings.length, bookings };
+  },
+});
+
 // ── Interview availability: time off (out of town, etc.) ──────────────────────
 
 export const agentTools = {
@@ -1438,6 +1475,7 @@ export const agentTools = {
   // Interviews (tracked manually; self-scheduling is via Google booking pages)
   getInterviews,
   getInterviewers,
+  getCalendarBookings,
   createInterview,
   scheduleInterview,
   updateInterview,
