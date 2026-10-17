@@ -46,6 +46,7 @@ const TOOL_LABELS: Record<string, string> = {
   advanceInterview: "Advancing an interview",
   deleteInterview: "Removing an interview",
   getSacramentBulletin: "Reading the bulletin",
+  getPrayerHistory: "Reading the prayer history",
   updateSacramentBulletin: "Updating the bulletin",
   getAnnouncements: "Reading announcements",
   createAnnouncement: "Adding an announcement",
