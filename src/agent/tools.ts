@@ -922,6 +922,58 @@ export const getSacramentBulletin = tool({
   },
 });
 
+/** Bulletin row labels that hold a prayer, mapped to which prayer it is. */
+function prayerKind(label: string): "invocation" | "benediction" | undefined {
+  const l = label.trim().toLowerCase();
+  if (l.includes("invocation") || l.includes("opening prayer")) return "invocation";
+  if (l.includes("benediction") || l.includes("closing prayer")) return "benediction";
+  return undefined;
+}
+
+export const getPrayerHistory = tool({
+  description:
+    "Get everyone who has given (or is scheduled to give) a prayer in sacrament meeting, from every bulletin on record, in one call. Returns each prayer (date, invocation/benediction, name) newest first, plus a per-person summary with their most recent prayer date and count. Use this to choose who to ask to pray, e.g. people whose last prayer was longest ago.",
+  inputSchema: z.object({
+    name: z.string().optional().describe("Optional: only return prayers by people whose name contains this text"),
+  }),
+  execute: async ({ name }) => {
+    const { data, error } = await db()
+      .from("meetings")
+      .select("*")
+      .eq("type", "sacrament_meeting")
+      .order("date", { ascending: false });
+    if (error) throw error;
+
+    const filter = name?.trim().toLowerCase();
+    const prayers: { date: string; prayer: "invocation" | "benediction"; name: string }[] = [];
+    for (const r of data ?? []) {
+      const meeting = fromRow<Meeting>(r);
+      for (const row of meeting.program?.rows ?? []) {
+        const kind = prayerKind(row.label ?? "");
+        const who = row.value?.trim();
+        if (!kind || !who) continue;
+        if (filter && !who.toLowerCase().includes(filter)) continue;
+        prayers.push({ date: meeting.date, prayer: kind, name: who });
+      }
+    }
+
+    // One entry per person (case-insensitive), keyed to their latest prayer.
+    const people = new Map<string, { name: string; lastPrayed: string; count: number }>();
+    for (const p of prayers) {
+      const key = p.name.toLowerCase();
+      const entry = people.get(key);
+      if (!entry) people.set(key, { name: p.name, lastPrayed: p.date, count: 1 });
+      else entry.count += 1;
+    }
+
+    return {
+      earliestBulletin: data?.length ? data[data.length - 1].date : null,
+      prayers,
+      people: [...people.values()],
+    };
+  },
+});
+
 export const updateSacramentBulletin = tool({
   description:
     "Create or update the sacrament meeting bulletin for a Sunday. Provide only the header fields you want to change; existing ones are kept. Provide `rows` to replace the full order of service (read it first with getSacramentBulletin, then send back the modified list) — omit `rows` to leave the order of service unchanged. The 'Administration of the Sacrament' anchor row is always preserved.",
@@ -1483,6 +1535,7 @@ export const agentTools = {
   deleteInterview,
   // Sacrament meeting bulletins
   getSacramentBulletin,
+  getPrayerHistory,
   updateSacramentBulletin,
   // Ward business
   getWardBusiness,

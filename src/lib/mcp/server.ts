@@ -22,6 +22,7 @@ const READ_ONLY = new Set([
   "getInterviews",
   "getInterviewers",
   "getSacramentBulletin",
+  "getPrayerHistory",
   "getWardBusiness",
   "getAnnouncements",
   "searchInbox",
