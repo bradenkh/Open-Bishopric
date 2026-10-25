@@ -160,7 +160,6 @@ function AssistantMemoryCard() {
 const AI_PROVIDERS: { value: string; label: string; baseUrl: boolean; modelHint: string }[] = [
   { value: "openai-compat", label: "OpenRouter (OpenAI-compatible)", baseUrl: true, modelHint: "openai/gpt-4o-mini" },
   { value: "cerebras", label: "Cerebras", baseUrl: true, modelHint: "llama-3.3-70b" },
-  { value: "deepseek", label: "DeepSeek", baseUrl: false, modelHint: "deepseek-chat" },
 ];
 
 const providerMeta = (value: string) => AI_PROVIDERS.find((p) => p.value === value) ?? AI_PROVIDERS[0];
@@ -333,7 +332,7 @@ function AIAssistantCard() {
             OpenRouter
           </a>
           , <a href="https://cerebras.ai" target="_blank" rel="noreferrer" className="underline">Cerebras</a>,
-          DeepSeek, or any OpenAI-compatible gateway. API keys are stored securely on the
+          or any OpenAI-compatible gateway. API keys are stored securely on the
           server and never shown here.
         </p>
 

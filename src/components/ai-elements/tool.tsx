@@ -54,8 +54,6 @@ const TOOL_LABELS: Record<string, string> = {
   sendTaskReminder: "Sending a task reminder",
   emailInterviewTimes: "Emailing interview times",
   sendEmail: "Sending an email",
-  searchInbox: "Searching the inbox",
-  readEmail: "Reading an email",
   rememberPreference: "Saving a preference",
   getRememberedPreferences: "Recalling preferences",
   forgetPreference: "Forgetting a preference",

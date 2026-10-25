@@ -18,11 +18,11 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { useData, newId } from "@/contexts/DataContext";
 import type {
-  SettlementRecord, SettlementStatus, DeclaredTithingStatus,
+  SettlementRecord, SettlementStatus,
   Member, CalendarBooking,
 } from "@/types";
 import {
-  INTERVIEW_TYPE_LABELS, SETTLEMENT_STATUS_LABELS, DECLARED_STATUS_LABELS,
+  INTERVIEW_TYPE_LABELS, SETTLEMENT_STATUS_LABELS,
 } from "@/types";
 import { formatDate, cn } from "@/lib/utils";
 import { APP_TIME_ZONE, toDateStr, fromMinutes, nowInAppTz } from "@/lib/availability";
@@ -229,7 +229,6 @@ const SETTLEMENT_STATUS_COLORS: Record<SettlementStatus, string> = {
 const SETTLEMENT_STATUSES: SettlementStatus[] = [
   "not_started", "link_created", "scheduled", "completed", "declined", "exempt",
 ];
-const DECLARED_STATUSES: DeclaredTithingStatus[] = ["full", "partial", "non", "exempt"];
 const TERMINAL_STATUSES = new Set<SettlementStatus>(["completed", "exempt", "declined"]);
 
 type SettlementSegment = "all" | "not_started" | "link" | "scheduled" | "done";
@@ -330,12 +329,11 @@ interface SettlementViewProps {
   onEmail: (member: Member, tpl: SettlementEmailTemplate) => Promise<boolean>;
   onEmailSelected: (members: Member[], tpl: SettlementEmailTemplate) => Promise<number>;
   onSetStatus: (member: Member, record: SettlementRecord | undefined, status: SettlementStatus) => void;
-  onSetDeclared: (member: Member, record: SettlementRecord | undefined, declared: DeclaredTithingStatus) => void;
 }
 
 function SettlementView({
   members, settlements, calendarBookings, emailTemplate, bookingUrl,
-  onEmail, onEmailSelected, onSetStatus, onSetDeclared,
+  onEmail, onEmailSelected, onSetStatus,
 }: SettlementViewProps) {
   const [query, setQuery] = useState("");
   const [segment, setSegment] = useState<SettlementSegment>("all");
@@ -668,11 +666,6 @@ function SettlementView({
                     </p>
                   );
                 })()}
-                {!r.booking && r.record?.declaredStatus && (
-                  <p className="text-[11px] text-muted-foreground truncate">
-                    Declared: {DECLARED_STATUS_LABELS[r.record.declaredStatus]}
-                  </p>
-                )}
                 {r.record?.linkSentAt && r.status !== "scheduled" && !TERMINAL_STATUSES.has(r.status) && (
                   <p className="flex items-center gap-1 text-[11px] text-muted-foreground truncate">
                     <Mail className="h-3 w-3 shrink-0" /> Emailed {timeAgo(r.record.linkSentAt)}
@@ -713,21 +706,6 @@ function SettlementView({
                 </SelectContent>
               </Select>
 
-              {r.status === "completed" && (
-                <Select
-                  value={r.record?.declaredStatus ?? ""}
-                  onValueChange={(v) => onSetDeclared(r.member, r.record, v as DeclaredTithingStatus)}
-                >
-                  <SelectTrigger className="h-8 w-[130px] text-xs shrink-0">
-                    <SelectValue placeholder="Declared…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {DECLARED_STATUSES.map((s) => (
-                      <SelectItem key={s} value={s}>{DECLARED_STATUS_LABELS[s]}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
             </div>
           ))}
         </div>
@@ -956,15 +934,6 @@ export default function InterviewsPage() {
     });
   }
 
-  async function setDeclared(m: Member, record: SettlementRecord | undefined, declared: DeclaredTithingStatus) {
-    const now = new Date().toISOString();
-    if (record) await settlementsCol.update(record.id, { declaredStatus: declared });
-    else await settlementsCol.create({
-      id: newId(), memberId: m.id, memberName: memberName(m), year: SETTLEMENT_YEAR,
-      status: "completed", declaredStatus: declared, createdBy: user?.uid ?? "mock", createdAt: now, updatedAt: now,
-    });
-  }
-
   // ── Header counts ────────────────────────────────────────────────────────────
   const unmatchedBookings = calendarBookings.filter((b) => b.status !== "cancelled" && !b.memberId).length;
   const upcomingBookings = calendarBookings.filter(
@@ -1064,7 +1033,6 @@ export default function InterviewsPage() {
           onEmail={(m, tpl) => emailLink(m, tpl)}
           onEmailSelected={(ms, tpl) => emailSelected(ms, tpl)}
           onSetStatus={(m, r, s) => { void setSettlementStatus(m, r, s); }}
-          onSetDeclared={(m, r, d) => { void setDeclared(m, r, d); }}
         />
       )}
     </div>

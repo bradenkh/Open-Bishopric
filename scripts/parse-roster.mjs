@@ -18,6 +18,8 @@
  *                            House).
  *   - isHouseholdParent     = head of house OR spouse of head (the two get the
  *                            settlement email).
+ *   - isMinor               = under 18. Age is read only to set this flag; the
+ *                            age itself is never written out.
  *
  * The export carries real names, emails, and phone numbers, so BOTH the HTML and
  * the JSON this writes are PII — keep them out of git (they match .gitignore's
@@ -136,7 +138,8 @@ function splitName(full) {
 const now = new Date().toISOString();
 const members = raw.map((r) => {
   const { firstName, lastName } = splitName(r.full);
-  const ageNum = /^\d+$/.test(r.age) ? Number(r.age) : undefined;
+  // Keep only whether the member is a minor, never their age.
+  const isMinor = /^\d+$/.test(r.age) ? Number(r.age) < 18 : undefined;
   return {
     id: r.uuid,
     firstName,
@@ -146,7 +149,7 @@ const members = raw.map((r) => {
     householdId: uuidByPref.get(r.head) || r.uuid,
     isHeadOfHousehold: r.pref === r.head,
     isHouseholdParent: parentUuids.has(r.uuid),
-    age: ageNum,
+    isMinor,
     gender: normGender(r.gender),
     isActive: true,
     createdAt: now,

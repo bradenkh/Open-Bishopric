@@ -5,7 +5,7 @@ import { fromRow } from "@/lib/db/mappers";
 import { parseBulletin, defaultBulletin, upcomingSunday } from "@/lib/bulletin";
 import { isAnnouncementActive } from "@/lib/announcements";
 import { listAgentNotes } from "@/lib/agent-notes";
-import { isEmailConfigured, sendEmail as sendGmailMessage, searchInbox, readInboxMessage } from "@/lib/email/gmail";
+import { isEmailConfigured, sendEmail as sendGmailMessage } from "@/lib/email/gmail";
 import { WARD_BUSINESS_CATEGORIES, makeEntry, seedBusiness } from "@/lib/ward";
 import { renderTaskReminder, withReminderDefaults } from "@/lib/task-reminder";
 import { syncCalendar, CalendarNotConfiguredError } from "@/lib/calendar/sync";
@@ -1353,7 +1353,7 @@ export const emailInterviewTimes = tool({
 
 export const sendEmail = tool({
   description:
-    "Compose and send a plain-text email from the ward Gmail account to any recipient. Use this for any outbound email that isn't a task reminder or interview-time request — for example replying to a message from the inbox, or writing to a ward member or leader. Write the complete message yourself (subject and full body) so the user can review exactly what will go out. The user must review and either approve it (which sends it) or give feedback for you to revise — nothing is sent until they approve. To reply within an existing email thread, pass the original message's Message-ID as inReplyTo (available from readEmail). Requires email to be configured in Settings → Email.",
+    "Compose and send a plain-text email from the ward Gmail account to any recipient. Use this for any outbound email that isn't a task reminder or interview-time request — for example writing to a ward member or leader. Write the complete message yourself (subject and full body) so the user can review exactly what will go out. The user must review and either approve it (which sends it) or give feedback for you to revise — nothing is sent until they approve. To reply within an existing email thread, pass the original message's Message-ID as inReplyTo. Requires email to be configured in Settings → Email.",
   // Outbound email always goes through human review: the send only happens
   // after the signed-in bishopric member approves the drafted message.
   needsApproval: true,
@@ -1364,7 +1364,7 @@ export const sendEmail = tool({
     inReplyTo: z
       .string()
       .optional()
-      .describe("The Message-ID being replied to, to thread the reply (from readEmail); omit for a new message"),
+      .describe("The Message-ID being replied to, to thread the reply; omit for a new message"),
   }),
   execute: async ({ to, subject, body, inReplyTo }) => {
     if (!(await isEmailConfigured())) {
@@ -1379,52 +1379,6 @@ export const sendEmail = tool({
       return { ok: true, to: recipient, subject, messageId };
     } catch (e) {
       return { error: e instanceof Error ? e.message : "Failed to send the email." };
-    }
-  },
-});
-
-// ── Email: search and read the inbox ─────────────────────────────────────────
-
-export const searchInboxTool = tool({
-  description:
-    "Search the ward Gmail inbox and return a list of matching emails (newest first), each with a uid, sender, subject, date, a short snippet, and whether it's unread. Combine any of the filters — they're ANDed together. `query` accepts Gmail search syntax (e.g. \"has:attachment\", \"temple recommend\"). With no filters it returns recent inbox mail from the last 30 days. Use the returned uid with readEmail to open the full message. Requires email to be configured in Settings → Email.",
-  inputSchema: z.object({
-    query: z.string().optional().describe("Free-text / Gmail search terms matched across the message"),
-    from: z.string().optional().describe("Restrict to a sender name or email address"),
-    subject: z.string().optional().describe("Restrict to a subject phrase"),
-    withinDays: z.number().optional().describe("Only messages received within this many days"),
-    unreadOnly: z.boolean().optional().default(false).describe("Only unread messages"),
-    limitCount: z.number().optional().default(20).describe("Max emails to return (newest first)"),
-  }),
-  execute: async ({ query, from, subject, withinDays, unreadOnly = false, limitCount = 20 }) => {
-    if (!(await isEmailConfigured())) {
-      return { error: "Email isn't configured yet. Add a Gmail address and app password in Settings → Email." };
-    }
-    try {
-      const results = await searchInbox({ query, from, subject, withinDays, unreadOnly, limit: limitCount });
-      return { count: results.length, messages: results };
-    } catch (e) {
-      return { error: e instanceof Error ? e.message : "Failed to search the inbox." };
-    }
-  },
-});
-
-export const readEmail = tool({
-  description:
-    "Read one inbox email in full by its uid (from searchInbox), returning the complete body plus sender, recipients, subject, and date. Use this after searchInbox when you need the full contents of a specific message. Reading does not mark the email as read. Requires email to be configured.",
-  inputSchema: z.object({
-    uid: z.number().describe("The email's uid, from a searchInbox result"),
-  }),
-  execute: async ({ uid }) => {
-    if (!(await isEmailConfigured())) {
-      return { error: "Email isn't configured yet. Add a Gmail address and app password in Settings → Email." };
-    }
-    try {
-      const message = await readInboxMessage(uid);
-      if (!message) return { error: `No inbox email found with uid ${uid}. It may have moved or been deleted — search again for the current uid.` };
-      return message;
-    } catch (e) {
-      return { error: e instanceof Error ? e.message : "Failed to read the email." };
     }
   },
 });
@@ -1545,8 +1499,6 @@ export const agentTools = {
   sendTaskReminder,
   emailInterviewTimes,
   sendEmail,
-  searchInbox: searchInboxTool,
-  readEmail,
   // Memory
   rememberPreference,
   getRememberedPreferences,

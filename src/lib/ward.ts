@@ -1,26 +1,4 @@
-import type { Calling, WardInfo, WardBusiness, WardBusinessEntry } from "@/types";
-
-/**
- * Default ward details, seeded from the Schenectady Ward bulletin. These are
- * editable at runtime (ward settings) — they live here so there's a sensible
- * starting point before a backend exists.
- */
-export const DEFAULT_WARD_INFO: WardInfo = {
-  wardName: "Schenectady Ward",
-  churchName: "The Church of Jesus Christ of Latter-Day Saints",
-  stake: "Albany New York Stake",
-  address: "52 Blue Barns Rd., Rexford, NY",
-  meetingTitle: "Schenectady Sacrament Meeting",
-  meetingTime: "9 a.m.",
-  leadership: [
-    { name: "Jay Phillips",      role: "Bishop",        phone: "(518) 545-9256" },
-    { name: "Blaine Bringhurst", role: "1st Counselor", phone: "(518) 698-1106" },
-    { name: "Scott Davenport",   role: "2nd Counselor", phone: "(503) 860-9364" },
-  ],
-  submissionNote:
-    "To make an appointment with the Bishop or submit announcements for the Ward Bulletin, " +
-    "please contact Braden Hansen via text at (208) 243-1193 or via email at bradenhnsn@gmail.com.",
-};
+import type { Calling, WardBusiness, WardBusinessEntry } from "@/types";
 
 /**
  * The ward-business categories read during sacrament meeting, in the order they

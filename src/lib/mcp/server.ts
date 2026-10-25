@@ -25,8 +25,6 @@ const READ_ONLY = new Set([
   "getPrayerHistory",
   "getWardBusiness",
   "getAnnouncements",
-  "searchInbox",
-  "readEmail",
   "getRememberedPreferences",
 ]);
 

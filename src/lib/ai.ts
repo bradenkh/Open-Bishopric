@@ -1,13 +1,12 @@
 import "server-only";
 import { createOpenAI } from "@ai-sdk/openai";
-import { createDeepSeek } from "@ai-sdk/deepseek";
 import type { LanguageModel } from "ai";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-export type AIProvider = "openai-compat" | "deepseek" | "cerebras";
+export type AIProvider = "openai-compat" | "cerebras";
 
 /** Every provider the assistant can talk to — used to validate settings input. */
-export const AI_PROVIDERS: readonly AIProvider[] = ["openai-compat", "deepseek", "cerebras"];
+export const AI_PROVIDERS: readonly AIProvider[] = ["openai-compat", "cerebras"];
 
 export interface AISettings {
   provider: AIProvider;
@@ -125,9 +124,6 @@ export async function getAIModel(): Promise<LanguageModel> {
     throw new AINotConfiguredError();
   }
 
-  if (provider === "deepseek") {
-    return createDeepSeek({ apiKey })(model) as LanguageModel;
-  }
   // Both "openai-compat" (OpenRouter et al.) and "cerebras" speak the OpenAI
   // chat-completions API, so they share this path — only the base URL differs.
   // Strip any trailing slash so the SDK doesn't build a "…/v1//chat/completions"
