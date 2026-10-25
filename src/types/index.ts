@@ -282,8 +282,6 @@ export interface SacramentProgram {
   conducting?: string;
   chorister?: string;
   organist?: string;
-  /** What happens in the second hour, e.g. "Sunday School". Optional. */
-  secondHour?: string;
   /** Spiritual thought / quote printed on the bulletin. */
   quote?: string;
   /** Attribution for the quote, e.g. "President Oaks". */
