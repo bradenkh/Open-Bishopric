@@ -397,7 +397,7 @@ export default function SacramentPage() {
             </div>
             {!editing && (
               <p className="text-xs text-muted-foreground">
-                A standard order of service will be added. Edit the program, conducting, chorister, organist and second hour on the bulletin after creating. Presiding is set on the Business items.
+                A standard order of service will be added. Edit the program, conducting, chorister and organist on the bulletin after creating. Presiding is set on the Business items.
               </p>
             )}
             <div className="space-y-1.5">

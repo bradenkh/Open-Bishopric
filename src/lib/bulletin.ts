@@ -20,7 +20,6 @@ export function defaultBulletin(header: Partial<SacramentProgram> = {}): Sacrame
     conducting: header.conducting,
     chorister: header.chorister,
     organist: header.organist,
-    secondHour: header.secondHour,
     quote: header.quote,
     quoteBy: header.quoteBy,
     rows: [
@@ -97,7 +96,6 @@ export function parseBulletin(input: unknown): SacramentProgram {
     conducting: str(obj.conducting),
     chorister: str(obj.chorister),
     organist: str(obj.organist),
-    secondHour: str(obj.secondHour),
     quote: str(obj.quote),
     quoteBy: str(obj.quoteBy),
     rows,

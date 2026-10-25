@@ -25,7 +25,6 @@ const BULLETIN_CSS = `
 .bulletin ul.program .value{text-align:right;max-width:60%}
 .bulletin .footer{margin-top:16px;text-align:center;font-size:9pt}
 .bulletin .footer .roles{display:flex;justify-content:center;gap:40px;margin-bottom:8px}
-.bulletin .footer .second{margin-bottom:14px}
 .bulletin .footer .contacts{font-size:8.5pt;color:#222;line-height:1.5}
 .bulletin .right .quote{text-align:center;font-size:9.5pt;margin-bottom:16px}
 .bulletin .right .quote .by{display:block;margin-top:3px}
@@ -119,7 +118,6 @@ export function BulletinDialog({ open, onOpenChange, meeting, ward, announcement
                   {program.chorister && <span>Chorister – {program.chorister}</span>}
                   {program.organist && <span>Organist – {program.organist}</span>}
                 </div>
-                {program.secondHour && <div className="second">Second hour – {program.secondHour}</div>}
                 <div className="contacts">
                   {ward.leadership.map((l, i) => (
                     <span key={i}>
