@@ -93,9 +93,8 @@ calendar feed token lives), never exposed to the browser.
   solicitation replies (`status='replied'`) and interview replies (appended to
   the interview's notes). Wire it to a cron to poll
   for replies.
-- The MCP tools include `sendEmail`, `sendTaskReminder` and `emailInterviewTimes`.
-  They need the recipient's address from the user, since the app keeps no member
-  contact details. Inbox contents are not exposed to AI.
+- Email is sent only from the app itself. The MCP server has no email tools, so
+  AI can neither send mail nor read the inbox.
 - If email isn't configured, sending an agenda request **falls back to a
   `mailto:` link**, so nothing breaks before setup.
 
@@ -134,9 +133,8 @@ integration; there is no in-app chat.
 Each token acts as the member who generated it. Only a hash is stored
 (`mcp_tokens`), and revoking a token in Settings cuts it off immediately.
 Clients that can send headers can use `/api/mcp` with
-`Authorization: Bearer <token>` instead. Email tools send immediately over MCP
-(there's no in-app review screen), so the server tells Claude to confirm each
-draft with you first. Keep those tools on "ask before use" in Claude.
+`Authorization: Bearer <token>` instead. The connector has no email tools:
+Claude can draft messages, but sending happens in the app or your own mail client.
 
 ## Database setup & schema changes
 

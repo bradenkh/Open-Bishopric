@@ -31,12 +31,8 @@ const READ_ONLY = new Set([
 /** Tools that delete or wholesale replace data. */
 const DESTRUCTIVE = new Set(["deleteCalling", "deleteInterview", "importRoster", "forgetPreference"]);
 
-/** Tools that send email to people outside the bishopric. */
-const SENDS_EMAIL = new Set(["sendEmail", "sendTaskReminder", "emailInterviewTimes"]);
-
 function annotationsFor(name: string): ToolAnnotations {
   if (READ_ONLY.has(name)) return { readOnlyHint: true, openWorldHint: false };
-  if (SENDS_EMAIL.has(name)) return { readOnlyHint: false, destructiveHint: true, openWorldHint: true };
   return { readOnlyHint: false, destructiveHint: DESTRUCTIVE.has(name), openWorldHint: false };
 }
 

@@ -5,9 +5,7 @@ import { fromRow } from "@/lib/db/mappers";
 import { parseBulletin, defaultBulletin, upcomingSunday } from "@/lib/bulletin";
 import { isAnnouncementActive } from "@/lib/announcements";
 import { listAgentNotes } from "@/lib/agent-notes";
-import { isEmailConfigured, sendEmail as sendGmailMessage } from "@/lib/email/gmail";
 import { WARD_BUSINESS_CATEGORIES, makeEntry, seedBusiness } from "@/lib/ward";
-import { renderTaskReminder, withReminderDefaults } from "@/lib/task-reminder";
 import { syncCalendar, CalendarNotConfiguredError } from "@/lib/calendar/sync";
 import { INTERVIEW_DURATION_MINS } from "@/types";
 import type {
@@ -1224,128 +1222,6 @@ export const updateAnnouncement = tool({
   },
 });
 
-// ── Email: send reminders and scheduling requests ────────────────────────────
-
-export const sendTaskReminder = tool({
-  description:
-    "Email a reminder about a to-do/task to its owner. Use when the bishopric wants to nudge whoever owns an assignment. The app keeps no member email addresses, so the recipient's email must be given by the user; ask for it if you don't have it. Sends immediately: get the user's explicit go-ahead first. Requires email to be configured in Settings → Email.",
-  inputSchema: z.object({
-    taskId: z.string().describe("The task to send a reminder about (from getTasks)"),
-    to: z.string().describe("Recipient email, as given by the user"),
-    note: z.string().optional().describe("Optional extra line to include in the reminder"),
-  }),
-  execute: async ({ taskId, to, note }) => {
-    if (!(await isEmailConfigured())) {
-      return { error: "Email isn't configured yet. Add a Gmail address and app password in Settings → Email." };
-    }
-    const { data: row, error } = await db().from("tasks").select("*").eq("id", taskId).maybeSingle();
-    if (error) throw error;
-    if (!row) return { error: "No task found with that id." };
-    const task = fromRow<Task>(row);
-
-    const recipient = to.trim();
-    if (!recipient) return { error: "A recipient email address is required." };
-
-    // Use the bishopric's saved reminder template (Settings → Email), falling
-    // back to the built-in default. Keeps the assistant's wording in sync with
-    // the Tasks page.
-    const { data: settings } = await db()
-      .from("app_settings")
-      .select("task_reminder_subject, task_reminder_body")
-      .eq("id", "default")
-      .maybeSingle();
-    const tpl = withReminderDefaults({
-      subject: settings?.task_reminder_subject,
-      body: settings?.task_reminder_body,
-    });
-    const { subject, body } = renderTaskReminder(tpl, {
-      name: task.assigneeName?.split(" ")[0] ?? "",
-      task: task.title,
-      description: task.description ?? "",
-      due: task.dueDate ? `Due: ${task.dueDate}` : "",
-    });
-    // Append the caller's extra note, if any.
-    const finalBody = note ? `${body}\n\n${note}` : body;
-
-    const { messageId } = await sendGmailMessage({ to: recipient, subject, body: finalBody });
-    await db().from("tasks").update({ reminder_sent_at: new Date().toISOString() }).eq("id", taskId);
-    return { ok: true, taskId, to: recipient, messageId };
-  },
-});
-
-export const emailInterviewTimes = tool({
-  description:
-    "Email a member proposed interview time(s) and ask them to reply with what works. The app keeps no member email addresses, so the recipient's email must be given by the user; ask for it if you don't have it. Stores the message id so the member's reply is matched back to this interview by the inbound poll. Sends immediately: get the user's explicit go-ahead first. Requires email to be configured.",
-  inputSchema: z.object({
-    interviewId: z.string().describe("The interview to schedule (from getInterviews)"),
-    proposedTimes: z.array(z.string()).min(1).describe("Human-readable time options, e.g. 'Tuesday, Sep 2 at 7:00 PM'"),
-    to: z.string().describe("Recipient email, as given by the user"),
-    note: z.string().optional().describe("Optional extra context to include"),
-  }),
-  execute: async ({ interviewId, proposedTimes, to, note }) => {
-    if (!(await isEmailConfigured())) {
-      return { error: "Email isn't configured yet. Add a Gmail address and app password in Settings → Email." };
-    }
-    const { data: row, error } = await db().from("interviews").select("*").eq("id", interviewId).maybeSingle();
-    if (error) throw error;
-    if (!row) return { error: "No interview found with that id." };
-    const interview = fromRow<Interview>(row);
-
-    const recipient = to.trim();
-    if (!recipient) return { error: "A recipient email address is required." };
-
-    const first = interview.memberName.split(" ")[0];
-    const options = proposedTimes.map((t) => `• ${t}`).join("\n");
-    const body = [
-      `Hi ${first},`,
-      "",
-      "We'd like to schedule a short interview with you. Do any of these times work?",
-      "",
-      options,
-      note ? `\n${note}` : "",
-      "",
-      "Just reply to this email and let us know. Thank you!",
-    ].filter(Boolean).join("\n");
-
-    const { messageId } = await sendGmailMessage({
-      to: recipient,
-      subject: "Scheduling an interview",
-      body,
-    });
-    await db().from("interviews").update({ email_message_id: messageId }).eq("id", interviewId);
-    return { ok: true, interviewId, to: recipient, messageId };
-  },
-});
-
-export const sendEmail = tool({
-  description:
-    "Compose and send a plain-text email from the ward Gmail account to any recipient. Use this for any outbound email that isn't a task reminder or interview-time request — for example writing to a ward member or leader. Write the complete message yourself (subject and full body). Sends immediately: show the user the full message and get their explicit go-ahead first. To reply within an existing email thread, pass the original message's Message-ID as inReplyTo. Requires email to be configured in Settings → Email.",
-  inputSchema: z.object({
-    to: z.string().describe("Recipient email address"),
-    subject: z.string().describe("The email subject line"),
-    body: z.string().describe("The full plain-text body of the email, written out in full"),
-    inReplyTo: z
-      .string()
-      .optional()
-      .describe("The Message-ID being replied to, to thread the reply; omit for a new message"),
-  }),
-  execute: async ({ to, subject, body, inReplyTo }) => {
-    if (!(await isEmailConfigured())) {
-      return { error: "Email isn't configured yet. Add a Gmail address and app password in Settings → Email." };
-    }
-    const recipient = to.trim();
-    if (!recipient) {
-      return { error: "A recipient email address is required." };
-    }
-    try {
-      const { messageId } = await sendGmailMessage({ to: recipient, subject, body, inReplyTo });
-      return { ok: true, to: recipient, subject, messageId };
-    } catch (e) {
-      return { error: e instanceof Error ? e.message : "Failed to send the email." };
-    }
-  },
-});
-
 // ── Memory: standing preferences the assistant remembers across conversations ──
 
 export const rememberPreference = tool({
@@ -1458,10 +1334,6 @@ export const agentTools = {
   getAnnouncements,
   createAnnouncement,
   updateAnnouncement,
-  // Email
-  sendTaskReminder,
-  emailInterviewTimes,
-  sendEmail,
   // Memory
   rememberPreference,
   getRememberedPreferences,
