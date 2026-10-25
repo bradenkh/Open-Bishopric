@@ -1,6 +1,6 @@
 import "server-only";
 import * as ical from "node-ical";
-import type { Attendee, Organizer, VEvent } from "node-ical";
+import type { Organizer, VEvent } from "node-ical";
 import type { CalendarMatchMethod, InterviewType, Member } from "@/types";
 
 /**
@@ -26,7 +26,6 @@ export interface ParsedEvent {
   start: Date;
   end?: Date;
   organizerEmail?: string;
-  attendeeEmails: string[];
   /** True when the feed marks the event STATUS:CANCELLED. */
   cancelled: boolean;
 }
@@ -59,8 +58,8 @@ export async function fetchIcs(url: string): Promise<string> {
   return res.text();
 }
 
-/** Pull a bare email address out of an ORGANIZER/ATTENDEE value. */
-function emailOf(value: Attendee | Organizer | undefined): string | undefined {
+/** Pull a bare email address out of an ORGANIZER value. */
+function emailOf(value: Organizer | undefined): string | undefined {
   if (!value) return undefined;
   // A value is either the raw "mailto:foo@bar.com" string or an object whose
   // `val` holds it (with CN/PARTSTAT params alongside).
@@ -70,12 +69,17 @@ function emailOf(value: Attendee | Organizer | undefined): string | undefined {
   return email.includes("@") ? email : undefined;
 }
 
-/** Every attendee email on an event, de-duplicated. */
-function attendeeEmails(event: VEvent): string[] {
-  const raw = event.attendee;
-  const list = Array.isArray(raw) ? raw : raw ? [raw] : [];
-  const emails = list.map(emailOf).filter((e): e is string => Boolean(e));
-  return [...new Set(emails)];
+/**
+ * Strip email addresses and phone numbers from event text. Google booking pages
+ * write the booker's contact details into the description; the app keeps member
+ * names only, so those never reach the database.
+ */
+export function scrubContact(text?: string): string | undefined {
+  const scrubbed = text
+    ?.replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, "")
+    .replace(/\+?1?[ .-]?\(?\d{3}\)?[ .-]?\d{3}[ .-]?\d{4}/g, "")
+    .trim();
+  return scrubbed || undefined;
 }
 
 /**
@@ -96,13 +100,12 @@ export function parseIcs(icsText: string): ParsedEvent[] {
 
     events.push({
       uid: event.uid,
-      summary: event.summary?.trim() || undefined,
-      description: event.description?.trim() || undefined,
+      summary: scrubContact(event.summary),
+      description: scrubContact(event.description),
       location: event.location?.trim() || undefined,
       start: event.start,
       end: event.end ?? undefined,
       organizerEmail: emailOf(event.organizer),
-      attendeeEmails: attendeeEmails(event),
       cancelled: event.status === "CANCELLED",
     });
   }
@@ -116,28 +119,16 @@ function normalizedName(member: Pick<Member, "firstName" | "lastName">): string 
 }
 
 /**
- * Link a parsed event to a ward member.
- *
- *   1. By email — an attendee address equals a member's email on file. Reliable,
- *      so it wins outright.
- *   2. By name — the event summary/description contains exactly one member's full
- *      name. Fuzzy, so it is used only when a single member matches; ambiguity
- *      leaves the booking unmatched for manual review.
+ * Link a parsed event to a ward member by name: the event summary/description
+ * must contain exactly one member's full name. Ambiguity leaves the booking
+ * unmatched for manual review. (The app keeps no member emails, so there is no
+ * email match.)
  *
  * Returns an empty match when nothing links — the ingest step keeps those in an
  * "unmatched" state rather than guessing.
  */
 export function matchMember(event: ParsedEvent, members: Member[]): MemberMatch {
-  // 1. Email — direct and unambiguous.
-  const guestEmails = new Set(event.attendeeEmails);
-  for (const member of members) {
-    const email = member.email?.trim().toLowerCase();
-    if (email && guestEmails.has(email)) {
-      return { memberId: member.id, memberName: `${member.firstName} ${member.lastName}`, method: "email" };
-    }
-  }
-
-  // 2. Name — only when exactly one member's full name appears in the text.
+  // Only when exactly one member's full name appears in the text.
   const haystack = `${event.summary ?? ""} ${event.description ?? ""}`
     .replace(/\s+/g, " ")
     .toLowerCase();

@@ -2,33 +2,28 @@
 
 import { useState, useEffect, useMemo } from "react";
 import {
-  RotateCcw, Loader2, Trash2, Mail, Send, Search, Download, User, CalendarClock, Check,
+  RotateCcw, Loader2, Trash2, Mail, Send, Search, Download, User, CalendarClock, Copy,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
-} from "@/components/ui/dialog";
 import { useAuth } from "@/contexts/AuthContext";
 import { useData, newId } from "@/contexts/DataContext";
 import type {
-  SettlementRecord, SettlementStatus, DeclaredTithingStatus,
+  SettlementRecord, SettlementStatus,
   Member, CalendarBooking,
 } from "@/types";
 import {
-  INTERVIEW_TYPE_LABELS, SETTLEMENT_STATUS_LABELS, DECLARED_STATUS_LABELS,
+  INTERVIEW_TYPE_LABELS, SETTLEMENT_STATUS_LABELS,
 } from "@/types";
 import { formatDate, cn } from "@/lib/utils";
 import { APP_TIME_ZONE, toDateStr, fromMinutes, nowInAppTz } from "@/lib/availability";
 import { toZonedTime } from "date-fns-tz";
 import {
-  DEFAULT_SETTLEMENT_EMAIL, renderSettlementEmail, settlementTitle, withDefaults,
+  DEFAULT_SETTLEMENT_EMAIL, renderSettlementEmail, withDefaults,
   type SettlementEmailTemplate,
 } from "@/lib/settlement-email";
 import { bookingLinkFor } from "@/lib/booking-pages";
@@ -112,9 +107,6 @@ function BookingRow({
           )}
         </div>
         <p className="text-sm truncate mt-0.5">{booking.summary ?? "(no title)"}</p>
-        {booking.attendeeEmails?.length ? (
-          <p className="text-xs text-muted-foreground truncate">{booking.attendeeEmails.join(", ")}</p>
-        ) : null}
       </div>
       <div className="shrink-0">
         {booking.memberId ? (
@@ -229,7 +221,6 @@ const SETTLEMENT_STATUS_COLORS: Record<SettlementStatus, string> = {
 const SETTLEMENT_STATUSES: SettlementStatus[] = [
   "not_started", "link_created", "scheduled", "completed", "declined", "exempt",
 ];
-const DECLARED_STATUSES: DeclaredTithingStatus[] = ["full", "partial", "non", "exempt"];
 const TERMINAL_STATUSES = new Set<SettlementStatus>(["completed", "exempt", "declined"]);
 
 type SettlementSegment = "all" | "not_started" | "link" | "scheduled" | "done";
@@ -248,13 +239,12 @@ interface SettlementRowState {
 
 /** Build and download a CSV of every household's settlement status. */
 function downloadSettlementCsv(rows: SettlementRowState[]) {
-  const header = ["Household", "Parents", "Parent Emails", "Members", "Status", "Emailed", "Scheduled"];
+  const header = ["Household", "Parents", "Members", "Status", "Emailed", "Scheduled"];
   const lines = rows.map((r) => {
     const emailed = r.record?.linkSentAt ? r.record.linkSentAt.slice(0, 10) : "";
     const sched = r.booking ? (() => { const w = bookingWhen(r.booking!.startAt); return `${w.date} ${w.time}`; })() : "";
     const parents = r.parents.map((p) => `${p.firstName} ${p.lastName}`).join("; ");
-    const parentEmails = r.parents.map((p) => p.email).filter(Boolean).join("; ");
-    return [r.name, parents, parentEmails, String(r.householdMembers.length),
+    return [r.name, parents, String(r.householdMembers.length),
       SETTLEMENT_STATUS_LABELS[r.status], emailed, sched]
       .map(csvCell)
       .join(",");
@@ -325,32 +315,21 @@ interface SettlementViewProps {
   /** Ingested Google bookings — a matched tithing-settlement one marks a household scheduled. */
   calendarBookings: CalendarBooking[];
   emailTemplate: SettlementEmailTemplate;
-  /** The Google booking-page URL emailed to members (from Settings). */
+  /** The Google booking-page URL sent to members (from Settings). */
   bookingUrl?: string;
-  onEmail: (member: Member, tpl: SettlementEmailTemplate) => Promise<boolean>;
-  onEmailSelected: (members: Member[], tpl: SettlementEmailTemplate) => Promise<number>;
+  /** Mark these households' heads (and their households) as invited. */
+  onMarkInvited: (heads: Member[]) => Promise<void>;
   onSetStatus: (member: Member, record: SettlementRecord | undefined, status: SettlementStatus) => void;
-  onSetDeclared: (member: Member, record: SettlementRecord | undefined, declared: DeclaredTithingStatus) => void;
 }
 
 function SettlementView({
   members, settlements, calendarBookings, emailTemplate, bookingUrl,
-  onEmail, onEmailSelected, onSetStatus, onSetDeclared,
+  onMarkInvited, onSetStatus,
 }: SettlementViewProps) {
   const [query, setQuery] = useState("");
   const [segment, setSegment] = useState<SettlementSegment>("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [emailedId, setEmailedId] = useState<string | null>(null);
-  const [emailMsg, setEmailMsg] = useState<string | null>(null);
-
-  // Compose dialog.
-  const [composeOpen, setComposeOpen] = useState(false);
-  const [composeRecipients, setComposeRecipients] = useState<Member[]>([]);
-  const [composeHouseholdId, setComposeHouseholdId] = useState<string | null>(null);
-  const [composeHouseholdName, setComposeHouseholdName] = useState("");
-  const [draftSubject, setDraftSubject] = useState(emailTemplate.subject);
-  const [draftBody, setDraftBody] = useState(emailTemplate.body);
-  const [composeSending, setComposeSending] = useState(false);
+  const [actionMsg, setActionMsg] = useState<string | null>(null);
 
   // Settlement bookings, keyed by member id → the household's booking.
   const settlementBookingByMember = useMemo(() => {
@@ -409,24 +388,9 @@ function SettlementView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, segment, query]);
 
-  const recipientsOf = (r: SettlementRowState) => {
-    const withEmail = (list: Member[]) => {
-      const seen = new Set<string>();
-      return list.filter((m) => {
-        const e = m.email?.trim().toLowerCase();
-        if (!e || seen.has(e)) return false;
-        seen.add(e);
-        return true;
-      });
-    };
-    const parents = withEmail(r.parents);
-    return parents.length ? parents : withEmail(r.householdMembers);
-  };
-  // A household worth emailing: still awaiting a booking, has an email, and a
-  // booking page is configured to point them at.
-  const emailable = (r: SettlementRowState) =>
-    !!bookingUrl && recipientsOf(r).length > 0
-    && r.status !== "scheduled" && !TERMINAL_STATUSES.has(r.status);
+  // A household that still needs inviting or a nudge: not yet booked or done.
+  const awaiting = (r: SettlementRowState) =>
+    r.status !== "scheduled" && !TERMINAL_STATUSES.has(r.status);
 
   function toggleSelected(id: string) {
     setSelected((prev) => {
@@ -436,9 +400,10 @@ function SettlementView({
     });
   }
 
-  const selectableIds = filtered.filter(emailable).map((r) => r.member.id);
+  const selectableIds = filtered.filter(awaiting).map((r) => r.member.id);
   const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selected.has(id));
-  const selectedCount = rows.filter((r) => selected.has(r.member.id) && emailable(r)).length;
+  const selectedRows = rows.filter((r) => selected.has(r.member.id) && awaiting(r));
+  const selectedCount = selectedRows.length;
   function toggleSelectAll() {
     setSelected((prev) => {
       if (selectableIds.every((id) => prev.has(id))) {
@@ -450,64 +415,37 @@ function SettlementView({
     });
   }
 
-  function openCompose(recipients: Member[], household?: { id: string; name: string }) {
-    if (recipients.length === 0) return;
-    setComposeRecipients(recipients);
-    setComposeHouseholdId(household?.id ?? null);
-    setComposeHouseholdName(household?.name ?? "");
-    setDraftSubject(emailTemplate.subject);
-    setDraftBody(emailTemplate.body);
-    setEmailMsg(null);
-    setComposeOpen(true);
-  }
-
-  function openComposeSelected() {
-    const toSend = rows.filter((r) => selected.has(r.member.id) && emailable(r)).flatMap(recipientsOf);
-    openCompose(toSend);
-  }
-
-  async function sendCompose() {
-    const tpl: SettlementEmailTemplate = { subject: draftSubject, body: draftBody };
-    const recipients = composeRecipients;
-    const householdId = composeHouseholdId;
-    const householdName = composeHouseholdName;
-    setComposeSending(true);
-    setEmailMsg(null);
+  // The app keeps no member emails or phone numbers: invitations go out from LCR
+  // or Member Tools. These copy what's needed there — the selected households'
+  // names (to build a list) and the invitation text with the booking link filled in.
+  async function copyText(text: string, done: string) {
     try {
-      const sent = recipients.length === 1
-        ? (await onEmail(recipients[0], tpl)) ? 1 : 0
-        : await onEmailSelected(recipients, tpl);
-      setComposeOpen(false);
-      if (householdId) {
-        if (sent > 0) {
-          setEmailedId(householdId);
-          setTimeout(() => setEmailedId((c) => (c === householdId ? null : c)), 1800);
-          setEmailMsg(`Emailed ${householdName} (${sent} recipient${sent === 1 ? "" : "s"}).`);
-        }
-      } else {
-        setSelected(new Set());
-        setEmailMsg(`Emailed ${sent} recipient${sent === 1 ? "" : "s"} across the selected households.`);
-      }
-    } catch (e) {
-      setEmailMsg(e instanceof Error ? e.message : "Failed to send emails.");
-      setComposeOpen(false);
-    } finally {
-      setComposeSending(false);
+      await navigator.clipboard.writeText(text);
+      setActionMsg(done);
+    } catch {
+      setActionMsg("Couldn't copy to the clipboard.");
     }
   }
 
-  const previewRecipient = composeRecipients[0];
-  const preview = previewRecipient
-    ? renderSettlementEmail(
-        { subject: draftSubject, body: draftBody },
-        {
-          name: previewRecipient.firstName,
-          lastName: previewRecipient.lastName,
-          title: settlementTitle(previewRecipient.gender),
-          link: bookingUrl ?? "",
-        },
-      )
-    : null;
+  function copyNames() {
+    const names = selectedRows.flatMap((r) =>
+      (r.parents.length ? r.parents : [r.member]).map((m) => `${m.firstName} ${m.lastName}`));
+    void copyText(names.join("\n"),
+      `Copied ${names.length} name${names.length === 1 ? "" : "s"} from ${selectedCount} household${selectedCount === 1 ? "" : "s"}.`);
+  }
+
+  function copyMessage() {
+    const { subject, body } = renderSettlementEmail(emailTemplate, {
+      name: "", lastName: "Brothers and Sisters", title: "", link: bookingUrl ?? "",
+    });
+    void copyText(`${subject}\n\n${body}`, "Copied the invitation message.");
+  }
+
+  async function markInvited() {
+    await onMarkInvited(selectedRows.map((r) => r.member));
+    setActionMsg(`Marked ${selectedCount} household${selectedCount === 1 ? "" : "s"} as invited.`);
+    setSelected(new Set());
+  }
 
   if (total === 0) {
     return (
@@ -529,8 +467,8 @@ function SettlementView({
     <div className="space-y-4">
       {!bookingUrl && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-200">
-          Set a <strong>Tithing Settlement</strong> booking page in Settings → Google booking pages to email members
-          their booking link. Bookings members make there appear on the Bookings tab.
+          Set a <strong>Tithing Settlement</strong> booking page in Settings → Google booking pages so the
+          invitation message includes the booking link. Bookings members make there appear on the Bookings tab.
         </div>
       )}
 
@@ -552,15 +490,15 @@ function SettlementView({
                   <span className="hidden sm:inline">Export CSV</span>
                   <span className="sm:hidden">CSV</span>
                 </Button>
-                <Button size="sm" className="gap-1.5" disabled={selectedCount === 0} onClick={openComposeSelected}>
+                <Button size="sm" variant="outline" className="gap-1.5" onClick={copyMessage}>
                   <Mail className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">Email selected{selectedCount > 0 ? ` (${selectedCount})` : ""}</span>
-                  <span className="sm:hidden">Email{selectedCount > 0 ? ` (${selectedCount})` : ""}</span>
+                  <span className="hidden sm:inline">Copy message</span>
+                  <span className="sm:hidden">Message</span>
                 </Button>
               </div>
             </div>
             <BreakdownBar rows={rows} />
-            {emailMsg && <p className="text-xs text-muted-foreground">{emailMsg}</p>}
+            {actionMsg && <p className="text-xs text-muted-foreground">{actionMsg}</p>}
           </div>
         </div>
 
@@ -607,16 +545,26 @@ function SettlementView({
       </div>
 
       {selectableIds.length > 0 && (
-        <label className="flex items-center gap-2 px-1 text-xs text-muted-foreground">
-          <input
-            type="checkbox"
-            className="h-4 w-4 accent-primary"
-            checked={allSelected}
-            onChange={toggleSelectAll}
-            aria-label="Select all households with an email on file"
-          />
-          Select all shown ({selectableIds.length}) with an email on file
-        </label>
+        <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              className="h-4 w-4 accent-primary"
+              checked={allSelected}
+              onChange={toggleSelectAll}
+              aria-label="Select all households still to book"
+            />
+            Select all shown ({selectableIds.length}) still to book
+          </label>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" className="h-8 gap-1.5 text-xs" disabled={selectedCount === 0} onClick={copyNames}>
+              <Copy className="h-3.5 w-3.5" /> Copy names{selectedCount > 0 ? ` (${selectedCount})` : ""}
+            </Button>
+            <Button size="sm" className="h-8 gap-1.5 text-xs" disabled={selectedCount === 0} onClick={() => { void markInvited(); }}>
+              <Send className="h-3.5 w-3.5" /> Mark invited
+            </Button>
+          </div>
+        </div>
       )}
 
       {/* Roster */}
@@ -628,27 +576,15 @@ function SettlementView({
         <div className="rounded-xl border border-border bg-card divide-y divide-border overflow-hidden">
           {filtered.map((r) => (
             <div key={r.member.id} className="flex flex-wrap items-center gap-3 p-3">
-              {emailable(r) ? (
-                <input
-                  type="checkbox"
-                  className="h-4 w-4 shrink-0 accent-primary"
-                  checked={selected.has(r.member.id)}
-                  onChange={() => toggleSelected(r.member.id)}
-                  aria-label={`Select ${r.name} to email`}
-                />
-              ) : (
-                <input
-                  type="checkbox"
-                  className="h-4 w-4 shrink-0"
-                  disabled
-                  title={
-                    !bookingUrl ? "Set a settlement booking page first"
-                    : recipientsOf(r).length > 0 ? "Already booked or complete"
-                    : "No email on file for the household"
-                  }
-                  aria-label={`${r.name} can't be emailed`}
-                />
-              )}
+              <input
+                type="checkbox"
+                className="h-4 w-4 shrink-0 accent-primary"
+                checked={awaiting(r) && selected.has(r.member.id)}
+                disabled={!awaiting(r)}
+                title={awaiting(r) ? undefined : "Already booked or complete"}
+                onChange={() => toggleSelected(r.member.id)}
+                aria-label={`Select ${r.name}`}
+              />
               <div className="h-8 w-8 rounded-full flex items-center justify-center text-xs font-semibold shrink-0 bg-primary/10 text-primary">
                 {getInitials(r.name)}
               </div>
@@ -668,11 +604,6 @@ function SettlementView({
                     </p>
                   );
                 })()}
-                {!r.booking && r.record?.declaredStatus && (
-                  <p className="text-[11px] text-muted-foreground truncate">
-                    Declared: {DECLARED_STATUS_LABELS[r.record.declaredStatus]}
-                  </p>
-                )}
                 {r.record?.linkSentAt && r.status !== "scheduled" && !TERMINAL_STATUSES.has(r.status) && (
                   <p className="flex items-center gap-1 text-[11px] text-muted-foreground truncate">
                     <Mail className="h-3 w-3 shrink-0" /> Emailed {timeAgo(r.record.linkSentAt)}
@@ -684,25 +615,6 @@ function SettlementView({
                 {SETTLEMENT_STATUS_LABELS[r.status]}
               </Badge>
 
-              {/* Email the household their booking link — until they've booked. */}
-              {r.status !== "scheduled" && !TERMINAL_STATUSES.has(r.status) && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-8 gap-1 text-xs"
-                  disabled={!emailable(r)}
-                  title={
-                    !bookingUrl ? "Set a settlement booking page first"
-                    : recipientsOf(r).length > 0 ? "Email the household their booking link"
-                    : "No email on file for anyone in the household"
-                  }
-                  onClick={() => openCompose(recipientsOf(r), { id: r.householdId, name: r.name })}
-                >
-                  {emailedId === r.member.id ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Mail className="h-3.5 w-3.5" />}
-                  {emailedId === r.member.id ? "Sent" : "Email household"}
-                </Button>
-              )}
-
               {/* Status control */}
               <Select value={r.status} onValueChange={(v) => onSetStatus(r.member, r.record, v as SettlementStatus)}>
                 <SelectTrigger className="h-8 w-[130px] text-xs shrink-0"><SelectValue /></SelectTrigger>
@@ -713,78 +625,11 @@ function SettlementView({
                 </SelectContent>
               </Select>
 
-              {r.status === "completed" && (
-                <Select
-                  value={r.record?.declaredStatus ?? ""}
-                  onValueChange={(v) => onSetDeclared(r.member, r.record, v as DeclaredTithingStatus)}
-                >
-                  <SelectTrigger className="h-8 w-[130px] text-xs shrink-0">
-                    <SelectValue placeholder="Declared…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {DECLARED_STATUSES.map((s) => (
-                      <SelectItem key={s} value={s}>{DECLARED_STATUS_LABELS[s]}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
             </div>
           ))}
         </div>
       )}
 
-      {/* Compose dialog */}
-      <Dialog open={composeOpen} onOpenChange={(open) => { if (!open) setComposeOpen(false); }}>
-        <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>
-              {composeHouseholdId
-                ? `Email ${composeHouseholdName} their settlement link`
-                : composeRecipients.length === 1
-                  ? `Email ${composeRecipients[0]?.firstName} their settlement link`
-                  : `Email ${composeRecipients.length} recipients their settlement link`}
-            </DialogTitle>
-          </DialogHeader>
-
-          <div className="space-y-3">
-            <p className="text-xs text-muted-foreground">
-              <code className="rounded bg-muted px-1 py-0.5">{"{title}"}</code>,{" "}
-              <code className="rounded bg-muted px-1 py-0.5">{"{name}"}</code>,{" "}
-              <code className="rounded bg-muted px-1 py-0.5">{"{lastName}"}</code>, and{" "}
-              <code className="rounded bg-muted px-1 py-0.5">{"{link}"}</code> are filled in for
-              each recipient when sent. Edits here apply to this send only — change the saved
-              default in Settings → Email.
-            </p>
-            <div className="space-y-1.5">
-              <Label htmlFor="compose-subject" className="text-xs">Subject</Label>
-              <Input id="compose-subject" value={draftSubject} onChange={(e) => setDraftSubject(e.target.value)} />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="compose-body" className="text-xs">Message</Label>
-              <Textarea id="compose-body" rows={9} value={draftBody} onChange={(e) => setDraftBody(e.target.value)} />
-            </div>
-            {preview && (
-              <div className="space-y-1.5">
-                <Label className="text-xs text-muted-foreground">
-                  Preview{composeRecipients.length > 1 ? ` (${previewRecipient.firstName}, first of ${composeRecipients.length})` : ""}
-                </Label>
-                <div className="rounded-lg border border-border bg-muted/40 p-3 text-xs">
-                  <p className="font-medium">{preview.subject}</p>
-                  <p className="mt-1 whitespace-pre-wrap text-muted-foreground">{preview.body}</p>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setComposeOpen(false)} disabled={composeSending}>Cancel</Button>
-            <Button onClick={() => { void sendCompose(); }} disabled={composeSending || !draftSubject.trim() || !draftBody.trim()} className="gap-1.5">
-              {composeSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              {composeRecipients.length === 1 ? "Send" : `Send ${composeRecipients.length}`}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
@@ -803,12 +648,12 @@ export default function InterviewsPage() {
 
   const [view, setView] = useState<PageView>("bookings");
 
-  // Saved settlement-email template (Settings → Email).
+  // Saved settlement invitation template (Settings → Message templates).
   const [emailTemplate, setEmailTemplate] = useState<SettlementEmailTemplate>(DEFAULT_SETTLEMENT_EMAIL);
   useEffect(() => {
-    fetch("/api/settings/email")
+    fetch("/api/settings/templates")
       .then((r) => r.json())
-      .then((d) => { if (d && !d.error) setEmailTemplate(withDefaults({ subject: d.settlementEmailSubject, body: d.settlementEmailBody })); })
+      .then((d) => { if (d && !d.error) setEmailTemplate(withDefaults({ subject: d.settlementSubject, body: d.settlementBody })); })
       .catch(() => { /* keep default */ });
   }, []);
 
@@ -881,70 +726,12 @@ export default function InterviewsPage() {
     return record;
   }
 
-  /**
-   * Email one member the household's Google settlement booking link and stamp
-   * their record. Falls back to a mailto: window when Gmail isn't configured or
-   * the send fails. `silent` suppresses that fallback (for bulk sends).
-   */
-  async function sendLinkEmail(
-    m: Member, record: SettlementRecord | undefined, tpl: SettlementEmailTemplate, opts?: { silent?: boolean },
-  ): Promise<boolean> {
-    if (!m.email || !settlementBookingUrl) return false;
-    const { subject, body } = renderSettlementEmail(tpl, {
-      name: m.firstName, lastName: m.lastName, title: settlementTitle(m.gender), link: settlementBookingUrl,
-    });
-    try {
-      const res = await fetch("/api/email/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ to: m.email, subject, body }),
-      });
-      if (res.ok) {
-        const { messageId } = await res.json();
-        const now = new Date().toISOString();
-        const patch: Partial<SettlementRecord> = { linkSentAt: now };
-        if (messageId) patch.linkEmailMessageId = messageId;
-        if (record && record.status === "not_started") patch.status = "link_created";
-        if (record) await settlementsCol.update(record.id, patch);
-        return true;
-      }
-    } catch {
-      /* network error — fall through to mailto */
-    }
-    if (!opts?.silent) {
-      window.location.assign(`mailto:${m.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`);
-    }
-    return false;
-  }
-
-  /** Ensure records for the whole household (so each shows on the board), then send. */
-  async function emailLink(m: Member, tpl: SettlementEmailTemplate, opts?: { silent?: boolean }): Promise<boolean> {
-    if (!m.email) return false;
+  /** Mark each household as invited (records for every member, so each shows on the board). */
+  async function markInvited(heads: Member[]) {
     const pool = members.filter((x) => x.isActive);
-    const house = householdMembersOf(m, pool);
-    const records = new Map<string, SettlementRecord>();
-    for (const person of house) records.set(person.id, await ensureRecord(person));
-    return sendLinkEmail(m, records.get(m.id), tpl, opts);
-  }
-
-  async function emailSelected(ms: Member[], tpl: SettlementEmailTemplate): Promise<number> {
-    let sent = 0;
-    const ensured = new Set<string>();
-    for (const m of ms) {
-      if (!m.email) continue;
-      const key = householdKey(m);
-      if (!ensured.has(key)) {
-        const pool = members.filter((x) => x.isActive);
-        for (const person of householdMembersOf(m, pool)) await ensureRecord(person);
-        ensured.add(key);
-      }
-      const ok = await sendLinkEmail(m, recordFor(m.id), tpl, { silent: true });
-      if (ok) sent += 1;
-      else if (sent === 0) {
-        throw new Error("Email isn't set up yet. Add a Gmail address in Settings → Email, then try again.");
-      }
+    for (const head of heads) {
+      for (const person of householdMembersOf(head, pool)) await ensureRecord(person);
     }
-    return sent;
   }
 
   async function setSettlementStatus(m: Member, record: SettlementRecord | undefined, status: SettlementStatus) {
@@ -953,15 +740,6 @@ export default function InterviewsPage() {
     else await settlementsCol.create({
       id: newId(), memberId: m.id, memberName: memberName(m), year: SETTLEMENT_YEAR,
       status, createdBy: user?.uid ?? "mock", createdAt: now, updatedAt: now,
-    });
-  }
-
-  async function setDeclared(m: Member, record: SettlementRecord | undefined, declared: DeclaredTithingStatus) {
-    const now = new Date().toISOString();
-    if (record) await settlementsCol.update(record.id, { declaredStatus: declared });
-    else await settlementsCol.create({
-      id: newId(), memberId: m.id, memberName: memberName(m), year: SETTLEMENT_YEAR,
-      status: "completed", declaredStatus: declared, createdBy: user?.uid ?? "mock", createdAt: now, updatedAt: now,
     });
   }
 
@@ -1061,10 +839,8 @@ export default function InterviewsPage() {
           calendarBookings={calendarBookings}
           emailTemplate={emailTemplate}
           bookingUrl={settlementBookingUrl}
-          onEmail={(m, tpl) => emailLink(m, tpl)}
-          onEmailSelected={(ms, tpl) => emailSelected(ms, tpl)}
+          onMarkInvited={markInvited}
           onSetStatus={(m, r, s) => { void setSettlementStatus(m, r, s); }}
-          onSetDeclared={(m, r, d) => { void setDeclared(m, r, d); }}
         />
       )}
     </div>

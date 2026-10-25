@@ -26,9 +26,6 @@ export interface Member {
   id: string;
   firstName: string;
   lastName: string;
-  email?: string;
-  phone?: string;
-  address?: string;
   /** Gender from the roster. Optional — absent for members imported before
    *  gender was captured; such members are addressed without a courtesy title. */
   gender?: Gender;
@@ -41,8 +38,8 @@ export interface Member {
   /** Marks a household parent (head of house + spouse of head). Settlement
    *  emails go to the parents, not to children. */
   isHouseholdParent?: boolean;
-  /** The member's age from the roster. Kept for upcoming age-aware features. */
-  age?: number;
+  /** Under 18. The app keeps this yes/no flag instead of the member's age. */
+  isMinor?: boolean;
   isActive: boolean;
   notes?: string;
   createdAt: string;
@@ -573,8 +570,6 @@ export interface CalendarBooking {
   /** Event end as an ISO timestamp, when the feed provides one. */
   endAt?: string;
   organizerEmail?: string;
-  /** Guest email addresses on the event (the booking member is usually here). */
-  attendeeEmails?: string[];
   /** The matched ward member, when the app could link the booking. */
   memberId?: string;
   memberName?: string;
@@ -620,16 +615,6 @@ export const SETTLEMENT_STATUS_LABELS: Record<SettlementStatus, string> = {
   exempt:       "Exempt",
 };
 
-/** The member's self-declared tithing status, recorded at/after the interview. */
-export type DeclaredTithingStatus = "full" | "partial" | "non" | "exempt";
-
-export const DECLARED_STATUS_LABELS: Record<DeclaredTithingStatus, string> = {
-  full:    "Full tithe",
-  partial: "Partial tithe",
-  non:     "Non-tithe payer",
-  exempt:  "Exempt",
-};
-
 /** One member's tithing-settlement record for a given year. */
 export interface SettlementRecord {
   id: string;
@@ -639,7 +624,6 @@ export interface SettlementRecord {
   status: SettlementStatus;
   /** The booked interview (once scheduled). */
   interviewId?: string;
-  declaredStatus?: DeclaredTithingStatus;
   notes?: string;
   /** ISO timestamp the booking link was last emailed to the member (null = never). */
   linkSentAt?: string;

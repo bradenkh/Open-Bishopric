@@ -5,7 +5,7 @@
  *   node scripts/parse-roster.mjs <export.html> [out.json]
  *
  * The report must include these columns: Preferred Name, Full Name, Age, Head of
- * House, Spouse of Head of House, Individual Phone, Individual E-mail. Include a
+ * House, Spouse of Head of House. Include a
  * Gender (or Sex) column too and the parents' settlement emails are addressed by
  * courtesy title (Brother/Sister); leave it out and members simply have no
  * gender. Columns are matched by header name, so their order doesn't matter.
@@ -18,9 +18,12 @@
  *                            House).
  *   - isHouseholdParent     = head of house OR spouse of head (the two get the
  *                            settlement email).
+ *   - isMinor               = under 18. Age is read only to set this flag; the
+ *                            age itself is never written out.
  *
- * The export carries real names, emails, and phone numbers, so BOTH the HTML and
- * the JSON this writes are PII — keep them out of git (they match .gitignore's
+ * Phone numbers and emails in the export are ignored: the app keeps names only,
+ * and members are contacted through LCR and Member Tools. The export and the
+ * JSON this writes still hold names, so both are PII — keep them out of git (they match .gitignore's
  * *.local.json / roster export patterns). This script writes no PII to git; it
  * only reads the export you point it at and writes the JSON you name.
  */
@@ -68,11 +71,9 @@ const idx = {
   age: colOf("age"),
   head: colOf("head of house"),
   spouse: colOf("spouse of head of house"),
-  phone: colOf("individual phone"),
-  email: colOf("individual e-mail", "individual email"),
   gender: colOf("gender", "sex"),
 };
-const missing = ["pref", "full", "head", "spouse", "email"].filter((k) => idx[k] === -1);
+const missing = ["pref", "full", "head", "spouse"].filter((k) => idx[k] === -1);
 if (missing.length) {
   console.error(`Export is missing required column(s): ${missing.join(", ")}. Header row: ${headers.join(" | ")}`);
   process.exit(1);
@@ -100,8 +101,6 @@ for (const tr of rows.slice(1)) {
     age: at(tds, idx.age),
     head: at(tds, idx.head),
     spouse: at(tds, idx.spouse),
-    phone: at(tds, idx.phone),
-    email: at(tds, idx.email),
     gender: at(tds, idx.gender),
   });
 }
@@ -136,17 +135,16 @@ function splitName(full) {
 const now = new Date().toISOString();
 const members = raw.map((r) => {
   const { firstName, lastName } = splitName(r.full);
-  const ageNum = /^\d+$/.test(r.age) ? Number(r.age) : undefined;
+  // Keep only whether the member is a minor, never their age.
+  const isMinor = /^\d+$/.test(r.age) ? Number(r.age) < 18 : undefined;
   return {
     id: r.uuid,
     firstName,
     lastName,
-    email: r.email || undefined,
-    phone: r.phone || undefined,
     householdId: uuidByPref.get(r.head) || r.uuid,
     isHeadOfHousehold: r.pref === r.head,
     isHouseholdParent: parentUuids.has(r.uuid),
-    age: ageNum,
+    isMinor,
     gender: normGender(r.gender),
     isActive: true,
     createdAt: now,
@@ -161,11 +159,9 @@ if (withId.length !== members.length) {
 }
 const households = new Set(withId.map((m) => m.householdId));
 const parents = withId.filter((m) => m.isHouseholdParent);
-const parentsWithEmail = parents.filter((m) => m.email);
 
 writeFileSync(outPath, JSON.stringify(withId, null, 1));
 console.log(`Parsed ${withId.length} members in ${households.size} households.`);
-console.log(`  parents: ${parents.length} (${parentsWithEmail.length} with an email)`);
-console.log(`  with email: ${withId.filter((m) => m.email).length}, with phone: ${withId.filter((m) => m.phone).length}`);
+console.log(`  parents: ${parents.length}, minors: ${withId.filter((m) => m.isMinor).length}`);
 console.log(`  with gender: ${withId.filter((m) => m.gender).length}${idx.gender === -1 ? " (no Gender/Sex column in the export)" : ""}`);
 console.log(`Wrote ${outPath}`);

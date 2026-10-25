@@ -1,14 +1,13 @@
 /**
- * The email that delivers a member's tithing-settlement booking link.
+ * The tithing-settlement invitation, copied from the Tithing Settlement tab and
+ * sent through LCR or Member Tools (the app itself sends no email).
  *
  * The subject and body are a template: `{title}`, `{name}`, `{lastName}`, and
- * `{link}` are substituted per recipient at send time (the link is the ward's
- * Google Calendar booking page for tithing settlement). Because parents are
- * addressed individually, one
- * copy can read "Dear Brother Smith," and the other "Dear Sister Smith,".
- * The bishopric can override the copy in Settings → Email; when they haven't,
- * these defaults are used. Kept framework-free so both the settings UI and the
- * settlement tab's compose dialog can import it.
+ * `{link}` are substituted when the message is copied (the link is the ward's
+ * Google Calendar booking page for tithing settlement). The bishopric can
+ * override the copy in Settings → Message templates; when they haven't, these
+ * defaults are used. Kept framework-free so both the settings UI and the
+ * settlement tab can import it.
  */
 
 export interface SettlementEmailTemplate {
@@ -82,73 +81,5 @@ export function withDefaults(partial?: Partial<SettlementEmailTemplate> | null):
   return {
     subject: partial?.subject?.trim() ? partial.subject : DEFAULT_SETTLEMENT_EMAIL.subject,
     body: partial?.body?.trim() ? partial.body : DEFAULT_SETTLEMENT_EMAIL.body,
-  };
-}
-
-// ── Booking confirmation ──────────────────────────────────────────────────────
-
-/**
- * The confirmation sent after a member self-books their household's settlement
- * appointment through their link. Uses the same template shape as the invite,
- * with `{name}`, `{date}`, `{time}`, and `{interviewer}` substituted at send
- * time. The bishopric can override the copy in Settings → Email; when they
- * haven't, this default is used.
- */
-export const DEFAULT_SETTLEMENT_CONFIRMATION: SettlementEmailTemplate = {
-  subject: "Your tithing settlement is booked",
-  body: [
-    "Dear {title} {lastName},",
-    "",
-    "Your household's tithing settlement is scheduled for {date} at {time} with {interviewer}.",
-    "",
-    "Add it to your calendar: {calendar}",
-    "",
-    "One appointment covers your whole household. If you need to change the time, just reply to this email and we'll help you reschedule. Thank you!",
-  ].join("\n"),
-};
-
-/** The placeholders a confirmation template may use, for help text / previews. */
-export const SETTLEMENT_CONFIRMATION_PLACEHOLDERS = ["{title}", "{name}", "{lastName}", "{date}", "{time}", "{interviewer}", "{calendar}"] as const;
-
-export interface SettlementConfirmationVars {
-  /** The member's first name (or a preview stand-in). */
-  name: string;
-  /** The booked date, already formatted for display (e.g. "Dec 3, 2026"). */
-  date: string;
-  /** The booked time, already formatted for display (e.g. "4:30 PM"). */
-  time: string;
-  /** Who the appointment is with. */
-  interviewer: string;
-  /** Courtesy title (Brother/Sister); "" or omitted when gender is unknown. */
-  title?: string;
-  /** The member's last name, for a "{title} {lastName}" salutation. */
-  lastName?: string;
-  /** An "add to calendar" URL for the booked appointment (optional). */
-  calendar?: string;
-}
-
-/** Substitute {title}/{name}/{lastName}/{date}/{time}/{interviewer}/{calendar} throughout a template. */
-export function renderSettlementConfirmation(
-  template: SettlementEmailTemplate,
-  vars: SettlementConfirmationVars,
-): SettlementEmailTemplate {
-  const fill = (s: string) =>
-    fillTitle(s, vars.title ?? "")
-      .replaceAll("{name}", vars.name)
-      .replaceAll("{lastName}", vars.lastName ?? "")
-      .replaceAll("{date}", vars.date)
-      .replaceAll("{time}", vars.time)
-      .replaceAll("{interviewer}", vars.interviewer)
-      .replaceAll("{calendar}", vars.calendar ?? "");
-  return { subject: fill(template.subject), body: fill(template.body) };
-}
-
-/** A stored confirmation template with blank fields falls back to the defaults. */
-export function withConfirmationDefaults(
-  partial?: Partial<SettlementEmailTemplate> | null,
-): SettlementEmailTemplate {
-  return {
-    subject: partial?.subject?.trim() ? partial.subject : DEFAULT_SETTLEMENT_CONFIRMATION.subject,
-    body: partial?.body?.trim() ? partial.body : DEFAULT_SETTLEMENT_CONFIRMATION.body,
   };
 }

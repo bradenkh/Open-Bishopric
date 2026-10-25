@@ -1,5 +1,5 @@
 /**
- * Update household-related fields (age, is_head_of_household, is_household_parent)
+ * Update household-related fields (is_minor, is_household_parent)
  * in the members table from the parsed roster.
  *
  *   NEXT_PUBLIC_SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
@@ -40,6 +40,7 @@ async function main() {
         .from("members")
         .update({
           is_household_parent: member.isHouseholdParent,
+          is_minor: member.isMinor ?? false,
         })
         .eq("id", member.id);
       if (error) {

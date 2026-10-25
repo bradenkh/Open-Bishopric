@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Plus, Filter, CheckCircle2, RotateCcw, Pencil, Trash2, User, CalendarDays,
-  Mail, ListTodo, Check,
+  Mail, ListTodo, Check, Copy,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -77,17 +77,18 @@ export default function TasksPage() {
   const [saving, setSaving] = useState(false);
   const [ownerOpen, setOwnerOpen] = useState(false); // owner typeahead dropdown
 
-  // Reminder compose dialog: prefilled from the task, editable before sending.
+  // Reminder dialog: prefilled from the task, editable, then copied out to send
+  // from the user's own email or messaging (the app sends no email).
   const [reminder, setReminder] = useState<
-    { taskId: string; to: string; subject: string; body: string } | null
+    { taskId: string; subject: string; body: string } | null
   >(null);
-  const [sendingReminder, setSendingReminder] = useState(false);
+  const [copyError, setCopyError] = useState(false);
 
-  // The saved reminder template (Settings → Email); falls back to the built-in
+  // The saved reminder template (Settings → Message templates); falls back to the built-in
   // default until loaded.
   const [template, setTemplate] = useState<TaskReminderTemplate>(DEFAULT_TASK_REMINDER);
   useEffect(() => {
-    fetch("/api/settings/email")
+    fetch("/api/settings/templates")
       .then((r) => r.json())
       .then((d) => {
         if (d && !d.error) {
@@ -200,9 +201,9 @@ export default function TasksPage() {
     await updateTask(t.id, { status: "cancelled", updatedAt: new Date().toISOString() });
   }
 
-  // ── Email reminder ───────────────────────────────────────────────────────────
-  // Open a compose dialog prefilled with a reminder to the task's owner. The
-  // recipient, subject and body can all be edited before anything is sent.
+  // ── Reminder ─────────────────────────────────────────────────────────────────
+  // Open a dialog prefilled with a reminder to the task's owner. The subject and
+  // body can be edited, then copied to send however the bishopric reaches them.
   function openReminder(t: Task) {
     const owner = t.assigneeId ? members.find((m) => m.id === t.assigneeId) : undefined;
     const { subject, body } = renderTaskReminder(template, {
@@ -211,41 +212,21 @@ export default function TasksPage() {
       description: t.description ?? "",
       due: t.dueDate ? `Due: ${formatDate(t.dueDate)}` : "",
     });
-    setReminder({ taskId: t.id, to: owner?.email ?? "", subject, body });
+    setCopyError(false);
+    setReminder({ taskId: t.id, subject, body });
   }
 
-  // Send the edited reminder via the shared endpoint, falling back to a mailto:
-  // link if Gmail isn't configured (409 notConfigured).
-  async function submitReminder() {
-    if (!reminder || !reminder.to.trim()) return;
-    const { taskId, to, subject, body } = reminder;
-    setSendingReminder(true);
+  // Copy the reminder and stamp the task, so the list shows it was reminded.
+  async function copyReminder() {
+    if (!reminder) return;
     try {
-      const res = await fetch("/api/email/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ to: to.trim(), subject, body }),
-      });
-      if (res.status === 409) {
-        // Email not configured — hand off to the user's own mail client. We
-        // don't mark it "sent" since we can't confirm they actually send it.
-        window.location.href =
-          `mailto:${encodeURIComponent(to.trim())}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-        setReminder(null);
-        return;
-      }
-      if (!res.ok) {
-        const { error } = await res.json().catch(() => ({ error: "Failed to send" }));
-        alert(`Couldn't send the reminder: ${error}`);
-        return;
-      }
-      await updateTask(taskId, { reminderSentAt: new Date().toISOString() });
-      setReminder(null);
+      await navigator.clipboard.writeText(`${reminder.subject}\n\n${reminder.body}`);
     } catch {
-      alert("Couldn't reach the email service. Check your connection and try again.");
-    } finally {
-      setSendingReminder(false);
+      setCopyError(true);
+      return;
     }
+    await updateTask(reminder.taskId, { reminderSentAt: new Date().toISOString() });
+    setReminder(null);
   }
 
   // ── Render ───────────────────────────────────────────────────────────────────
@@ -346,7 +327,7 @@ export default function TasksPage() {
                         </span>
                       )}
                       {t.reminderSentAt && (
-                        <span className="text-xs text-green-700 dark:text-green-400">reminder sent</span>
+                        <span className="text-xs text-green-700 dark:text-green-400">reminded</span>
                       )}
                     </div>
                   </div>
@@ -364,7 +345,7 @@ export default function TasksPage() {
                   )}
                   {!closed && (
                     <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => openReminder(t)}>
-                      <Mail className="h-3.5 w-3.5" /> Send reminder
+                      <Mail className="h-3.5 w-3.5" /> Reminder
                     </Button>
                   )}
                   <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => openEdit(t)}>
@@ -458,7 +439,6 @@ export default function TasksPage() {
                           >
                             <User className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                             <span className="flex-1 truncate">{m.firstName} {m.lastName}</span>
-                            {!m.email && <span className="text-[10px] text-muted-foreground">no email</span>}
                           </button>
                         </li>
                       ))}
@@ -491,7 +471,7 @@ export default function TasksPage() {
             </div>
             <p className="text-[11px] text-muted-foreground -mt-1">
               Search the roster and pick a member, or type any name to assign someone not in
-              the ward. A member with an email on file can be sent reminders.
+              the ward.
             </p>
             <div className="space-y-1.5">
               <Label htmlFor="task-notes">Notes</Label>
@@ -517,25 +497,13 @@ export default function TasksPage() {
       <Dialog open={!!reminder} onOpenChange={(o) => !o && setReminder(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Send reminder</DialogTitle>
+            <DialogTitle>Reminder</DialogTitle>
           </DialogHeader>
           {reminder && (
             <div className="space-y-4">
-              <div className="space-y-1.5">
-                <Label htmlFor="reminder-to">To</Label>
-                <Input
-                  id="reminder-to"
-                  type="email"
-                  value={reminder.to}
-                  onChange={(e) => setReminder((r) => (r ? { ...r, to: e.target.value } : r))}
-                  placeholder="owner@example.com"
-                />
-                {!reminder.to.trim() && (
-                  <p className="text-[11px] text-amber-600 dark:text-amber-400">
-                    This owner has no email on file — enter a recipient to send.
-                  </p>
-                )}
-              </div>
+              <p className="text-xs text-muted-foreground">
+                Edit if needed, then copy it into your email or a text to the task&rsquo;s owner.
+              </p>
               <div className="space-y-1.5">
                 <Label htmlFor="reminder-subject">Subject</Label>
                 <Input
@@ -557,8 +525,9 @@ export default function TasksPage() {
           )}
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setReminder(null)}>Cancel</Button>
-            <Button onClick={submitReminder} disabled={sendingReminder || !reminder?.to.trim()}>
-              {sendingReminder ? "Sending…" : "Send reminder"}
+            {copyError && <span className="text-xs text-destructive">Couldn&rsquo;t copy to the clipboard.</span>}
+            <Button onClick={() => { void copyReminder(); }} className="gap-1.5">
+              <Copy className="h-4 w-4" /> Copy reminder
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -5,7 +5,6 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
-  MessageSquare,
   ListTodo,
   NotebookPen,
   CalendarClock,
@@ -22,7 +21,6 @@ import { Button } from "@/components/ui/button";
 
 const navItems = [
   { href: "/home", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/chat", label: "AI Assistant", icon: MessageSquare },
   { href: "/tasks", label: "Tasks", icon: ListTodo },
   { href: "/meetings", label: "Meetings", icon: NotebookPen },
   { href: "/sacrament", label: "Sacrament", icon: Lectern },
