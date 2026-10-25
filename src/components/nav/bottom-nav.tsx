@@ -2,12 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, MessageSquare, ListTodo, NotebookPen, Lectern, CalendarClock, HandHelping } from "lucide-react";
+import { LayoutDashboard, ListTodo, NotebookPen, Lectern, CalendarClock, HandHelping } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
   { href: "/home", label: "Home", icon: LayoutDashboard },
-  { href: "/chat", label: "Chat", icon: MessageSquare },
   { href: "/tasks", label: "Tasks", icon: ListTodo },
   { href: "/meetings", label: "Meetings", icon: NotebookPen },
   { href: "/sacrament", label: "Sacrament", icon: Lectern },

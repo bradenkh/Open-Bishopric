@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import {
-  ClipboardList, CalendarClock, HandHelping, ArrowRight, MessageSquare,
+  ClipboardList, CalendarClock, HandHelping, ArrowRight,
   CalendarPlus, Plus, Settings, ListTodo,
 } from "lucide-react";
 import Link from "next/link";
@@ -103,12 +103,6 @@ export default function DashboardPage() {
           <Link href="/interviews?new=1">
             <CalendarPlus className="h-4 w-4" />
             Add Interview
-          </Link>
-        </Button>
-        <Button variant="outline" asChild className="flex-1 sm:flex-none gap-2">
-          <Link href="/chat">
-            <MessageSquare className="h-4 w-4" />
-            Ask AI Assistant
           </Link>
         </Button>
         <Button variant="outline" asChild className="flex-1 sm:flex-none gap-2">

@@ -40,14 +40,8 @@ function annotationsFor(name: string): ToolAnnotations {
   return { readOnlyHint: false, destructiveHint: DESTRUCTIVE.has(name), openWorldHint: false };
 }
 
-// In the app, email tools pause for an approval click before sending. MCP has
-// no equivalent hook, so the review step moves into the conversation itself.
-const MCP_EMAIL_RULE = `
-
-You are connected over MCP. The email-sending tools (sendEmail, sendTaskReminder, emailInterviewTimes) send immediately when called — there is no separate review screen. Before calling any of them, show the user the recipient, subject and full message (for the templated ones, say what will be sent) and wait for their explicit go-ahead in the conversation.`;
-
 async function instructions(): Promise<string> {
-  let text = agentInstructions() + MCP_EMAIL_RULE;
+  let text = agentInstructions();
   try {
     const notes = await listAgentNotes(createAdminClient());
     if (notes.length > 0) {

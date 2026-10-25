@@ -1228,10 +1228,7 @@ export const updateAnnouncement = tool({
 
 export const sendTaskReminder = tool({
   description:
-    "Email a reminder about a to-do/task to its owner. Use when the bishopric wants to nudge whoever owns an assignment. The app keeps no member email addresses, so the recipient's email must be given by the user; ask for it if you don't have it. The user reviews and approves (or gives feedback on) the message before it is sent. Requires email to be configured in Settings → Email.",
-  // Outbound email always goes through human review: the send only happens
-  // after the signed-in bishopric member approves it in the chat.
-  needsApproval: true,
+    "Email a reminder about a to-do/task to its owner. Use when the bishopric wants to nudge whoever owns an assignment. The app keeps no member email addresses, so the recipient's email must be given by the user; ask for it if you don't have it. Sends immediately: get the user's explicit go-ahead first. Requires email to be configured in Settings → Email.",
   inputSchema: z.object({
     taskId: z.string().describe("The task to send a reminder about (from getTasks)"),
     to: z.string().describe("Recipient email, as given by the user"),
@@ -1278,9 +1275,7 @@ export const sendTaskReminder = tool({
 
 export const emailInterviewTimes = tool({
   description:
-    "Email a member proposed interview time(s) and ask them to reply with what works. The app keeps no member email addresses, so the recipient's email must be given by the user; ask for it if you don't have it. Stores the message id so the member's reply is matched back to this interview by the inbound poll. The user reviews and approves (or gives feedback on) the message before it is sent. Requires email to be configured.",
-  // Outbound email always goes through human review before it is sent.
-  needsApproval: true,
+    "Email a member proposed interview time(s) and ask them to reply with what works. The app keeps no member email addresses, so the recipient's email must be given by the user; ask for it if you don't have it. Stores the message id so the member's reply is matched back to this interview by the inbound poll. Sends immediately: get the user's explicit go-ahead first. Requires email to be configured.",
   inputSchema: z.object({
     interviewId: z.string().describe("The interview to schedule (from getInterviews)"),
     proposedTimes: z.array(z.string()).min(1).describe("Human-readable time options, e.g. 'Tuesday, Sep 2 at 7:00 PM'"),
@@ -1324,10 +1319,7 @@ export const emailInterviewTimes = tool({
 
 export const sendEmail = tool({
   description:
-    "Compose and send a plain-text email from the ward Gmail account to any recipient. Use this for any outbound email that isn't a task reminder or interview-time request — for example writing to a ward member or leader. Write the complete message yourself (subject and full body) so the user can review exactly what will go out. The user must review and either approve it (which sends it) or give feedback for you to revise — nothing is sent until they approve. To reply within an existing email thread, pass the original message's Message-ID as inReplyTo. Requires email to be configured in Settings → Email.",
-  // Outbound email always goes through human review: the send only happens
-  // after the signed-in bishopric member approves the drafted message.
-  needsApproval: true,
+    "Compose and send a plain-text email from the ward Gmail account to any recipient. Use this for any outbound email that isn't a task reminder or interview-time request — for example writing to a ward member or leader. Write the complete message yourself (subject and full body). Sends immediately: show the user the full message and get their explicit go-ahead first. To reply within an existing email thread, pass the original message's Message-ID as inReplyTo. Requires email to be configured in Settings → Email.",
   inputSchema: z.object({
     to: z.string().describe("Recipient email address"),
     subject: z.string().describe("The email subject line"),

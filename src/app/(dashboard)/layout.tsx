@@ -9,7 +9,6 @@ import { BottomNav } from "@/components/nav/bottom-nav";
 import { InstallBanner } from "@/components/pwa/InstallBanner";
 import { useAuth } from "@/contexts/AuthContext";
 import { DataProvider } from "@/contexts/DataContext";
-import { ChatProvider } from "@/contexts/ChatContext";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -33,7 +32,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   return (
     <DataProvider>
-      <ChatProvider>
         <div className="flex h-full min-h-screen">
           <Sidebar />
           <main className="flex-1 min-w-0 overflow-x-hidden overflow-y-auto overscroll-y-contain lg:pl-60">
@@ -42,7 +40,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <BottomNav />
           <InstallBanner variant="banner" />
         </div>
-      </ChatProvider>
     </DataProvider>
   );
 }

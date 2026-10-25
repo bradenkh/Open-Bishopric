@@ -12,10 +12,8 @@
 --     phone numbers are scrubbed out of stored booking titles/descriptions.
 --   * settlement_records.declared_status is dropped. A member's tithing
 --     declaration is recorded by the bishop in LCR, not here.
---   * DeepSeek is no longer an allowed AI provider. Saved DeepSeek configs are
---     deleted (their API keys with them), and a legacy DeepSeek setting on
---     app_settings is reset so the assistant reports "not set up" until a new
---     provider is chosen.
+--   * The in-app AI assistant is gone (Claude reaches the app through the MCP
+--     server instead), so the saved AI provider configs and API keys are dropped.
 --
 -- Forward-only and idempotent.
 -- ============================================================================
@@ -54,21 +52,14 @@ update public.calendar_bookings
 -- ── Tithing settlement: drop the declared status ────────────────────────────
 alter table public.settlement_records drop column if exists declared_status;
 
--- ── AI providers: remove DeepSeek ───────────────────────────────────────────
--- Deleting the config clears app_settings.active_ai_config_id (on delete set null).
-delete from public.ai_configs where provider = 'deepseek';
-
-update public.app_settings
-   set ai_provider = 'openai-compat',
-       ai_model    = 'openai/gpt-4o-mini',
-       ai_base_url = 'https://openrouter.ai/api/v1',
-       ai_api_key  = null
- where ai_provider = 'deepseek';
-
-alter table public.ai_configs drop constraint if exists ai_configs_provider_check;
-alter table public.ai_configs add constraint ai_configs_provider_check
-  check (provider in ('openai-compat', 'cerebras'));
-
+-- ── In-app AI assistant removed: drop its provider configs and API keys ─────
+-- The app's only AI integration is now the MCP server (Claude connects to it),
+-- so no model provider or key is stored here any more.
+alter table public.app_settings drop column if exists active_ai_config_id;
+drop table if exists public.ai_configs;
 alter table public.app_settings drop constraint if exists app_settings_ai_provider_check;
-alter table public.app_settings add constraint app_settings_ai_provider_check
-  check (ai_provider in ('openai-compat', 'cerebras'));
+alter table public.app_settings
+  drop column if exists ai_provider,
+  drop column if exists ai_model,
+  drop column if exists ai_base_url,
+  drop column if exists ai_api_key;
