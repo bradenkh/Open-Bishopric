@@ -13,7 +13,7 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { useData } from "@/contexts/DataContext";
 import { createClient } from "@/lib/supabase/client";
-import { EmailSettingsCard } from "@/components/settings/email-settings";
+import { MessageTemplatesCard } from "@/components/settings/message-templates";
 import { CalendarSettingsCard } from "@/components/settings/calendar-settings";
 import { BookingPagesCard } from "@/components/settings/booking-pages";
 import { McpTokensCard } from "@/components/settings/mcp-tokens";
@@ -46,7 +46,7 @@ export default function SettingsPage() {
 
       <AccountCard />
       <WardSettingsCard />
-      <EmailSettingsCard />
+      <MessageTemplatesCard />
       <CalendarSettingsCard />
       <BookingPagesCard />
       <AssistantMemoryCard />

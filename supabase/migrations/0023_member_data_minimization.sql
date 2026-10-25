@@ -14,6 +14,7 @@
 --     declaration is recorded by the bishop in LCR, not here.
 --   * The in-app AI assistant is gone (Claude reaches the app through the MCP
 --     server instead), so the saved AI provider configs and API keys are dropped.
+--   * The app no longer sends or reads email, so the Gmail credentials are dropped.
 --
 -- Forward-only and idempotent.
 -- ============================================================================
@@ -63,3 +64,13 @@ alter table public.app_settings
   drop column if exists ai_model,
   drop column if exists ai_base_url,
   drop column if exists ai_api_key;
+
+-- ── Email sending removed: drop the Gmail credentials ───────────────────────
+-- The app no longer sends or reads email. Messages are copied from the app and
+-- sent through LCR, Member Tools or the user's own mail client, so the Gmail
+-- app password and the unused booking-confirmation template go.
+alter table public.app_settings
+  drop column if exists gmail_address,
+  drop column if exists gmail_app_password,
+  drop column if exists settlement_confirmation_subject,
+  drop column if exists settlement_confirmation_body;

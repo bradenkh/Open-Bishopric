@@ -1,13 +1,12 @@
 /**
- * The reminder email the bishopric sends about an open task.
+ * The reminder the bishopric copies and sends about an open task.
  *
  * The subject and body are a template: `{name}` (the task owner's first name),
  * `{task}` (the task title), `{description}` (the task's notes), and `{due}`
  * (a ready-made "Due: <date>" line, blank when the task has no due date) are
  * substituted when a reminder is composed. The bishopric can override the copy
- * in Settings → Email; when they haven't, these defaults are used. Kept
- * framework-free so the settings UI, the Tasks page, and the AI agent can all
- * import it.
+ * in Settings → Message templates; when they haven't, these defaults are used.
+ * Kept framework-free so the settings UI and the Tasks page can both import it.
  */
 
 export interface TaskReminderTemplate {

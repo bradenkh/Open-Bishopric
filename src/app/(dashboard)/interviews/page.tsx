@@ -648,12 +648,12 @@ export default function InterviewsPage() {
 
   const [view, setView] = useState<PageView>("bookings");
 
-  // Saved settlement-email template (Settings → Email).
+  // Saved settlement invitation template (Settings → Message templates).
   const [emailTemplate, setEmailTemplate] = useState<SettlementEmailTemplate>(DEFAULT_SETTLEMENT_EMAIL);
   useEffect(() => {
-    fetch("/api/settings/email")
+    fetch("/api/settings/templates")
       .then((r) => r.json())
-      .then((d) => { if (d && !d.error) setEmailTemplate(withDefaults({ subject: d.settlementEmailSubject, body: d.settlementEmailBody })); })
+      .then((d) => { if (d && !d.error) setEmailTemplate(withDefaults({ subject: d.settlementSubject, body: d.settlementBody })); })
       .catch(() => { /* keep default */ });
   }, []);
 
