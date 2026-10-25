@@ -211,7 +211,7 @@ export default function TasksPage() {
       description: t.description ?? "",
       due: t.dueDate ? `Due: ${formatDate(t.dueDate)}` : "",
     });
-    setReminder({ taskId: t.id, to: owner?.email ?? "", subject, body });
+    setReminder({ taskId: t.id, to: "", subject, body });
   }
 
   // Send the edited reminder via the shared endpoint, falling back to a mailto:
@@ -458,7 +458,6 @@ export default function TasksPage() {
                           >
                             <User className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                             <span className="flex-1 truncate">{m.firstName} {m.lastName}</span>
-                            {!m.email && <span className="text-[10px] text-muted-foreground">no email</span>}
                           </button>
                         </li>
                       ))}

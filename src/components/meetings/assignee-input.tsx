@@ -105,7 +105,6 @@ export function AssigneeInput({
                 <span className="flex-1 truncate">
                   {m.firstName} {m.lastName}
                 </span>
-                {!m.email && <span className="text-[10px] text-muted-foreground">no email</span>}
               </button>
             </li>
           ))}

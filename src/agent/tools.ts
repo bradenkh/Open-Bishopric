@@ -1226,35 +1226,15 @@ export const updateAnnouncement = tool({
 
 // ── Email: send reminders and scheduling requests ────────────────────────────
 
-/** Resolve a ward member's email by id. */
-async function memberEmailById(id: string): Promise<string | undefined> {
-  const { data, error } = await db().from("members").select("email").eq("id", id).maybeSingle();
-  if (error) throw error;
-  return (data as { email?: string } | null)?.email ?? undefined;
-}
-
-/** Resolve a ward member's email by (case-insensitive) full name. */
-async function memberEmailByName(name: string): Promise<string | undefined> {
-  const { data, error } = await db().from("members").select("email").ilike("first_name || ' ' || last_name", name);
-  if (error) {
-    // Some Postgres configs disallow computed-column filters; fall back to a scan.
-    const { data: all } = await db().from("members").select("first_name, last_name, email");
-    return (all ?? [])
-      .map((r) => fromRow<Member>(r))
-      .find((m) => `${m.firstName} ${m.lastName}`.toLowerCase() === name.toLowerCase())?.email;
-  }
-  return (data?.[0] as { email?: string } | undefined)?.email ?? undefined;
-}
-
 export const sendTaskReminder = tool({
   description:
-    "Email a reminder about a to-do/task to its owner — the ward member responsible for it. Use when the bishopric wants to nudge whoever owns an assignment. Resolves the recipient from the task's owner (assignee), or pass an explicit email. The user reviews and approves (or gives feedback on) the message before it is sent. Requires email to be configured in Settings → Email.",
+    "Email a reminder about a to-do/task to its owner. Use when the bishopric wants to nudge whoever owns an assignment. The app keeps no member email addresses, so the recipient's email must be given by the user; ask for it if you don't have it. The user reviews and approves (or gives feedback on) the message before it is sent. Requires email to be configured in Settings → Email.",
   // Outbound email always goes through human review: the send only happens
   // after the signed-in bishopric member approves it in the chat.
   needsApproval: true,
   inputSchema: z.object({
     taskId: z.string().describe("The task to send a reminder about (from getTasks)"),
-    to: z.string().optional().describe("Recipient email; if omitted, resolved from the task's owner (assignee)"),
+    to: z.string().describe("Recipient email, as given by the user"),
     note: z.string().optional().describe("Optional extra line to include in the reminder"),
   }),
   execute: async ({ taskId, to, note }) => {
@@ -1266,15 +1246,8 @@ export const sendTaskReminder = tool({
     if (!row) return { error: "No task found with that id." };
     const task = fromRow<Task>(row);
 
-    // Resolve the owner's email: prefer the assignee's member id, fall back to
-    // matching their name (older calling-workflow tasks store a name but no id).
-    const recipient =
-      to ??
-      (task.assigneeId ? await memberEmailById(task.assigneeId) : undefined) ??
-      (task.assigneeName ? await memberEmailByName(task.assigneeName) : undefined);
-    if (!recipient) {
-      return { error: "No email address found for this task's owner. Assign an owner whose member record has an email, or provide a `to` address." };
-    }
+    const recipient = to.trim();
+    if (!recipient) return { error: "A recipient email address is required." };
 
     // Use the bishopric's saved reminder template (Settings → Email), falling
     // back to the built-in default. Keeps the assistant's wording in sync with
@@ -1305,13 +1278,13 @@ export const sendTaskReminder = tool({
 
 export const emailInterviewTimes = tool({
   description:
-    "Email a member proposed interview time(s) and ask them to reply with what works. Stores the message id so the member's reply is matched back to this interview by the inbound poll. The user reviews and approves (or gives feedback on) the message before it is sent. Requires email to be configured.",
+    "Email a member proposed interview time(s) and ask them to reply with what works. The app keeps no member email addresses, so the recipient's email must be given by the user; ask for it if you don't have it. Stores the message id so the member's reply is matched back to this interview by the inbound poll. The user reviews and approves (or gives feedback on) the message before it is sent. Requires email to be configured.",
   // Outbound email always goes through human review before it is sent.
   needsApproval: true,
   inputSchema: z.object({
     interviewId: z.string().describe("The interview to schedule (from getInterviews)"),
     proposedTimes: z.array(z.string()).min(1).describe("Human-readable time options, e.g. 'Tuesday, Sep 2 at 7:00 PM'"),
-    to: z.string().optional().describe("Recipient email; if omitted, resolved from the interview's member"),
+    to: z.string().describe("Recipient email, as given by the user"),
     note: z.string().optional().describe("Optional extra context to include"),
   }),
   execute: async ({ interviewId, proposedTimes, to, note }) => {
@@ -1323,10 +1296,8 @@ export const emailInterviewTimes = tool({
     if (!row) return { error: "No interview found with that id." };
     const interview = fromRow<Interview>(row);
 
-    const recipient = to ?? (await memberEmailByName(interview.memberName));
-    if (!recipient) {
-      return { error: "No email address found for this member. Provide a `to` address, or add an email to their member record." };
-    }
+    const recipient = to.trim();
+    if (!recipient) return { error: "A recipient email address is required." };
 
     const first = interview.memberName.split(" ")[0];
     const options = proposedTimes.map((t) => `• ${t}`).join("\n");

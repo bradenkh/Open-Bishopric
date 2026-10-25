@@ -26,8 +26,6 @@ export interface Member {
   id: string;
   firstName: string;
   lastName: string;
-  email?: string;
-  phone?: string;
   /** Gender from the roster. Optional — absent for members imported before
    *  gender was captured; such members are addressed without a courtesy title. */
   gender?: Gender;
@@ -572,8 +570,6 @@ export interface CalendarBooking {
   /** Event end as an ISO timestamp, when the feed provides one. */
   endAt?: string;
   organizerEmail?: string;
-  /** Guest email addresses on the event (the booking member is usually here). */
-  attendeeEmails?: string[];
   /** The matched ward member, when the app could link the booking. */
   memberId?: string;
   memberName?: string;

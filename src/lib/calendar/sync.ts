@@ -111,7 +111,6 @@ export async function syncCalendar(admin: Admin): Promise<SyncResult> {
       start_at: event.start.toISOString(),
       end_at: event.end ? event.end.toISOString() : null,
       organizer_email: event.organizerEmail ?? null,
-      attendee_emails: event.attendeeEmails,
       member_id: link.memberId ?? null,
       member_name: link.memberName ?? null,
       match_method: link.method ?? null,

@@ -189,18 +189,13 @@ export function EmailSettingsCard() {
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">
-                Sent when you email a member their settlement booking link. Use{" "}
-                <code className="rounded bg-muted px-1 py-0.5">{"{title}"}</code> for their
-                courtesy title (Brother/Sister),{" "}
-                <code className="rounded bg-muted px-1 py-0.5">{"{name}"}</code> for their
-                first name,{" "}
-                <code className="rounded bg-muted px-1 py-0.5">{"{lastName}"}</code> for their
-                last name, and{" "}
-                <code className="rounded bg-muted px-1 py-0.5">{"{link}"}</code> for their
-                personal booking link — all filled in per recipient when the email is sent.
-                Each parent is emailed individually, so a household&rsquo;s two parents get the
-                same message addressed to each of them. When a member&rsquo;s gender isn&rsquo;t on
-                file, <code className="rounded bg-muted px-1 py-0.5">{"{title}"}</code> is left blank.
+                The invitation you copy from the Tithing Settlement tab (&ldquo;Copy message&rdquo;)
+                to send through LCR or Member Tools. Use{" "}
+                <code className="rounded bg-muted px-1 py-0.5">{"{link}"}</code> for the booking
+                link. In a copied message,{" "}
+                <code className="rounded bg-muted px-1 py-0.5">{"{title} {lastName}"}</code> becomes
+                &ldquo;Brothers and Sisters&rdquo; and{" "}
+                <code className="rounded bg-muted px-1 py-0.5">{"{name}"}</code> is left blank.
               </p>
               <div className="space-y-1.5">
                 <Label htmlFor="settlement-subject" className="text-xs">Subject</Label>
