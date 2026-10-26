@@ -81,9 +81,8 @@ export default function TasksPage() {
   const [reminder, setReminder] = useState<
     { taskId: string; to: string; subject: string; body: string } | null
   >(null);
-  const [sendingReminder, setSendingReminder] = useState(false);
 
-  // The saved reminder template (Settings → Email); falls back to the built-in
+  // The saved reminder template (Settings → Email templates); falls back to the built-in
   // default until loaded.
   const [template, setTemplate] = useState<TaskReminderTemplate>(DEFAULT_TASK_REMINDER);
   useEffect(() => {
@@ -214,38 +213,14 @@ export default function TasksPage() {
     setReminder({ taskId: t.id, to: owner?.email ?? "", subject, body });
   }
 
-  // Send the edited reminder via the shared endpoint, falling back to a mailto:
-  // link if Gmail isn't configured (409 notConfigured).
-  async function submitReminder() {
+  // Hand the edited reminder to the user's own mail app. We don't mark it
+  // "sent" since we can't confirm they actually send it.
+  function submitReminder() {
     if (!reminder || !reminder.to.trim()) return;
-    const { taskId, to, subject, body } = reminder;
-    setSendingReminder(true);
-    try {
-      const res = await fetch("/api/email/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ to: to.trim(), subject, body }),
-      });
-      if (res.status === 409) {
-        // Email not configured — hand off to the user's own mail client. We
-        // don't mark it "sent" since we can't confirm they actually send it.
-        window.location.href =
-          `mailto:${encodeURIComponent(to.trim())}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-        setReminder(null);
-        return;
-      }
-      if (!res.ok) {
-        const { error } = await res.json().catch(() => ({ error: "Failed to send" }));
-        alert(`Couldn't send the reminder: ${error}`);
-        return;
-      }
-      await updateTask(taskId, { reminderSentAt: new Date().toISOString() });
-      setReminder(null);
-    } catch {
-      alert("Couldn't reach the email service. Check your connection and try again.");
-    } finally {
-      setSendingReminder(false);
-    }
+    const { to, subject, body } = reminder;
+    window.location.href =
+      `mailto:${encodeURIComponent(to.trim())}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    setReminder(null);
   }
 
   // ── Render ───────────────────────────────────────────────────────────────────
@@ -557,8 +532,8 @@ export default function TasksPage() {
           )}
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setReminder(null)}>Cancel</Button>
-            <Button onClick={submitReminder} disabled={sendingReminder || !reminder?.to.trim()}>
-              {sendingReminder ? "Sending…" : "Send reminder"}
+            <Button onClick={submitReminder} disabled={!reminder?.to.trim()}>
+              Open in mail app
             </Button>
           </DialogFooter>
         </DialogContent>
