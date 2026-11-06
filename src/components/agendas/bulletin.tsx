@@ -7,7 +7,6 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import type { Announcement, Meeting, WardInfo } from "@/types";
-import { downloadNodeAsPdf } from "@/lib/print";
 import { formatText } from "@/lib/format-text";
 
 // Self-contained styles travel with the bulletin markup so the exact same DOM
@@ -62,10 +61,12 @@ export function BulletinDialog({ open, onOpenChange, meeting, ward, announcement
   const [downloading, setDownloading] = useState(false);
 
   async function download() {
-    if (!ref.current || downloading) return;
+    if (downloading) return;
     setDownloading(true);
     try {
-      await downloadNodeAsPdf(ref.current, `${ward.wardName} Bulletin`);
+      const { buildBulletinPdf } = await import("@/lib/bulletin-pdf");
+      const pdf = buildBulletinPdf({ meeting, ward, announcements });
+      pdf.save(`${ward.wardName} Bulletin.pdf`.replace(/[\\/:*?"<>|]+/g, " ").trim());
     } finally {
       setDownloading(false);
     }

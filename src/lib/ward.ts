@@ -22,6 +22,12 @@ export const DEFAULT_WARD_INFO: WardInfo = {
     "please contact Braden Hansen via text at (208) 243-1193 or via email at bradenhnsn@gmail.com.",
 };
 
+/** Empty ward details, shown before the ward settings have been filled in. */
+export const BLANK_WARD_INFO: WardInfo = {
+  wardName: "", churchName: "", stake: "", address: "",
+  meetingTitle: "", meetingTime: "", leadership: [], submissionNote: "",
+};
+
 /**
  * The ward-business categories read during sacrament meeting, in the order they
  * appear on the document. Mirrors the fixed-section pattern of AGENDA_SECTIONS.

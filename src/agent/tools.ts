@@ -4,6 +4,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { fromRow } from "@/lib/db/mappers";
 import { parseBulletin, defaultBulletin, upcomingSunday } from "@/lib/bulletin";
 import { isAnnouncementActive } from "@/lib/announcements";
+import type { BulletinPdfInput } from "@/lib/bulletin-pdf";
+import { wardInfoRepo } from "@/lib/db";
+import { BLANK_WARD_INFO } from "@/lib/ward";
 import { listAgentNotes } from "@/lib/agent-notes";
 import { isEmailConfigured, sendEmail as sendGmailMessage, searchInbox, readInboxMessage } from "@/lib/email/gmail";
 import { WARD_BUSINESS_CATEGORIES, makeEntry, seedBusiness } from "@/lib/ward";
@@ -920,6 +923,38 @@ export const getSacramentBulletin = tool({
     };
   },
 });
+
+/**
+ * Everything the printed bulletin for a Sunday needs: the meeting's program, the
+ * ward letterhead and the announcements that print on it. Used by the MCP
+ * `getBulletinPdf` tool; mirrors what the Sacrament page's bulletin preview shows.
+ */
+export async function loadBulletinForPdf(date?: string): Promise<
+  { exists: false; date: string } | { exists: true; date: string; input: BulletinPdfInput }
+> {
+  const { row, sunday } = await findSacramentMeeting(date ?? new Date().toISOString().slice(0, 10));
+  if (!row) return { exists: false, date: sunday };
+  const meeting = fromRow<Meeting>(row);
+
+  const [ward, ann] = await Promise.all([
+    wardInfoRepo.get(db()),
+    db().from("announcements").select("*").order("created_at", { ascending: false }),
+  ]);
+  if (ann.error) throw ann.error;
+  const announcements = (ann.data ?? [])
+    .map((r) => fromRow<Announcement>(r))
+    .filter((a) => isAnnouncementActive(a));
+
+  return {
+    exists: true,
+    date: sunday,
+    input: {
+      meeting: { date: meeting.date, program: meeting.program ?? defaultBulletin({}) },
+      ward: ward ?? BLANK_WARD_INFO,
+      announcements,
+    },
+  };
+}
 
 /** Bulletin row labels that hold a prayer, mapped to which prayer it is. */
 function prayerKind(label: string): "invocation" | "benediction" | undefined {

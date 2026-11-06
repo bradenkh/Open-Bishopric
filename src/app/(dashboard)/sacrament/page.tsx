@@ -21,7 +21,7 @@ import type {
 } from "@/types";
 import { MEETING_TYPE_LABELS, MEETING_STATUS_COLORS } from "@/types";
 import { useData, newId } from "@/contexts/DataContext";
-import { seedBusiness } from "@/lib/ward";
+import { seedBusiness, BLANK_WARD_INFO } from "@/lib/ward";
 import { isAnnouncementActive } from "@/lib/announcements";
 import { defaultBulletin, addDays, upcomingSunday, todayISODate, formatSunday } from "@/lib/bulletin";
 import { cn } from "@/lib/utils";
@@ -48,10 +48,7 @@ const EMPTY_FORM = {
   date: "", time: "", location: "", notes: "",
 };
 
-const BLANK_WARD: WardInfo = {
-  wardName: "", churchName: "", stake: "", address: "",
-  meetingTitle: "", meetingTime: "", leadership: [], submissionNote: "",
-};
+const BLANK_WARD: WardInfo = BLANK_WARD_INFO;
 
 function formatTime(time?: string) {
   if (!time) return "";
