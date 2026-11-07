@@ -9,6 +9,10 @@ import type { Announcement } from "@/types";
  * one block per announcement. When the template hasn't been customized these
  * defaults are used. Framework-free so the settings UI and the MCP tool can
  * both import it.
+ *
+ * The ward's email tool (LCR) turns every line into its own paragraph, with a
+ * paragraph's worth of space after it, so the text uses single line breaks
+ * only: a blank line would come through as a double gap.
  */
 
 /** Just the message body; the subject is left to whoever sends it. */
@@ -19,9 +23,7 @@ export interface BulletinEmailTemplate {
 export const DEFAULT_BULLETIN_EMAIL: BulletinEmailTemplate = {
   body: [
     "Hello {ward} Members,",
-    "",
     "Please see the attached Ward Bulletin. A few reminders for the coming weeks:",
-    "",
     "{announcements}",
   ].join("\n"),
 };
@@ -35,7 +37,7 @@ function plain(text: string): string {
 }
 
 /**
- * Announcements as email text, a blank line between each. A one-line
+ * Announcements as email text, one after another with no blank lines. A one-line
  * announcement reads "Title: description"; a longer one (a schedule, a list of
  * times) puts its title on a line of its own above the description's lines.
  */
@@ -50,7 +52,7 @@ export function announcementsAsText(list: Pick<Announcement, "title" | "descript
       return [title, ...lines].join("\n");
     })
     .filter(Boolean)
-    .join("\n\n");
+    .join("\n");
 }
 
 /** A blank stored template falls back to the default. */
@@ -80,7 +82,12 @@ export function renderBulletinEmail(
   };
   const fill = (s: string) => s.replace(/\{(ward|date|announcements)\}/g, (m) => map[m] ?? "");
   return {
-    // Collapse the gap an empty {announcements} would leave.
-    body: fill(template.body).replace(/\n{3,}/g, "\n\n").trim(),
+    // A line holding only {announcements} is dropped on a week with none.
+    body: template.body
+      .split("\n")
+      .filter((line) => line.trim() !== "{announcements}" || map["{announcements}"] !== "")
+      .map(fill)
+      .join("\n")
+      .trim(),
   };
 }

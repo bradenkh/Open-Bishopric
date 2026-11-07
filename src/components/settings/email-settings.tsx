@@ -345,7 +345,8 @@ export function EmailSettingsCard() {
                 Sunday, and{" "}
                 <code className="rounded bg-muted px-1 py-0.5">{"{announcements}"}</code> for
                 that week&rsquo;s bulletin announcements. Put standing text, such as the
-                bishop&rsquo;s message or a Zoom link, after the announcements.
+                bishop&rsquo;s message or a Zoom link, after the announcements. Leave out blank
+                lines: the ward email tool already spaces every line as its own paragraph.
               </p>
               <div className="space-y-1.5">
                 <Label htmlFor="bulletin-body" className="text-xs">Message</Label>
