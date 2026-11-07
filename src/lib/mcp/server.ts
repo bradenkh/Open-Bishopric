@@ -1,8 +1,9 @@
 import "server-only";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
-import type { z } from "zod";
-import { agentTools } from "@/agent/tools";
+import { agentTools, loadBulletinForPdf } from "@/agent/tools";
+import { bulletinPdfBytes, bulletinDate } from "@/lib/bulletin-pdf";
+import { z as zod } from "zod";
 import { agentInstructions } from "@/agent/prompt";
 import { listAgentNotes } from "@/lib/agent-notes";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -85,7 +86,7 @@ export async function createMcpServer(): Promise<McpServer> {
         description: t.description,
         // The AI SDK tools declare their inputs with zod objects, which the
         // MCP SDK accepts directly.
-        inputSchema: t.inputSchema as z.ZodObject,
+        inputSchema: t.inputSchema as zod.ZodObject,
         annotations: annotationsFor(name),
       },
       async (input: unknown) => {
@@ -105,5 +106,58 @@ export async function createMcpServer(): Promise<McpServer> {
     );
   }
 
+  registerBulletinPdf(server);
+
   return server;
+}
+
+/**
+ * MCP-only: the bulletin as the PDF that gets printed, so it can be checked
+ * before Sunday. Not an in-app agent tool, since the in-app model can't read a
+ * PDF; it returns the file as an embedded resource instead of JSON.
+ */
+function registerBulletinPdf(server: McpServer) {
+  server.registerTool(
+    "getBulletinPdf",
+    {
+      description:
+        "Get the printed sacrament meeting bulletin for a Sunday as a PDF file (the same file the app's Download PDF button produces), to check how it looks before it is printed or emailed. If the date isn't a Sunday it's rolled forward to the next one.",
+      inputSchema: zod.object({
+        date: zod.string().optional().describe("ISO date YYYY-MM-DD; defaults to the upcoming Sunday"),
+      }),
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    async ({ date }) => {
+      try {
+        const found = await loadBulletinForPdf(date);
+        if (!found.exists) {
+          return {
+            content: [{ type: "text" as const, text: `There is no bulletin for ${found.date} yet.` }],
+            isError: true,
+          };
+        }
+        const bytes = bulletinPdfBytes(found.input);
+        const name = `${found.input.ward.wardName || "Ward"} Bulletin ${found.date}.pdf`;
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Bulletin for ${bulletinDate(found.date)}: ${name} (${Math.round(bytes.length / 1024)} KB, ${found.input.announcements.length} announcements).`,
+            },
+            {
+              type: "resource" as const,
+              resource: {
+                uri: `bulletin://${found.date}/${encodeURIComponent(name)}`,
+                mimeType: "application/pdf",
+                blob: Buffer.from(bytes).toString("base64"),
+              },
+            },
+          ],
+        };
+      } catch (e) {
+        const message = e instanceof Error ? e.message : (e as { message?: string })?.message ?? "Tool failed.";
+        return { content: [{ type: "text" as const, text: message }], isError: true };
+      }
+    },
+  );
 }
