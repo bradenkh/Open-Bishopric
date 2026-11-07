@@ -123,7 +123,7 @@ function registerBulletinPdf(server: McpServer) {
     "getBulletinPdf",
     {
       description:
-        "Get the printed sacrament meeting bulletin for a Sunday as a PDF file (the same file the app's Download PDF button produces), plus the subject and body of that week's email to the ward with the bulletin's announcements filled in. Use it to check the bulletin before it is printed or emailed. Always show the user the email subject and body exactly as returned, so they can copy them. This tool sends nothing. If the date isn't a Sunday it's rolled forward to the next one.",
+        "Get the printed sacrament meeting bulletin for a Sunday as a PDF file (the same file the app's Download PDF button produces), plus the body of that week's email to the ward with the bulletin's announcements filled in. Use it to check the bulletin before it is printed or emailed. Always show the user the email body exactly as returned, so they can copy them. This tool sends nothing. If the date isn't a Sunday it's rolled forward to the next one.",
       inputSchema: zod.object({
         date: zod.string().optional().describe("ISO date YYYY-MM-DD; defaults to the upcoming Sunday"),
       }),
@@ -153,7 +153,7 @@ function registerBulletinPdf(server: McpServer) {
             },
             {
               type: "text" as const,
-              text: `Email to the ward (copy into the email with the PDF attached; nothing has been sent):\n\nSubject: ${email.subject}\n\n${email.body}`,
+              text: `Email to the ward (copy into the email with the PDF attached; nothing has been sent):\n\n${email.body}`,
             },
             {
               type: "resource" as const,

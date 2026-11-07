@@ -965,12 +965,11 @@ export async function loadBulletinEmailTemplate(): Promise<BulletinEmailTemplate
   try {
     const { data, error } = await db()
       .from("app_settings")
-      .select("bulletin_email_subject, bulletin_email_body")
+      .select("bulletin_email_body")
       .eq("id", "default")
       .maybeSingle();
     if (error) throw error;
     return withBulletinEmailDefaults({
-      subject: data?.bulletin_email_subject ?? undefined,
       body: data?.bulletin_email_body ?? undefined,
     });
   } catch {

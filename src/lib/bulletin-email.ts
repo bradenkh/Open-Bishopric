@@ -11,13 +11,12 @@ import type { Announcement } from "@/types";
  * both import it.
  */
 
+/** Just the message body; the subject is left to whoever sends it. */
 export interface BulletinEmailTemplate {
-  subject: string;
   body: string;
 }
 
 export const DEFAULT_BULLETIN_EMAIL: BulletinEmailTemplate = {
-  subject: "{ward} Bulletin",
   body: [
     "Hello {ward} Members,",
     "",
@@ -54,12 +53,11 @@ export function announcementsAsText(list: Pick<Announcement, "title" | "descript
     .join("\n\n");
 }
 
-/** A stored template with blank fields falls back to the defaults, field by field. */
+/** A blank stored template falls back to the default. */
 export function withBulletinEmailDefaults(
   partial?: Partial<BulletinEmailTemplate> | null,
 ): BulletinEmailTemplate {
   return {
-    subject: partial?.subject?.trim() ? partial.subject : DEFAULT_BULLETIN_EMAIL.subject,
     body: partial?.body?.trim() ? partial.body : DEFAULT_BULLETIN_EMAIL.body,
   };
 }
@@ -82,7 +80,6 @@ export function renderBulletinEmail(
   };
   const fill = (s: string) => s.replace(/\{(ward|date|announcements)\}/g, (m) => map[m] ?? "");
   return {
-    subject: fill(template.subject).trim(),
     // Collapse the gap an empty {announcements} would leave.
     body: fill(template.body).replace(/\n{3,}/g, "\n\n").trim(),
   };

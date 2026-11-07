@@ -11,5 +11,4 @@
 -- ============================================================================
 
 alter table public.app_settings
-  add column if not exists bulletin_email_subject text,
-  add column if not exists bulletin_email_body    text;
+  add column if not exists bulletin_email_body text;

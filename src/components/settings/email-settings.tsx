@@ -42,7 +42,6 @@ export function EmailSettingsCard() {
   const [reminderSubject, setReminderSubject] = useState(DEFAULT_TASK_REMINDER.subject);
   const [reminderBody, setReminderBody] = useState(DEFAULT_TASK_REMINDER.body);
   // Weekly bulletin email — returned with the bulletin PDF for copying.
-  const [bulletinSubject, setBulletinSubject] = useState(DEFAULT_BULLETIN_EMAIL.subject);
   const [bulletinBody, setBulletinBody] = useState(DEFAULT_BULLETIN_EMAIL.body);
 
   useEffect(() => {
@@ -58,7 +57,6 @@ export function EmailSettingsCard() {
         if (data.settlementConfirmationBody) setConfirmationBody(data.settlementConfirmationBody);
         if (data.taskReminderSubject) setReminderSubject(data.taskReminderSubject);
         if (data.taskReminderBody) setReminderBody(data.taskReminderBody);
-        if (data.bulletinEmailSubject) setBulletinSubject(data.bulletinEmailSubject);
         if (data.bulletinEmailBody) setBulletinBody(data.bulletinEmailBody);
       })
       .catch(() => setError("Couldn't load email settings."));
@@ -80,7 +78,6 @@ export function EmailSettingsCard() {
           settlementConfirmationBody: confirmationBody,
           taskReminderSubject: reminderSubject,
           taskReminderBody: reminderBody,
-          bulletinEmailSubject: bulletinSubject,
           bulletinEmailBody: bulletinBody,
         }),
       });
@@ -332,7 +329,6 @@ export function EmailSettingsCard() {
                   size="sm"
                   className="h-7 text-xs"
                   onClick={() => {
-                    setBulletinSubject(DEFAULT_BULLETIN_EMAIL.subject);
                     setBulletinBody(DEFAULT_BULLETIN_EMAIL.body);
                     setSaved(false);
                   }}
@@ -351,12 +347,6 @@ export function EmailSettingsCard() {
                 that week&rsquo;s bulletin announcements. Put standing text, such as the
                 bishop&rsquo;s message or a Zoom link, after the announcements.
               </p>
-              <div className="space-y-1.5">
-                <Label htmlFor="bulletin-subject" className="text-xs">Subject</Label>
-                <Input id="bulletin-subject" value={bulletinSubject}
-                  onChange={(e) => { setBulletinSubject(e.target.value); setSaved(false); }}
-                  placeholder={DEFAULT_BULLETIN_EMAIL.subject} />
-              </div>
               <div className="space-y-1.5">
                 <Label htmlFor="bulletin-body" className="text-xs">Message</Label>
                 <Textarea id="bulletin-body" value={bulletinBody} rows={12}
