@@ -17,7 +17,7 @@ export async function GET() {
   const { data, error } = await createAdminClient()
     .from("app_settings")
     .select(
-      "gmail_address, gmail_app_password, settlement_email_subject, settlement_email_body, settlement_confirmation_subject, settlement_confirmation_body, task_reminder_subject, task_reminder_body",
+      "gmail_address, gmail_app_password, settlement_email_subject, settlement_email_body, settlement_confirmation_subject, settlement_confirmation_body, task_reminder_subject, task_reminder_body, bulletin_email_body",
     )
     .eq("id", "default")
     .maybeSingle();
@@ -34,6 +34,7 @@ export async function GET() {
     settlementConfirmationBody: data?.settlement_confirmation_body ?? "",
     taskReminderSubject: data?.task_reminder_subject ?? "",
     taskReminderBody: data?.task_reminder_body ?? "",
+    bulletinEmailBody: data?.bulletin_email_body ?? "",
   });
 }
 
@@ -54,6 +55,7 @@ export async function PUT(request: NextRequest) {
   const settlementConfirmationBody: unknown = body.settlementConfirmationBody;
   const taskReminderSubject: unknown = body.taskReminderSubject;
   const taskReminderBody: unknown = body.taskReminderBody;
+  const bulletinEmailBody: unknown = body.bulletinEmailBody;
 
   const patch: Record<string, string> = {};
   if (typeof gmailAddress === "string") patch.gmail_address = gmailAddress.trim();
@@ -67,6 +69,7 @@ export async function PUT(request: NextRequest) {
   if (typeof settlementConfirmationBody === "string") patch.settlement_confirmation_body = settlementConfirmationBody;
   if (typeof taskReminderSubject === "string") patch.task_reminder_subject = taskReminderSubject;
   if (typeof taskReminderBody === "string") patch.task_reminder_body = taskReminderBody;
+  if (typeof bulletinEmailBody === "string") patch.bulletin_email_body = bulletinEmailBody;
 
   const { error } = await createAdminClient()
     .from("app_settings")

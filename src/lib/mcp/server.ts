@@ -1,7 +1,8 @@
 import "server-only";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
-import { agentTools, loadBulletinForPdf } from "@/agent/tools";
+import { agentTools, loadBulletinForPdf, loadBulletinEmailTemplate } from "@/agent/tools";
+import { renderBulletinEmail } from "@/lib/bulletin-email";
 import { bulletinPdfBytes, bulletinDate } from "@/lib/bulletin-pdf";
 import { z as zod } from "zod";
 import { agentInstructions } from "@/agent/prompt";
@@ -113,15 +114,16 @@ export async function createMcpServer(): Promise<McpServer> {
 
 /**
  * MCP-only: the bulletin as the PDF that gets printed, so it can be checked
- * before Sunday. Not an in-app agent tool, since the in-app model can't read a
- * PDF; it returns the file as an embedded resource instead of JSON.
+ * before Sunday, plus the week's email to the ward (subject and body, with the
+ * announcements filled in) ready to copy. Not an in-app agent tool, since the
+ * in-app model can't read a PDF; the file comes back as an embedded resource.
  */
 function registerBulletinPdf(server: McpServer) {
   server.registerTool(
     "getBulletinPdf",
     {
       description:
-        "Get the printed sacrament meeting bulletin for a Sunday as a PDF file (the same file the app's Download PDF button produces), to check how it looks before it is printed or emailed. If the date isn't a Sunday it's rolled forward to the next one.",
+        "Get the printed sacrament meeting bulletin for a Sunday as a PDF file (the same file the app's Download PDF button produces), plus the body of that week's email to the ward with the bulletin's announcements filled in. Use it to check the bulletin before it is printed or emailed. Always show the user the email body exactly as returned, so they can copy them. This tool sends nothing. If the date isn't a Sunday it's rolled forward to the next one.",
       inputSchema: zod.object({
         date: zod.string().optional().describe("ISO date YYYY-MM-DD; defaults to the upcoming Sunday"),
       }),
@@ -137,12 +139,21 @@ function registerBulletinPdf(server: McpServer) {
           };
         }
         const bytes = bulletinPdfBytes(found.input);
+        const email = renderBulletinEmail(await loadBulletinEmailTemplate(), {
+          ward: found.input.ward.wardName,
+          date: bulletinDate(found.date),
+          announcements: found.input.announcements,
+        });
         const name = `${found.input.ward.wardName || "Ward"} Bulletin ${found.date}.pdf`;
         return {
           content: [
             {
               type: "text" as const,
               text: `Bulletin for ${bulletinDate(found.date)}: ${name} (${Math.round(bytes.length / 1024)} KB, ${found.input.announcements.length} announcements).`,
+            },
+            {
+              type: "text" as const,
+              text: `Email to the ward (copy into the email with the PDF attached; nothing has been sent):\n\n${email.body}`,
             },
             {
               type: "resource" as const,

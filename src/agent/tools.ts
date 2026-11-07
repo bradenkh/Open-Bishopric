@@ -5,6 +5,7 @@ import { fromRow } from "@/lib/db/mappers";
 import { parseBulletin, defaultBulletin, upcomingSunday } from "@/lib/bulletin";
 import { isAnnouncementActive } from "@/lib/announcements";
 import type { BulletinPdfInput } from "@/lib/bulletin-pdf";
+import { withBulletinEmailDefaults, type BulletinEmailTemplate } from "@/lib/bulletin-email";
 import { wardInfoRepo } from "@/lib/db";
 import { BLANK_WARD_INFO } from "@/lib/ward";
 import { listAgentNotes } from "@/lib/agent-notes";
@@ -954,6 +955,26 @@ export async function loadBulletinForPdf(date?: string): Promise<
       announcements,
     },
   };
+}
+
+/**
+ * The weekly bulletin email's saved template (Settings → Email), or the built-in
+ * default when it isn't customized or the settings can't be read.
+ */
+export async function loadBulletinEmailTemplate(): Promise<BulletinEmailTemplate> {
+  try {
+    const { data, error } = await db()
+      .from("app_settings")
+      .select("bulletin_email_body")
+      .eq("id", "default")
+      .maybeSingle();
+    if (error) throw error;
+    return withBulletinEmailDefaults({
+      body: data?.bulletin_email_body ?? undefined,
+    });
+  } catch {
+    return withBulletinEmailDefaults(null);
+  }
 }
 
 /** Bulletin row labels that hold a prayer, mapped to which prayer it is. */

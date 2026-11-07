@@ -7,9 +7,10 @@ import type { Announcement, Meeting, WardInfo } from "@/types";
  * the server (the MCP `getBulletinPdf` tool), so the file someone inspects
  * remotely is the same file that gets printed.
  *
- * The layout mirrors BULLETIN_CSS in components/agendas/bulletin.tsx: a wide
- * left column (welcome, order of service, footer) and a narrow right column
- * (quote, announcements). Sizes are in points, matching the CSS's pt values.
+ * Layout: a full-width letterhead with the meeting and date set between rules,
+ * then two columns (order of service on the left, a boxed panel with the quote
+ * and announcements on the right), and the bishopric's contacts along the
+ * bottom of the page. Black and white only, for the ward's printer.
  */
 
 export interface BulletinPdfInput {
@@ -21,16 +22,25 @@ export interface BulletinPdfInput {
 // Letter page, 0.5in margins, plus the bulletin's own 0.3in padding.
 const PAGE_W = 612;
 const PAGE_H = 792;
-const MARGIN = 36 + 21.6;
-const GAP = 22.5;
+const MARGIN = 40;
+const GAP = 22;
 const INNER_W = PAGE_W - MARGIN * 2;
-const LEFT_W = ((INNER_W - GAP) * 1.7) / 2.7;
+const LEFT_W = (INNER_W - GAP) * 0.6;
 const RIGHT_W = INNER_W - GAP - LEFT_W;
 const LEFT_X = MARGIN;
 const RIGHT_X = MARGIN + LEFT_W + GAP;
 const BOTTOM = PAGE_H - MARGIN;
 const LINE = 1.35;
 const FONT = "times";
+
+// The bulletin is printed in black and white, so everything is black or gray
+// line work and text: no colour and no filled areas.
+type RGB = [number, number, number];
+const INK: RGB = [17, 17, 17];
+const ACCENT: RGB = INK;
+const MUTED: RGB = [85, 85, 85];
+const GOLD: RGB = [120, 120, 120];
+const RULE: RGB = [170, 170, 170];
 
 type Style = "normal" | "bold" | "italic" | "bolditalic";
 interface Run { text: string; style: Style }
@@ -56,9 +66,8 @@ export function bulletinDate(iso: string): string {
  */
 function clean(text: string): string {
   return text
-    .replace(/[‐‑‒]/g, "-")
-    .replace(/ /g, " ")
-    .replace(/[^\x20-\x7e¡-ÿ–—‘’‚“”„†‡•…‰€™ŒœŠšŸŽžƒˆ˜]/g, "");
+    .replace(/[\u2010\u2011\u2012]/g, "-")
+    .replace(/[^\x20-\x7e\u00a0-\u00ff\u2013\u2014\u2018\u2019\u201a\u201c\u201d\u201e\u2020\u2021\u2022\u2026\u2030\u20ac\u2122\u0152\u0153\u0160\u0161\u0178\u017d\u017e\u0192\u02c6\u02dc]/g, "");
 }
 
 /** Split **bold** / *italic* markup (the announcement format) into styled runs. */
@@ -86,9 +95,9 @@ function wrapRuns(pdf: jsPDF, runs: Run[], size: number, width: number): Word[][
   const words: Word[] = [];
   let sawSpace = false;
   for (const run of runs) {
-    for (const p of clean(run.text).split(/(\s+)/)) {
+    for (const p of clean(run.text).split(/([ \t\r\n]+)/)) {
       if (p === "") continue;
-      if (/^\s+$/.test(p)) { sawSpace = true; continue; }
+      if (/^[ \t\r\n]+$/.test(p)) { sawSpace = true; continue; }
       words.push({ text: p, style: run.style, space: words.length > 0 && sawSpace });
       sawSpace = false;
     }
@@ -193,151 +202,240 @@ function measureLines(pdf: jsPDF, text: string, size: number, width: number, sty
 export function buildBulletinPdf({ meeting, ward, announcements }: BulletinPdfInput): jsPDF {
   const pdf = new jsPDF({ unit: "pt", format: "letter", orientation: "portrait" });
   pdf.setProperties({ title: `${ward.wardName} Bulletin – ${bulletinDate(meeting.date)}`.trim() });
-  pdf.setTextColor(17, 17, 17);
   const program = meeting.program ?? { rows: [] };
+  const color = (c: RGB) => pdf.setTextColor(c[0], c[1], c[2]);
+  const stroke = (c: RGB, w: number) => { pdf.setDrawColor(c[0], c[1], c[2]); pdf.setLineWidth(w); };
 
-  // Columns flow independently; each starts a new page when it runs out of room.
+  // ── Footer (measured first so the columns know where to stop) ──────────────
+  const FOOT_SIZE = 8.5;
+  // One paragraph in plain black: "Name, Role: (555) 555-5555; ..." then the
+  // submission note.
+  // Phone numbers use non-breaking spaces so they never split across lines.
+  const contacts = ward.leadership
+    .map((l) => `${l.name}, ${l.role}${l.phone ? `: ${l.phone.replace(/ /g, "\u00a0")}` : ""}`)
+    .join(";  ");
+  const FOOT_W = INNER_W - 40;
+  const note = (ward.submissionNote ?? "").replace(/\((\d{3})\) (\d{3})/g, "($1)\u00a0$2");
+  const contactLines = contacts ? measureLines(pdf, contacts, FOOT_SIZE, FOOT_W) : 0;
+  const noteLines = note ? measureLines(pdf, note, FOOT_SIZE, FOOT_W, "italic") : 0;
+  const footerH = 10 + contactLines * FOOT_SIZE * LINE + (contactLines && noteLines ? 4 : 0) + noteLines * FOOT_SIZE * LINE;
+  const footerTop = BOTTOM - footerH;
+
+  // ── Letterhead ─────────────────────────────────────────────────────────────
+  let y = MARGIN;
+  const full = { x: MARGIN, width: INNER_W, align: "center" as const };
+  color(ACCENT);
+  y = drawText(pdf, `Welcome to the ${ward.wardName}`, { ...full, top: y, size: 22, style: "bold" }) + 2;
+  color(MUTED);
+  const subs = [ward.churchName, [ward.stake, ward.address].filter(Boolean).join("  ·  ")].filter(Boolean);
+  for (const sub of subs) y = drawText(pdf, sub, { ...full, top: y, size: 9.5, style: "italic" });
+  y += 8;
+
+  // Meeting title, time and date between a heavy and a light rule.
+  const bandH = 26;
+  stroke(INK, 1.6);
+  pdf.line(MARGIN, y, MARGIN + INNER_W, y);
+  stroke(INK, 0.5);
+  pdf.line(MARGIN, y + 2.5, MARGIN + INNER_W, y + 2.5);
+  pdf.line(MARGIN, y + bandH - 2.5, MARGIN + INNER_W, y + bandH - 2.5);
+  stroke(INK, 1.6);
+  pdf.line(MARGIN, y + bandH, MARGIN + INNER_W, y + bandH);
+  color(INK);
+  const band = [ward.meetingTitle, ward.meetingTime, bulletinDate(meeting.date)].filter(Boolean).join("   •   ");
+  drawText(pdf, band, { ...full, top: y + (bandH - 12 * LINE) / 2, size: 12, style: "bold" });
+  y += bandH + 16;
+  const columnsTop = y;
+
+  // Column bodies flow onto extra pages only if a week is unusually long.
   let page = 1;
+  let lastPage = 1;
   const pageFor = (n: number) => {
     while (pdf.getNumberOfPages() < n) pdf.addPage();
     pdf.setPage(n);
+    lastPage = Math.max(lastPage, n);
   };
-  const flow = (y: number, needed: number, top: number): number => {
-    if (y + needed <= BOTTOM) return y;
+  const flow = (yy: number, needed: number, limit: number): number => {
+    if (yy + needed <= limit) return yy;
     page += 1;
     pageFor(page);
-    return top;
+    return MARGIN;
   };
+  const colBottom = footerTop - 14;
 
-  // ── Left column ────────────────────────────────────────────────────────────
-  let y = MARGIN;
-  const centre = { x: LEFT_X, width: LEFT_W, align: "center" as const };
-  y = drawText(pdf, `Welcome to the ${ward.wardName}`, { ...centre, top: y, size: 17, style: "bold" }) + 6;
-  for (const sub of [ward.churchName, ward.stake, ward.address]) {
-    y = drawText(pdf, sub ?? "", { ...centre, top: y + 1, size: 9, style: "bold" }) + 1;
-  }
-  y += 12;
-  y = drawText(pdf, `${ward.meetingTitle} – ${ward.meetingTime}`, { ...centre, top: y, size: 12, style: "bold" });
-  y = drawText(pdf, bulletinDate(meeting.date), { ...centre, top: y, size: 12, style: "bold" });
-  y += 12;
+  // ── Left column: order of service ──────────────────────────────────────────
+  const heading = (text: string, x: number, width: number, top: number): number => {
+    color(ACCENT);
+    pdf.setFont(FONT, "bold");
+    pdf.setFontSize(10);
+    pdf.setCharSpace(1.6);
+    const label = text.toUpperCase();
+    const w = pdf.getTextWidth(label) + 1.6 * label.length;
+    const cx = x + (width - w) / 2;
+    const base = top + 10;
+    pdf.text(label, cx, base);
+    pdf.setCharSpace(0);
+    stroke(GOLD, 0.8);
+    pdf.line(x, base - 3.5, cx - 8, base - 3.5);
+    pdf.line(cx + w + 8, base - 3.5, x + width, base - 3.5);
+    return top + 22;
+  };
+  y = heading("Order of Service", LEFT_X, LEFT_W, y);
 
   const rows: { label: string; value?: string }[] = [];
   if (program.conducting) rows.push({ label: "Conducting", value: program.conducting });
   for (const r of program.rows) rows.push({ label: r.label, value: r.value });
+  const roles = [
+    program.chorister ? `Chorister: ${program.chorister}` : "",
+    program.organist ? `Organist: ${program.organist}` : "",
+  ].filter(Boolean);
 
-  const SIZE = 10;
-  const PAD = 6.75;
+  const SIZE = 10.5;
+  const LABEL_SIZE = 8.5;
   const lineH = SIZE * LINE;
-  const innerW = LEFT_W - 3;
-  for (const row of rows) {
-    let height: number;
-    if (!row.value) {
-      height = measureLines(pdf, row.label, SIZE, innerW) * lineH;
-    } else {
-      const valueW = innerW * 0.6;
-      const labelW = innerW - valueW - 10.5;
-      height = Math.max(measureLines(pdf, row.label, SIZE, labelW), measureLines(pdf, row.value, SIZE, valueW)) * lineH;
-    }
-    y = flow(y, height + PAD * 2, MARGIN);
+  const valueW = LEFT_W * 0.62;
+  const heights = rows.map((row) =>
+    row.value
+      ? measureLines(pdf, row.value, SIZE, valueW) * lineH
+      : measureLines(pdf, row.label, SIZE + 0.5, LEFT_W - 20, "italic") * lineH,
+  );
+  // Spread spare room across the rows so the program fills the column.
+  const rolesH = roles.length ? 9 * LINE + 12 : 0;
+  const natural = heights.reduce((a, h) => a + h + 12, 0);
+  const spare = colBottom - y - rolesH - natural - 6; // a little slack for rounding
+  const PAD = 6 + (rows.length ? Math.min(5, Math.max(0, spare / rows.length / 2)) : 0);
+
+  rows.forEach((row, i) => {
+    const h = heights[i];
+    y = flow(y, h + PAD * 2, colBottom);
     const top = y + PAD;
     if (!row.value) {
-      drawText(pdf, row.label, { x: LEFT_X + 1.5, width: innerW, top, size: SIZE, align: "center" });
+      // A row with no value (the sacrament) is a set-off break in the program.
+      stroke(INK, 0.5);
+      pdf.line(LEFT_X, y + 1.5, LEFT_X + LEFT_W, y + 1.5);
+      pdf.line(LEFT_X, y + h + PAD * 2 - 1.5, LEFT_X + LEFT_W, y + h + PAD * 2 - 1.5);
+      color(ACCENT);
+      drawText(pdf, row.label, { x: LEFT_X + 10, width: LEFT_W - 20, top, size: SIZE + 0.5, style: "italic", align: "center" });
     } else {
-      const valueW = innerW * 0.6;
-      const labelW = innerW - valueW - 10.5;
-      drawText(pdf, row.label, { x: LEFT_X + 1.5, width: labelW, top, size: SIZE });
-      drawText(pdf, row.value, { x: LEFT_X + 1.5 + innerW - valueW, width: valueW, top, size: SIZE, align: "right" });
+      // Labels are short, letter-spaced small caps on one line.
+      color(MUTED);
+      pdf.setFont(FONT, "normal");
+      pdf.setFontSize(LABEL_SIZE);
+      pdf.setCharSpace(0.6);
+      pdf.text(clean(row.label.toUpperCase()), LEFT_X, top + (lineH - SIZE) / 2 + SIZE * 0.8);
+      pdf.setCharSpace(0);
+      color(INK);
+      drawText(pdf, row.value, { x: LEFT_X + LEFT_W - valueW, width: valueW, top, size: SIZE, align: "right" });
     }
-    y = top + height + PAD;
-    pdf.setLineWidth(0.75);
-    pdf.setDrawColor(188, 188, 188);
-    pdf.line(LEFT_X, y, LEFT_X + LEFT_W, y);
-  }
+    y = top + h + PAD;
+    const next = rows[i + 1];
+    if (row.value && next?.value) {
+      stroke(RULE, 0.6);
+      pdf.line(LEFT_X, y, LEFT_X + LEFT_W, y);
+    }
+  });
 
-  // Footer: chorister / organist, leadership contacts, submission note.
-  y += 12;
-  const roles = [
-    program.chorister ? `Chorister – ${program.chorister}` : "",
-    program.organist ? `Organist – ${program.organist}` : "",
-  ].filter(Boolean);
-  const contacts = ward.leadership
-    .map((l) => `${l.name}, ${l.role}${l.phone ? `: ${l.phone}` : ""}`)
-    .join("; ");
-  const footerH =
-    (roles.length ? 9 * LINE + 6 : 0) +
-    (contacts ? measureLines(pdf, contacts, 8.5, LEFT_W) * 8.5 * 1.5 : 0) +
-    (ward.submissionNote ? 7.5 + measureLines(pdf, ward.submissionNote, 8.5, LEFT_W) * 8.5 * 1.5 : 0);
-  y = flow(y, footerH, MARGIN);
   if (roles.length) {
-    // Like the CSS's flex row: the roles centred together, 30pt apart.
-    pdf.setFont(FONT, "normal");
-    pdf.setFontSize(9);
-    const widths = roles.map((r) => pdf.getTextWidth(clean(r)));
-    const total = widths.reduce((a, b) => a + b, 0) + 30 * (roles.length - 1);
-    let rx = LEFT_X + (LEFT_W - total) / 2;
-    roles.forEach((r, i) => {
-      drawText(pdf, r, { x: rx, width: widths[i] + 1, top: y, size: 9 });
-      rx += widths[i] + 30;
-    });
-    y += 9 * LINE + 6;
+    y = flow(y, rolesH, colBottom) + 12;
+    color(MUTED);
+    drawText(pdf, roles.join("     |     "), { x: LEFT_X, width: LEFT_W, top: y, size: 9, style: "italic", align: "center" });
   }
-  if (contacts) {
-    y = drawContacts(pdf, contacts, y);
-  }
-  if (ward.submissionNote) {
-    drawContacts(pdf, ward.submissionNote, y + 7.5);
-  }
+  const leftEndPage = page;
 
-  // ── Right column ───────────────────────────────────────────────────────────
+  // ── Right column: quote and announcements in a boxed panel ────────────────
   page = 1;
   pageFor(1);
-  let ry = MARGIN;
-  const rc = { x: RIGHT_X, width: RIGHT_W, align: "center" as const };
-  if (program.quote) {
-    ry = drawText(pdf, program.quote, { ...rc, top: ry, size: 9.5 });
-    if (program.quoteBy) ry = drawText(pdf, `-${program.quoteBy}`, { ...rc, top: ry + 2, size: 9.5 });
-    ry += 12;
-  }
-  ry = drawText(pdf, "Announcements", { ...rc, top: ry, size: 12, style: "bold", underline: true }) + 9;
+  const PANEL_PAD = 12;
+  const px = RIGHT_X + PANEL_PAD;
+  const pw = RIGHT_W - PANEL_PAD * 2;
+  const panelTop = columnsTop;
+  // The box hugs its contents, so it is drawn once the text is laid out:
+  // `boxTop` is where the box starts on the page being filled.
+  let boxTop = panelTop;
+  const drawBox = (bottom: number) => {
+    stroke(RULE, 0.6);
+    pdf.rect(RIGHT_X, boxTop, RIGHT_W, bottom - boxTop, "S");
+    stroke(INK, 1.6);
+    pdf.line(RIGHT_X, boxTop, RIGHT_X + RIGHT_W, boxTop);
+  };
 
-  const list = announcements.length ? announcements : [{ title: "", description: "No announcements." }];
-  for (const a of list) {
-    const firstLine = (a.description ?? "").split("\n");
-    const head = a.title ? `**${a.title.replace(/\*/g, "")}:** ` : "";
-    const body = [head + (firstLine[0] ?? ""), ...firstLine.slice(1)].join("\n");
-    const h = measureLines(pdf, body, 9, RIGHT_W) * 9 * LINE;
-    ry = flow(ry, h, MARGIN);
-    ry = drawText(pdf, body, { x: RIGHT_X, width: RIGHT_W, top: ry, size: 9 }) + 8;
+  let ry = panelTop + PANEL_PAD + 2;
+  if (program.quote) {
+    color(ACCENT);
+    pdf.setFont(FONT, "bold");
+    pdf.setFontSize(26);
+    pdf.text("“", RIGHT_X + RIGHT_W / 2, ry + 16, { align: "center" });
+    ry += 14;
+    color(INK);
+    ry = drawText(pdf, program.quote, { x: px, width: pw, top: ry, size: 10, style: "italic", align: "center" });
+    if (program.quoteBy) {
+      color(MUTED);
+      ry = drawText(pdf, `– ${program.quoteBy}`, { x: px, width: pw, top: ry + 3, size: 9, align: "center" });
+    }
+    ry += 14;
+  }
+  ry = heading("Announcements", px, pw, ry);
+
+  const list = announcements.length ? announcements : [{ title: "", description: "No announcements this week." }];
+  // The text size adapts to the week: it grows (up to 10.5pt) on a light week
+  // and shrinks (down to 7.5pt) to keep a heavy week on one page, and the box
+  // ends just below the last announcement. Past 7.5pt the announcements carry
+  // on to a second page rather than getting unreadable.
+  const annHeight = (size: number) =>
+    list.reduce((sum, a, i) =>
+      sum +
+      (a.title ? measureLines(pdf, a.title, size + 1, pw, "bold") * (size + 1) * LINE + 1 : 0) +
+      (a.description ? measureLines(pdf, a.description, size, pw) * size * LINE : 0) +
+      (i < list.length - 1 ? 13 : 0), 0);
+  const fits = (size: number) => ry + annHeight(size) <= colBottom - PANEL_PAD;
+  let ANN = 9;
+  while (ANN < 10.5 && fits(ANN + 0.25)) ANN += 0.25;
+  while (ANN > 7.5 && !fits(ANN)) ANN -= 0.25;
+  list.forEach((a, i) => {
+    const titleH = a.title ? measureLines(pdf, a.title, ANN + 1, pw, "bold") * (ANN + 1) * LINE : 0;
+    const bodyH = a.description ? measureLines(pdf, a.description, ANN, pw) * ANN * LINE : 0;
+    if (ry + titleH + bodyH > colBottom - PANEL_PAD) {
+      // Continued on a new page: close this page's box at the column bottom
+      // and start a new box at the top of the next page.
+      drawBox(colBottom);
+      ry = flow(ry, titleH + bodyH, colBottom - PANEL_PAD);
+      boxTop = ry;
+      ry += PANEL_PAD + 2;
+    }
+    if (a.title) {
+      color(ACCENT);
+      ry = drawText(pdf, a.title.replace(/\*/g, ""), { x: px, width: pw, top: ry, size: ANN + 1, style: "bold" }) + 1;
+    }
+    if (a.description) {
+      color(INK);
+      ry = drawText(pdf, a.description, { x: px, width: pw, top: ry, size: ANN });
+    }
+    if (i < list.length - 1) {
+      ry += 6;
+      stroke(GOLD, 0.5);
+      pdf.line(px + pw * 0.35, ry, px + pw * 0.65, ry);
+      ry += 7;
+    }
+  });
+
+  drawBox(Math.min(colBottom, ry + PANEL_PAD));
+
+  // ── Footer on the last page ────────────────────────────────────────────────
+  pageFor(Math.max(lastPage, leftEndPage, page));
+  let fy = footerTop;
+  stroke(ACCENT, 0.8);
+  pdf.line(MARGIN, fy, MARGIN + INNER_W, fy);
+  fy += 10;
+  if (contacts) {
+    color(INK);
+    fy = drawText(pdf, contacts, { x: MARGIN + 20, width: FOOT_W, top: fy, size: FOOT_SIZE, align: "center" }) + 4;
+  }
+  if (ward.submissionNote) {
+    color(INK);
+    drawText(pdf, note, { x: MARGIN + 20, width: FOOT_W, top: fy, size: FOOT_SIZE, style: "italic", align: "center" });
   }
 
   pdf.setPage(1);
   return pdf;
-}
-
-function drawContacts(pdf: jsPDF, text: string, top: number): number {
-  pdf.setTextColor(34, 34, 34);
-  const size = 8.5;
-  const paragraphs = text.split("\n");
-  let y = top;
-  for (const p of paragraphs) {
-    const lines = wrapRuns(pdf, parseRuns(p, "normal"), size, LEFT_W);
-    for (const line of lines) {
-      const w = lineWidth(pdf, line, size);
-      let cx = LEFT_X + (LEFT_W - w) / 2;
-      const baseline = y + (size * 1.5 - size) / 2 + size * 0.8;
-      for (const word of line) {
-        pdf.setFont(FONT, "normal");
-        pdf.setFontSize(size);
-        if (word.space) cx += pdf.getTextWidth(" ");
-        pdf.setFont(FONT, word.style);
-        pdf.text(word.text, cx, baseline);
-        cx += pdf.getTextWidth(word.text);
-      }
-      y += size * 1.5;
-    }
-  }
-  pdf.setTextColor(17, 17, 17);
-  return y;
 }
 
 /** The bulletin PDF as raw bytes. */
