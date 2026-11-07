@@ -208,10 +208,11 @@ export function buildBulletinPdf({ meeting, ward, announcements }: BulletinPdfIn
 
   // ── Footer (measured first so the columns know where to stop) ──────────────
   const FOOT_SIZE = 8.5;
-  // One paragraph: "Name, Role: (555) 555-5555; ..." then the submission note.
+  // One paragraph in plain black: "Name, Role: (555) 555-5555; ..." then the
+  // submission note.
   // Phone numbers use non-breaking spaces so they never split across lines.
   const contacts = ward.leadership
-    .map((l) => `**${l.name}**, ${l.role}${l.phone ? `: ${l.phone.replace(/ /g, "\u00a0")}` : ""}`)
+    .map((l) => `${l.name}, ${l.role}${l.phone ? `: ${l.phone.replace(/ /g, "\u00a0")}` : ""}`)
     .join(";  ");
   const FOOT_W = INNER_W - 40;
   const note = (ward.submissionNote ?? "").replace(/\((\d{3})\) (\d{3})/g, "($1)\u00a0$2");
@@ -429,7 +430,7 @@ export function buildBulletinPdf({ meeting, ward, announcements }: BulletinPdfIn
     fy = drawText(pdf, contacts, { x: MARGIN + 20, width: FOOT_W, top: fy, size: FOOT_SIZE, align: "center" }) + 4;
   }
   if (ward.submissionNote) {
-    color(MUTED);
+    color(INK);
     drawText(pdf, note, { x: MARGIN + 20, width: FOOT_W, top: fy, size: FOOT_SIZE, style: "italic", align: "center" });
   }
 
