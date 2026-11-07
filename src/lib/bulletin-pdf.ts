@@ -66,9 +66,8 @@ export function bulletinDate(iso: string): string {
  */
 function clean(text: string): string {
   return text
-    .replace(/[‐‑‒]/g, "-")
-    .replace(/ /g, " ")
-    .replace(/[^\x20-\x7e¡-ÿ–—‘’‚“”„†‡•…‰€™ŒœŠšŸŽžƒˆ˜]/g, "");
+    .replace(/[\u2010\u2011\u2012]/g, "-")
+    .replace(/[^\x20-\x7e\u00a0-\u00ff\u2013\u2014\u2018\u2019\u201a\u201c\u201d\u201e\u2020\u2021\u2022\u2026\u2030\u20ac\u2122\u0152\u0153\u0160\u0161\u0178\u017d\u017e\u0192\u02c6\u02dc]/g, "");
 }
 
 /** Split **bold** / *italic* markup (the announcement format) into styled runs. */
@@ -96,9 +95,9 @@ function wrapRuns(pdf: jsPDF, runs: Run[], size: number, width: number): Word[][
   const words: Word[] = [];
   let sawSpace = false;
   for (const run of runs) {
-    for (const p of clean(run.text).split(/(\s+)/)) {
+    for (const p of clean(run.text).split(/([ \t\r\n]+)/)) {
       if (p === "") continue;
-      if (/^\s+$/.test(p)) { sawSpace = true; continue; }
+      if (/^[ \t\r\n]+$/.test(p)) { sawSpace = true; continue; }
       words.push({ text: p, style: run.style, space: words.length > 0 && sawSpace });
       sawSpace = false;
     }
@@ -209,9 +208,16 @@ export function buildBulletinPdf({ meeting, ward, announcements }: BulletinPdfIn
 
   // ── Footer (measured first so the columns know where to stop) ──────────────
   const FOOT_SIZE = 8.5;
-  const leaders = ward.leadership.map((l) => ({ head: `${l.name}, ${l.role}`, phone: l.phone ?? "" }));
-  const noteLines = ward.submissionNote ? measureLines(pdf, ward.submissionNote, FOOT_SIZE, INNER_W - 40, "italic") : 0;
-  const footerH = 10 + (leaders.length ? FOOT_SIZE * 2 * LINE + 6 : 0) + noteLines * FOOT_SIZE * LINE;
+  // One paragraph: "Name, Role: (555) 555-5555; ..." then the submission note.
+  // Phone numbers use non-breaking spaces so they never split across lines.
+  const contacts = ward.leadership
+    .map((l) => `**${l.name}**, ${l.role}${l.phone ? `: ${l.phone.replace(/ /g, "\u00a0")}` : ""}`)
+    .join(";  ");
+  const FOOT_W = INNER_W - 40;
+  const note = (ward.submissionNote ?? "").replace(/\((\d{3})\) (\d{3})/g, "($1)\u00a0$2");
+  const contactLines = contacts ? measureLines(pdf, contacts, FOOT_SIZE, FOOT_W) : 0;
+  const noteLines = note ? measureLines(pdf, note, FOOT_SIZE, FOOT_W, "italic") : 0;
+  const footerH = 10 + contactLines * FOOT_SIZE * LINE + (contactLines && noteLines ? 4 : 0) + noteLines * FOOT_SIZE * LINE;
   const footerTop = BOTTOM - footerH;
 
   // ── Letterhead ─────────────────────────────────────────────────────────────
@@ -294,7 +300,7 @@ export function buildBulletinPdf({ meeting, ward, announcements }: BulletinPdfIn
   // Spread spare room across the rows so the program fills the column.
   const rolesH = roles.length ? 9 * LINE + 12 : 0;
   const natural = heights.reduce((a, h) => a + h + 12, 0);
-  const spare = colBottom - y - rolesH - natural;
+  const spare = colBottom - y - rolesH - natural - 6; // a little slack for rounding
   const PAD = 6 + (rows.length ? Math.min(5, Math.max(0, spare / rows.length / 2)) : 0);
 
   rows.forEach((row, i) => {
@@ -341,11 +347,15 @@ export function buildBulletinPdf({ meeting, ward, announcements }: BulletinPdfIn
   const px = RIGHT_X + PANEL_PAD;
   const pw = RIGHT_W - PANEL_PAD * 2;
   const panelTop = columnsTop;
-  // A thin box down the column, with a heavier top edge.
-  stroke(RULE, 0.6);
-  pdf.rect(RIGHT_X, panelTop, RIGHT_W, colBottom - panelTop, "S");
-  stroke(INK, 1.6);
-  pdf.line(RIGHT_X, panelTop, RIGHT_X + RIGHT_W, panelTop);
+  // The box hugs its contents, so it is drawn once the text is laid out:
+  // `boxTop` is where the box starts on the page being filled.
+  let boxTop = panelTop;
+  const drawBox = (bottom: number) => {
+    stroke(RULE, 0.6);
+    pdf.rect(RIGHT_X, boxTop, RIGHT_W, bottom - boxTop, "S");
+    stroke(INK, 1.6);
+    pdf.line(RIGHT_X, boxTop, RIGHT_X + RIGHT_W, boxTop);
+  };
 
   let ry = panelTop + PANEL_PAD + 2;
   if (program.quote) {
@@ -365,25 +375,30 @@ export function buildBulletinPdf({ meeting, ward, announcements }: BulletinPdfIn
   ry = heading("Announcements", px, pw, ry);
 
   const list = announcements.length ? announcements : [{ title: "", description: "No announcements this week." }];
-  // Shrink the announcement text (down to 7.5pt) until it fits on the page.
+  // The text size adapts to the week: it grows (up to 10.5pt) on a light week
+  // and shrinks (down to 7.5pt) to keep a heavy week on one page, and the box
+  // ends just below the last announcement. Past 7.5pt the announcements carry
+  // on to a second page rather than getting unreadable.
   const annHeight = (size: number) =>
     list.reduce((sum, a, i) =>
       sum +
       (a.title ? measureLines(pdf, a.title, size + 1, pw, "bold") * (size + 1) * LINE + 1 : 0) +
       (a.description ? measureLines(pdf, a.description, size, pw) * size * LINE : 0) +
       (i < list.length - 1 ? 13 : 0), 0);
+  const fits = (size: number) => ry + annHeight(size) <= colBottom - PANEL_PAD;
   let ANN = 9;
-  while (ANN > 7.5 && ry + annHeight(ANN) > colBottom - PANEL_PAD) ANN -= 0.25;
+  while (ANN < 10.5 && fits(ANN + 0.25)) ANN += 0.25;
+  while (ANN > 7.5 && !fits(ANN)) ANN -= 0.25;
   list.forEach((a, i) => {
     const titleH = a.title ? measureLines(pdf, a.title, ANN + 1, pw, "bold") * (ANN + 1) * LINE : 0;
     const bodyH = a.description ? measureLines(pdf, a.description, ANN, pw) * ANN * LINE : 0;
-    const before = ry;
-    ry = flow(ry, titleH + bodyH, colBottom - PANEL_PAD);
-    if (ry !== before) {
-      // Continued on a new page: box the panel there too.
-      stroke(RULE, 0.6);
-      pdf.rect(RIGHT_X, MARGIN, RIGHT_W, BOTTOM - MARGIN, "S");
-      ry += PANEL_PAD;
+    if (ry + titleH + bodyH > colBottom - PANEL_PAD) {
+      // Continued on a new page: close this page's box at the column bottom
+      // and start a new box at the top of the next page.
+      drawBox(colBottom);
+      ry = flow(ry, titleH + bodyH, colBottom - PANEL_PAD);
+      boxTop = ry;
+      ry += PANEL_PAD + 2;
     }
     if (a.title) {
       color(ACCENT);
@@ -401,26 +416,21 @@ export function buildBulletinPdf({ meeting, ward, announcements }: BulletinPdfIn
     }
   });
 
+  drawBox(Math.min(colBottom, ry + PANEL_PAD));
+
   // ── Footer on the last page ────────────────────────────────────────────────
   pageFor(Math.max(lastPage, leftEndPage, page));
   let fy = footerTop;
   stroke(ACCENT, 0.8);
   pdf.line(MARGIN, fy, MARGIN + INNER_W, fy);
   fy += 10;
-  if (leaders.length) {
-    const cellW = INNER_W / leaders.length;
-    leaders.forEach((l, i) => {
-      const cx = MARGIN + cellW * i;
-      color(ACCENT);
-      drawText(pdf, l.head, { x: cx, width: cellW, top: fy, size: FOOT_SIZE, style: "bold", align: "center" });
-      color(MUTED);
-      drawText(pdf, l.phone, { x: cx, width: cellW, top: fy + FOOT_SIZE * LINE, size: FOOT_SIZE, align: "center" });
-    });
-    fy += FOOT_SIZE * 2 * LINE + 6;
+  if (contacts) {
+    color(INK);
+    fy = drawText(pdf, contacts, { x: MARGIN + 20, width: FOOT_W, top: fy, size: FOOT_SIZE, align: "center" }) + 4;
   }
   if (ward.submissionNote) {
     color(MUTED);
-    drawText(pdf, ward.submissionNote, { x: MARGIN + 20, width: INNER_W - 40, top: fy, size: FOOT_SIZE, style: "italic", align: "center" });
+    drawText(pdf, note, { x: MARGIN + 20, width: FOOT_W, top: fy, size: FOOT_SIZE, style: "italic", align: "center" });
   }
 
   pdf.setPage(1);
